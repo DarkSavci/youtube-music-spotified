@@ -1,0 +1,16 @@
+# Normalise line endings in the repository.
+#
+# Everything is stored with LF and checked out as-is. Without this, a Windows
+# checkout commits CRLF and `gofmt -l` reports every Go file as unformatted —
+# which buries a real formatting problem under ninety false ones.
+* text=auto eol=lf
+
+# Except the things that are not text.
+*.png   binary
+*.ico   binary
+*.woff2 binary
+*.db    binary
+*.exe   binary
+
+# Recorded API responses: large, generated, and not worth reviewing by line.
+testdata/fixtures/*.json linguist-generated=true

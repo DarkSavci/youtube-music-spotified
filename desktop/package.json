@@ -1,0 +1,54 @@
+{
+  "name": "youtube-music-spotified",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop shell for Youtube Music Spotified",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "package": "node build.js",
+    "installer": "node build.js && electron-builder --win nsis --prepackaged \"../dist-desktop/Youtube Music Spotified-win32-x64\""
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^33.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "dev.darksavci.youtubemusicspotified",
+    "productName": "Youtube Music Spotified",
+    "directories": {
+      "output": "../dist-installer"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "branding/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Youtube Music Spotified",
+      "installerIcon": "branding/icon.ico",
+      "uninstallerIcon": "branding/icon.ico",
+      "uninstallDisplayName": "Youtube Music Spotified",
+      "artifactName": "Youtube-Music-Spotified-Setup-${version}.${ext}",
+      "include": "branding/installer.nsh"
+    },
+    "forceCodeSigning": false,
+    "toolsets": {
+      "nsis": "1.2.1"
+    }
+  },
+  "author": "DarkSavci"
+}

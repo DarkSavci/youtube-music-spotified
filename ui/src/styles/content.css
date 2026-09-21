@@ -1,0 +1,1141 @@
+/* Content surfaces: shelves, cards, entity headers, track tables, states. */
+
+/* ---------- states ---------- */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-control) 25%,
+    var(--surface-card) 37%,
+    var(--surface-control) 63%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+.skeleton--line {
+  height: 10px;
+  margin: 4px 0;
+}
+@keyframes shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+.emptystate {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface-control);
+  border-radius: var(--radius-md);
+}
+.emptystate__title {
+  margin: 0;
+  font-weight: var(--weight-bold);
+  font-size: var(--text-base);
+}
+.emptystate__body {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.pagestate {
+  display: grid;
+  place-items: center;
+  gap: var(--space-3);
+  min-height: 50vh;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.pagestate h2 {
+  font-size: var(--text-xl);
+  color: var(--text-primary);
+}
+
+/* ---------- shelves ---------- */
+
+.shelf {
+  margin-top: var(--space-6);
+}
+.shelf__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+.shelf__title {
+  font-size: var(--text-xl);
+  letter-spacing: -0.02em;
+}
+.shelf__title:hover {
+  text-decoration: underline;
+}
+.shelf__showall {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+.shelf__showall:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+/*
+ * A whole number of cards, never a partial one. The count is computed from the
+ * measured container width, so resizing the sidebar reflows the row.
+ */
+.shelf__row {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(var(--card-count, 5), minmax(0, 1fr));
+}
+/* minmax(0, …) lets the track shrink; this lets what sits in it shrink too. */
+.shelf__row > *,
+.shelf__grid > * {
+  min-width: 0;
+}
+
+/*
+ * The page behind "Show all" holds everything, so it wraps to as many columns
+ * as fit rather than fitting a whole number of cards into one row.
+ */
+.shelf__grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: transparent;
+  text-align: left;
+  position: relative;
+  transition: background var(--duration-base) var(--ease-out);
+
+  /*
+   * A grid item will not shrink below its content unless told to.
+   *
+   * `min-width` defaults to `auto` for a grid or flex item, which means the
+   * card refuses to be narrower than its longest unbreakable run of text —
+   * so a long title pushed straight out of the card and over its neighbour
+   * instead of being clipped. The ellipsis rule was there and correct; it
+   * simply never came into play, because nothing ever overflowed the box as
+   * far as the box was concerned.
+   */
+  min-width: 0;
+}
+.card:hover {
+  background: var(--surface-control);
+  text-decoration: none;
+}
+.card__artwrap {
+  position: relative;
+  aspect-ratio: 1;
+}
+.card__art {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  box-shadow: var(--shadow-card);
+}
+.card__art--round {
+  border-radius: var(--radius-circle);
+}
+.card__play {
+  position: absolute;
+  right: var(--space-2);
+  bottom: var(--space-2);
+  /* Above the stretched link, so the overlay plays instead of navigating. */
+  z-index: 1;
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity var(--duration-base) var(--ease-out),
+    transform var(--duration-base) var(--ease-out);
+}
+.card:hover .card__play,
+.card:focus-within .card__play {
+  opacity: 1;
+  transform: translateY(0);
+}
+.card__title {
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-base);
+  /* The ellipsis needs a box to be measured against. */
+  max-width: 100%;
+}
+.card__sub {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------- quick picks ---------- */
+
+.quickpicks {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  margin-top: var(--space-5);
+}
+.quickpick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 64px;
+  padding-right: var(--space-3);
+  background: var(--surface-control);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.quickpick:hover {
+  background: var(--surface-card);
+  text-decoration: none;
+}
+.quickpick__art {
+  width: 64px;
+  height: 64px;
+  flex: none;
+  object-fit: cover;
+  background: var(--surface-card);
+}
+.quickpick__title {
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-base);
+  min-width: 0;
+}
+
+/* ---------- mood tiles ---------- */
+
+.moods {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  margin-top: var(--space-4);
+}
+.mood {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  color: var(--text-primary);
+  text-align: left;
+  background: var(--tile-color, var(--surface-card));
+  transition: transform var(--duration-base) var(--ease-out);
+}
+.mood:hover {
+  transform: scale(1.02);
+  text-decoration: none;
+}
+/* Darken the supplied colour so white text keeps its contrast regardless of
+   which hue the upstream grid hands us. */
+.mood::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+}
+.mood span {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------- entity header ---------- */
+
+.entityheader {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-5);
+  padding: var(--space-7) var(--space-5) var(--space-5);
+  margin: 0 calc(var(--space-5) * -1);
+  background: linear-gradient(
+    180deg,
+    var(--extracted-color) 0%,
+    color-mix(in srgb, var(--extracted-color) 40%, var(--surface-raised)) 70%,
+    var(--surface-raised) 100%
+  );
+  transition: background var(--duration-slow) var(--ease-out);
+}
+.entityheader__art {
+  width: 208px;
+  height: 208px;
+  flex: none;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-dialog);
+}
+.entityheader__art--round {
+  border-radius: var(--radius-circle);
+}
+.entityheader__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.entityheader__kind {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.entityheader__title {
+  font-size: clamp(var(--text-2xl), 6vw, var(--text-hero));
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+.entityheader__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.entityheader__meta strong {
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.entityactions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-5) 0 var(--space-3);
+}
+
+/* ---------- track table ---------- */
+
+.tracktable {
+  width: 100%;
+}
+.tracktable__head {
+  display: grid;
+  grid-template-columns: var(--track-cols);
+  gap: var(--space-4);
+  padding: 0 var(--space-4) var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.trackrow {
+  display: grid;
+  grid-template-columns: var(--track-cols);
+  gap: var(--space-4);
+  align-items: center;
+  width: 100%;
+  height: 56px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--text-secondary);
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.trackrow:hover {
+  background: var(--surface-hover);
+}
+.trackrow[data-playing="true"] .trackrow__title {
+  color: var(--accent);
+}
+.trackrow[data-playable="false"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.trackrow__index {
+  display: grid;
+  place-items: center;
+  font-variant-numeric: tabular-nums;
+}
+.trackrow:hover .trackrow__num {
+  display: none;
+}
+.trackrow__play {
+  display: none;
+}
+.trackrow:hover .trackrow__play {
+  display: grid;
+}
+.trackrow__main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.trackrow__art {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+}
+.trackrow__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.trackrow__title {
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+}
+.trackrow__artist {
+  font-size: var(--text-sm);
+}
+.trackrow__duration {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.trackrow__badges {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-tertiary);
+}
+
+/* ---------- now playing / queue panel ---------- */
+
+.nowplaying {
+  grid-area: nowplaying;
+  display: flex;
+  flex-direction: column;
+}
+.nowplaying__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4);
+  font-weight: var(--weight-bold);
+}
+.nowplaying__body {
+  flex: 1;
+  padding: 0 var(--space-3) var(--space-4);
+}
+.queuesection {
+  margin-top: var(--space-4);
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-weight: var(--weight-semibold);
+}
+.queuerow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+.queuerow:hover {
+  background: var(--surface-hover);
+}
+.queuerow[data-current="true"] .queuerow__title {
+  color: var(--accent);
+}
+.queuerow__art {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+}
+.queuerow__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.queuerow__title {
+  font-size: var(--text-base);
+}
+.queuerow__artist {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.queuerow {
+  cursor: default;
+}
+.queuerow__text {
+  flex: 1;
+}
+.queuerow__remove {
+  flex: none;
+  opacity: 0;
+}
+.queuerow:hover .queuerow__remove,
+.queuerow:focus-within .queuerow__remove {
+  opacity: 1;
+}
+/* Songs already played: there to go back to, quieter than what is coming. */
+.queuerow--played {
+  opacity: 0.6;
+}
+.queuerow--played:hover,
+.queuerow--played:focus-within {
+  opacity: 1;
+}
+.queuerow[data-dragging="true"] {
+  opacity: 0.4;
+}
+/* The drop line sits on the edge the dragged row will land against. */
+.queueitem {
+  position: relative;
+}
+.queueitem[data-drop]::after {
+  content: "";
+  position: absolute;
+  left: var(--space-2);
+  right: var(--space-2);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.queueitem[data-drop="before"]::after {
+  top: -1px;
+}
+.queueitem[data-drop="after"]::after {
+  bottom: -1px;
+}
+
+/* ---------- statistics ---------- */
+
+.statlist {
+  counter-reset: stat;
+}
+.statrow {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto auto;
+  gap: var(--space-4);
+  align-items: center;
+  height: 48px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.statrow:hover {
+  background: var(--surface-hover);
+}
+.statrow__rank {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  text-align: right;
+}
+.statrow__main {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+.statrow__meta {
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Personal listening figures on an entity header, shown where a global
+   popularity metric would otherwise sit. */
+.affinity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.affinity__strong {
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+/* ---------- settings ---------- */
+
+.settings {
+  max-width: 760px;
+  padding-bottom: var(--space-8);
+}
+.settings__title {
+  font-size: var(--text-2xl);
+  margin: var(--space-6) 0 var(--space-5);
+}
+.settings__section {
+  margin-bottom: var(--space-6);
+}
+.settings__sectiontitle {
+  font-size: var(--text-md);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-2);
+}
+.settings__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-5);
+  align-items: center;
+  padding: var(--space-3) 0;
+}
+.settings__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.settings__hint {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.settings__control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.settings__inline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.settings__value {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  min-width: 48px;
+  text-align: right;
+}
+.settings__select {
+  background: var(--surface-control);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Switch: a pill whose thumb slides and whose track takes the accent when on,
+   so state is legible from colour and position rather than colour alone. */
+.switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  transition: background var(--duration-fast) var(--ease-out);
+  flex: none;
+}
+.switch[aria-checked="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.switch:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-circle);
+  background: var(--text-primary);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.switch[aria-checked="true"] .switch__thumb {
+  transform: translateX(20px);
+}
+
+.settings__shortcuts {
+  margin-bottom: var(--space-4);
+}
+.settings__grouptitle {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+.settings__shortcut {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) 0;
+  font-size: var(--text-base);
+}
+.settings__shortcut kbd {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  background: var(--surface-control);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+}
+
+/* ---------- motion ---------- */
+
+/*
+ * Motion is composed from the duration tokens, never hardcoded, so the
+ * reduced-motion guard in tokens.css and the in-app preference both collapse
+ * every animation from one place.
+ *
+ * Durations stay short. This is a tool people use for hours, and animation
+ * that reads as delightful on the first use reads as latency on the hundredth.
+ */
+
+/* Content arriving should settle rather than appear. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.main__content > * {
+  animation: rise var(--duration-base) var(--ease-out) both;
+}
+
+/* Skeleton to content, without a layout jump. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.card,
+.trackrow,
+.libitem {
+  animation: fade-in var(--duration-fast) var(--ease-out) both;
+}
+
+/* Cards lift toward the pointer. */
+.card {
+  transition:
+    background var(--duration-base) var(--ease-out),
+    transform var(--duration-base) var(--ease-out);
+}
+.card:hover {
+  transform: translateY(-2px);
+}
+.card__art {
+  transition: box-shadow var(--duration-base) var(--ease-out);
+}
+.card:hover .card__art {
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.6);
+}
+
+/* The artwork gradient crossfades between entities rather than snapping. */
+.entityheader {
+  animation: fade-in var(--duration-slow) var(--ease-out) both;
+}
+
+/* Queue rows settle in sequence when the panel opens, which reads as the list
+   arriving rather than the panel blinking. */
+.nowplaying {
+  animation: slide-in var(--duration-base) var(--ease-out) both;
+}
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Pressed state on every control, so clicks feel acknowledged. */
+.chip,
+.switch,
+.settings__select {
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+.chip:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+/* The transport bar's track identity crossfades on change. */
+.bar__meta,
+.bar__art {
+  animation: fade-in var(--duration-base) var(--ease-out) both;
+}
+
+/*
+ * Respect the OS and the in-app preference together. The tokens already
+ * collapse durations; this additionally removes transforms, because a
+ * zero-duration transform still moves the element.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .main__content > *,
+  .card,
+  .trackrow,
+  .libitem,
+  .entityheader,
+  .nowplaying,
+  .bar__meta,
+  .bar__art {
+    animation: none !important;
+  }
+  .card:hover {
+    transform: none;
+  }
+}
+
+/* ---------- generated mixes ---------- */
+
+.mixcard {
+  width: 100%;
+}
+/* The tile's size comes from the card, never from its images: with covers
+   that never loaded it had no width, so no height, and the title rose into
+   the space where the picture should be. */
+.mixcard .card__artwrap {
+  width: 100%;
+}
+.mixcard:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* A mix belongs to no single release, so it shows a mosaic of what is in it
+   rather than borrowing one track's cover and implying otherwise. */
+.mixcard__mosaic {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-control);
+  box-shadow: var(--shadow-card);
+}
+.mixcard__mosaic img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* With fewer than four covers the first fills the space, so the tile never
+   shows empty quadrants. */
+.mixcard__mosaic img:only-child {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+
+/*
+ * Card text.
+ *
+ * The title carries the link and stretches it over the whole card, so the
+ * card is clickable without the play button being nested inside an anchor.
+ */
+.card__meta {
+  /* Deliberately not positioned: the stretched link below resolves against
+     .card, which is what makes it cover the artwork too. */
+  min-width: 0;
+
+  /*
+   * Nothing inside may leave this box.
+   *
+   * min-width alone lets the card shrink, but a run of text with nowhere to
+   * break can still paint outside its own element — and what the eye sees
+   * then is a title lying across the next card. Clipping here rather than on
+   * .card, because .card holds the artwork and the stretched link overlay,
+   * and neither should ever be clipped.
+   */
+  overflow: hidden;
+  max-width: 100%;
+}
+.card__meta > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.card__link {
+  display: block;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  max-width: 100%;
+}
+.card__link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+.card__link:hover {
+  text-decoration: underline;
+}
+.card:focus-within {
+  background: var(--surface-control);
+}
+
+/* ---------- lyrics ---------- */
+
+/*
+ * A flat colour taken from the cover, not a blurred copy of it.
+ *
+ * Large text has to stay readable across the whole surface, and a blur has
+ * light and dark regions that the same type would have to survive. The colour
+ * is pushed into a fixed lightness band when it is extracted, so this is
+ * always dark enough for white text regardless of the artwork.
+ */
+.lyricspanel,
+.lyricsview {
+  background: var(--lyric-bg, var(--surface-raised));
+  transition: background var(--duration-slow) var(--ease-out);
+}
+.lyricspanel__actions {
+  display: flex;
+  gap: var(--space-1);
+}
+.lyricspanel__body {
+  padding-bottom: var(--space-6);
+}
+
+.lyrics {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-4);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-lg);
+  line-height: 1.45;
+}
+.lyrics--lg {
+  font-size: clamp(var(--text-xl), 3.2vw, 34px);
+  line-height: 1.35;
+  padding: 0;
+}
+.lyrics li {
+  margin: 0 0 var(--space-3);
+}
+.lyrics--lg li {
+  margin: 0 0 var(--space-4);
+}
+
+.lyrics__line {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  padding: 0;
+  font: inherit;
+  /*
+   * Three states, which is what makes the current line findable at a glance.
+   * Lines already sung fade back; lines still to come darken into the
+   * background; only the current line is pure white.
+   */
+  color: rgba(255, 255, 255, 0.55);
+  transition:
+    color var(--duration-base) var(--ease-out),
+    opacity var(--duration-base) var(--ease-out);
+}
+/*
+ * Desktop Spotify fades unsung lines in white rather than darkening them.
+ * The dark treatment is the mobile one, and at this size it reads as
+ * unreadable text rather than as text that has not happened yet.
+ */
+li[data-state="upcoming"] .lyrics__line {
+  color: rgba(255, 255, 255, 0.45);
+}
+li[data-state="sung"] .lyrics__line {
+  color: rgba(255, 255, 255, 0.45);
+}
+li[data-state="active"] .lyrics__line {
+  color: #ffffff;
+}
+.lyrics__line:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+.lyrics__line:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+/* An instrumental gap is real time passing, so it is shown rather than
+   collapsed — otherwise the view looks stuck. */
+.lyrics__gap {
+  display: block;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.lyrics--plain {
+  white-space: pre-wrap;
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: var(--weight-semibold);
+}
+
+.lyrics__note,
+.lyrics__source {
+  padding: 0 var(--space-4) var(--space-4);
+  margin: 0;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: var(--text-xs);
+}
+.lyrics__note {
+  padding-top: var(--space-4);
+}
+
+/* ---------- lyrics, filling the app ---------- */
+
+.lyricsview {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 100);
+  display: flex;
+  flex-direction: column;
+  animation: lyricsin var(--duration-slow) var(--ease-out);
+}
+@keyframes lyricsin {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lyricsview { animation: none; }
+  .lyrics__line { transition: none; }
+}
+
+.lyricsview__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  color: #ffffff;
+  /* The window is frameless; this strip is also the drag handle. */
+  -webkit-app-region: drag;
+}
+.lyricsview__head .iconbtn {
+  color: #ffffff;
+  -webkit-app-region: no-drag;
+}
+.lyricsview__meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+.lyricsview__title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: #ffffff;
+}
+.lyricsview__artist {
+  font-size: var(--text-xs);
+  color: rgba(255, 255, 255, 0.75);
+}
+.lyricsview__spacer {
+  width: 32px;
+}
+
+.lyricsview__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 clamp(var(--space-5), 8vw, 120px);
+  /*
+   * Half a viewport of padding at each end, so the first and last lines can
+   * still be scrolled to the centre. Without it the active line sticks to the
+   * top or bottom edge at the start and end of a song.
+   */
+  padding-top: 40vh;
+  padding-bottom: 40vh;
+}
+.lyricsview__body .lyrics__source,
+.lyricsview__body .lyrics__note {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* A show's description, which is prose rather than metadata. */
+.podcast__about {
+  max-width: 78ch;
+  margin: var(--space-4) 0 var(--space-5);
+  color: var(--text-secondary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+/* ---------- artist biography ---------- */
+
+.about__text {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+/*
+ * Clamped rather than truncated with an ellipsis in the string: the full text
+ * stays in the DOM, so it is selectable, searchable and readable by a screen
+ * reader whether or not it is expanded.
+ */
+.about__text[data-clamped] {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.about__source {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary, #717171);
+}
+.about__source a {
+  color: var(--text-secondary);
+  text-decoration: underline;
+}
+.about__source a:hover {
+  color: var(--text-primary);
+}
+
+/* Search's top result: the card, and beside it what YouTube shows inside it. */
+.topresult {
+  display: flex;
+  gap: var(--space-5);
+  align-items: flex-start;
+}
+.topresult__card {
+  flex: 0 0 280px;
+  max-width: 280px;
+}
+.topresult__items {
+  flex: 1;
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .topresult {
+    flex-direction: column;
+  }
+}

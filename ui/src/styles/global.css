@@ -1,0 +1,163 @@
+@import "./tokens.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden; /* panels scroll individually, the page never does */
+}
+
+/* Focus is visible for keyboard users and suppressed for pointer users, so
+   the ring is informative rather than noise. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+input {
+  font: inherit;
+  color: inherit;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+h1, h2, h3, h4 {
+  margin: 0;
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.02em;
+}
+
+/*
+ * Overlay scrollbars. Native ones break the dark, borderless look.
+ *
+ * Deliberately no `scrollbar-width` or `scrollbar-color`: Chromium ignores
+ * every ::-webkit-scrollbar rule below as soon as either is set to a non-auto
+ * value, which silently reinstated the native Windows scrollbar — arrows and
+ * all — while these rules sat here looking like they applied.
+ */
+.scroll {
+  overflow-y: auto;
+}
+.scroll::-webkit-scrollbar {
+  width: 12px;
+}
+.scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--radius-pill);
+}
+.scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
+  background-clip: content-box;
+}
+
+/* Accessible-only text, for labels a screen reader needs but sight does not. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Skip link: hidden until focused, then pinned over the interface.
+ *
+ * Without one, reaching the content means tabbing through every saved item in
+ * the library rail on every navigation.
+ */
+.skiplink {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: var(--z-toast);
+  padding: var(--space-2) var(--space-4);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-radius: var(--radius-sm);
+  font-weight: var(--weight-semibold);
+  transform: translateY(-200%);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.skiplink:focus {
+  transform: translateY(0);
+  text-decoration: none;
+}
+
+/*
+ * Forced-colors mode replaces the palette entirely, so borders have to carry
+ * the structure that colour normally does.
+ */
+@media (forced-colors: active) {
+  .chip,
+  .playbtn,
+  .iconbtn,
+  .switch,
+  .card {
+    border: 1px solid CanvasText;
+  }
+  .slider__fill,
+  .equalizer i {
+    background: Highlight;
+  }
+}

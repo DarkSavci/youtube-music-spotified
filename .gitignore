@@ -1,0 +1,65 @@
+# ---------------------------------------------------------------------------
+# Credentials. Never commit these.
+#
+# credentials.json holds a live YouTube session — the cookies are equivalent
+# to being signed in as the account, and they cannot be revoked individually.
+# Anyone who obtains the file is signed in as you until you sign out
+# everywhere. Sign-in writes it to the per-user data directory rather than
+# here; this entry exists because a stray copy in the working tree is exactly
+# the accident worth making impossible.
+# ---------------------------------------------------------------------------
+credentials.json
+**/credentials.json
+**/cookies.json
+*.cookies
+
+# ---------------------------------------------------------------------------
+# Personal data.
+#
+# The database holds listening history, the resume point, and which items are
+# pinned — a record of what this person listens to and when.
+# ---------------------------------------------------------------------------
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+# Cached audio from local runs.
+/audio-cache/
+
+# Fixtures recorded from a real account: the recording user's own library,
+# history, likes and player responses. Each developer records their own with
+# `go run ./cmd/record`. Catalogue fixtures ARE committed — they are the
+# shared contract that the parsers are tested against.
+testdata/fixtures/liked.json
+testdata/fixtures/history.json
+testdata/fixtures/library_*.json
+testdata/fixtures/account.json
+testdata/fixtures/player.json
+
+# ---------------------------------------------------------------------------
+# Build output and local artefacts.
+# ---------------------------------------------------------------------------
+/bin/
+/dist-desktop/
+*.exe
+node_modules/
+ui/dist/
+desktop/branding/icon-render.html
+
+# Development spikes: throwaway experiments, and they have held real cookies.
+/spike/
+
+# Screenshots and scratch captures from development.
+/shots/
+*.png
+!desktop/branding/*.png
+!ui/public/*.png
+
+# Editor and OS noise.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+/dist-installer/
+/desktop/vendor/

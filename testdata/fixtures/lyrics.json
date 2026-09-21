@@ -1,0 +1,99 @@
+{
+  "responseContext": {
+    "serviceTrackingParams": [
+      {
+        "service": "GFEEDBACK",
+        "params": [
+          {
+            "key": "browse_id",
+            "value": "MPLYt_TgQPwAzodvg-1"
+          },
+          {
+            "key": "browse_id_prefix",
+            "value": ""
+          },
+          {
+            "key": "has_unlimited_entitlement",
+            "value": "True"
+          },
+          {
+            "key": "logged_in",
+            "value": "1"
+          }
+        ]
+      },
+      {
+        "service": "CSI",
+        "params": [
+          {
+            "key": "c",
+            "value": "WEB_REMIX"
+          },
+          {
+            "key": "cver",
+            "value": "1.20260915.14.00"
+          },
+          {
+            "key": "yt_li",
+            "value": "1"
+          },
+          {
+            "key": "GetBrowseTrackLyricsPage_rid",
+            "value": "0x2a2e47b14b25a4ef"
+          }
+        ]
+      },
+      {
+        "service": "ECATCHER",
+        "params": [
+          {
+            "key": "client.version",
+            "value": "1.20000101"
+          },
+          {
+            "key": "client.name",
+            "value": "WEB_REMIX"
+          }
+        ]
+      }
+    ],
+    "responseId": "IhMIsLSEjbD-lgMVoE16BR1ZUz2W"
+  },
+  "contents": {
+    "sectionListRenderer": {
+      "contents": [
+        {
+          "musicDescriptionShelfRenderer": {
+            "description": {
+              "runs": [
+                {
+                  "text": "When you were here before\nCouldn't look you in the eye\nYou're just like an angel\nYour skin makes me cry\n\nYou float like a feather\nIn a beautiful world\nI wish I was special\nSo, fucking special\n\nBut I'm a creep\nI'm a weirdo\nWhat the hell am I doing here?\nI don't belong here\n\nI don't care if it hurts\nI wanna have control\nI want a perfect body\nI want a perfect soul\n\nI want you to notice\nWhen I'm not around\nSo, fucking special\nI wish I was special\n\nBut I'm a creep\nI'm a weirdo\nWhat the hell am I doing here?\nI don't belong here, oh-oh, oh-oh\nShe's running out the door\nShe's running out\nShe run, run, run, run\nRun\n\nWhatever makes you happy\nWhatever you want\nYou're so fucking special\nI wish I was special\n\nBut I'm a creep\nI'm a weirdo\nWhat the hell am I doing here?\nI don't belong here\nI don't belong here"
+                }
+              ]
+            },
+            "trackingParams": "CAIQ2fQEGAAiEwiwtISNsP6WAxWgTXoFHVlTPZY=",
+            "maxCollapsedLines": 0,
+            "maxExpandedLines": 0,
+            "onShowCommands": [
+              {
+                "clickTrackingParams": "CAIQ2fQEGAAiEwiwtISNsP6WAxWgTXoFHVlTPZbKAQRoGto5",
+                "logLyricEventCommand": {
+                  "serializedLyricInfo": "Eg90X1RnUVB3QXpvZHZnLTEYAiIFMTM2MTY="
+                }
+              }
+            ],
+            "footer": {
+              "runs": [
+                {
+                  "text": "Source: Musixmatch"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "trackingParams": "CAEQui8iEwiwtISNsP6WAxWgTXoFHVlTPZY="
+    }
+  },
+  "trackingParams": "CAAQhGciEwiwtISNsP6WAxWgTXoFHVlTPZbKAQRoGto5"
+}
