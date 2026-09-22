@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Toast } from "./components/Toast";
+import { UpdateNotice } from "./components/UpdateNotice";
 import { Tooltips } from "./components/Tooltip";
 import { Route, Routes } from "react-router-dom";
 import { LibrarySidebar } from "./components/LibrarySidebar";
@@ -19,6 +20,7 @@ import { lazy, Suspense } from "react";
 const Search = lazy(() => import("./views/Search").then((m) => ({ default: m.Search })));
 const Stats = lazy(() => import("./views/Stats").then((m) => ({ default: m.Stats })));
 const SettingsView = lazy(() => import("./views/Settings").then((m) => ({ default: m.SettingsView })));
+const Changelog = lazy(() => import("./views/Changelog").then((m) => ({ default: m.Changelog })));
 const AlbumView = lazy(() => import("./views/Entities").then((m) => ({ default: m.AlbumView })));
 const MixView = lazy(() => import("./views/Mix").then((m) => ({ default: m.MixView })));
 const ArtistView = lazy(() => import("./views/Entities").then((m) => ({ default: m.ArtistView })));
@@ -113,6 +115,7 @@ export function App() {
       {/* One listener for every icon-only control in the app. */}
       <Tooltips />
       <Toast />
+      <UpdateNotice />
       {/* The desktop tray, flyout and taskbar buttons. */}
       <TrayBridge />
       {/* Draws into the mini player's own window while it is open. */}
@@ -141,6 +144,7 @@ export function App() {
               <Route path="/search" element={<Search />} />
               <Route path="/stats" element={<Stats />} />
               <Route path="/settings" element={<SettingsView />} />
+              <Route path="/changelog" element={<Changelog />} />
               <Route path="/browse/:surface" element={<Browse />} />
               <Route path="/album/:id" element={<AlbumView />} />
               <Route path="/mix/:id" element={<MixView />} />

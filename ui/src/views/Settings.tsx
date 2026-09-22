@@ -1,4 +1,5 @@
 import { apiUrl } from "../lib/base";
+import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { signInLabel, useSignIn } from "../lib/signin";
 import { useSettings, applyDocumentSettings, type Settings as Prefs } from "../lib/settings";
@@ -322,6 +323,9 @@ function AppVersion() {
     <Row label="Version" hint={hint}>
       <div className="settings__inline">
         <span className="settings__value">{info.version}</span>
+        <Link className="chip" to="/changelog">
+          What's new
+        </Link>
         {u.status === "ready" ? (
           <button className="chip" onClick={() => desktop.installUpdate()}>
             Restart to update

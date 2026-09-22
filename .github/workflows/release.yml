@@ -9,6 +9,10 @@
 # yet), then the tests run and the installer is built. Only once all of that
 # has worked is the version commit pushed and the release published from it,
 # so a failed run leaves master and the releases untouched.
+#
+# The release notes, and CHANGELOG.md (which the app shows under What's new),
+# are written by git-cliff from the commit messages since the last release;
+# cliff.toml says how.
 
 name: Release
 
@@ -45,6 +49,10 @@ jobs:
           exit 1
 
       - uses: actions/checkout@v4
+        with:
+          # The whole history and its tags: the changelog is everything since
+          # the last release tag, which a shallow clone does not have.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -71,13 +79,19 @@ jobs:
           fi
           echo "Releasing v$VERSION (current: $current)."
 
-      - name: Set the version
-        working-directory: desktop
+      - name: Set the version and write the changelog
         run: |
-          npm version "$VERSION" --no-git-tag-version
+          (cd desktop && npm version "$VERSION" --no-git-tag-version)
+          # The app bundles CHANGELOG.md, so it is written before the build.
+          npx --yes git-cliff@2.14.2 --tag "v$VERSION" -o CHANGELOG.md
+          # This release's notes alone, for the GitHub release. Kept out of
+          # the repository.
+          npx --yes git-cliff@2.14.2 --unreleased --tag "v$VERSION" --strip header -o "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore: release v$VERSION"
+          git add CHANGELOG.md desktop/package.json desktop/package-lock.json
+          git commit -m "chore: release v$VERSION"
 
       - uses: actions/setup-go@v5
         with:
@@ -107,4 +121,4 @@ jobs:
             "$setup" "$setup.blockmap" dist-installer/latest.yml \
             --target "$(git rev-parse HEAD)" \
             --title "v$VERSION" \
-            --generate-notes
+            --notes-file "$RUNNER_TEMP/notes.md"

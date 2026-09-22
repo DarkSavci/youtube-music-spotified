@@ -1,0 +1,54 @@
+# git-cliff: builds CHANGELOG.md and each release's notes from the commit
+# history. Commits follow Conventional Commits ("feat: …", "fix: …"); the
+# release workflow runs this, and the app shows the result under What's new.
+#
+#   npx git-cliff --tag v0.1.6 -o CHANGELOG.md     # the whole file
+#   npx git-cliff --unreleased --tag v0.1.6 --strip header   # one release
+
+[changelog]
+header = """
+# Changelog
+
+Every release of Youtube Music Spotified, newest first.
+"""
+# One section per release. Only what a listener would notice is listed:
+# features, fixes and speed. Housekeeping (chore, ci, docs, tests, style,
+# refactors) is left out.
+body = """
+
+{% if version %}\
+## {{ version | trim_start_matches(pat="v") }} — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## Unreleased
+{% endif %}\
+{% if commits | length == 0 %}
+Behind-the-scenes improvements only.
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | upper_first | trim }}\
+{% endfor %}
+{% endfor %}\n
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+# Keep commits that are not conventional out rather than letting them show up
+# as noise.
+filter_unconventional = true
+split_commits = false
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->New" },
+  { message = "^fix", group = "<!-- 1 -->Fixed" },
+  { message = "^perf", group = "<!-- 2 -->Faster" },
+  { message = "^chore\\(release\\)|^chore: release", skip = true },
+  { message = "^(chore|ci|docs|test|style|refactor|build)", skip = true },
+]
+protect_breaking_commits = false
+filter_commits = false
+tag_pattern = "v[0-9]+\\.[0-9]+\\.[0-9]+"
+topo_order = false
+sort_commits = "newest"

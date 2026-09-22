@@ -75,5 +75,7 @@ export default defineConfig({
     // `lib/base.ts` can fall back to a relative path here; the packaged app
     // has no origin to be relative to and supplies an absolute one instead.
     proxy: { "/v1": CORE },
+    // The changelog is bundled from the repository root, outside ui/.
+    fs: { allow: [".."] },
   },
 });
