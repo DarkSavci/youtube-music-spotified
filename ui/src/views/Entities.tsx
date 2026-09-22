@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { ArtistLinks } from "../components/EntityLinks";
 import { warmFirst } from "../lib/warm";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
-import { api } from "../lib/api";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { api, browsePath } from "../lib/api";
 import { EntityHeader } from "../components/EntityHeader";
 import { TrackTable } from "../components/TrackTable";
 import { Shelf, Card } from "../components/Shelf";
@@ -374,9 +374,11 @@ function albumItems(albums: Album[]): ShelfItem[] {
 
 export function Browse() {
   const { surface = "" } = useParams();
+  const [search] = useSearchParams();
+  const params = search.get("params") ?? "";
   const { data, isPending, error, refetch } = useQuery({
-    queryKey: ["browse", surface],
-    queryFn: ({ signal }) => api.browse(surface, signal),
+    queryKey: ["browse", surface, params],
+    queryFn: ({ signal }) => api.browse(surface, signal, params || undefined),
   });
 
   if (isPending) return <TrackListSkeleton rows={4} />;
@@ -398,7 +400,7 @@ export function Browse() {
             <Link
               key={`${mood.id}:${mood.title}`}
               className="mood"
-              to={`/browse/${encodeURIComponent(mood.id)}`}
+              to={browsePath(mood.id, mood.params)}
               style={{ "--tile-color": mood.color } as React.CSSProperties}
             >
               <span>{mood.title}</span>

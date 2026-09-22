@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { warmOnHover } from "../lib/warm";
 import { Link } from "react-router-dom";
+import { browsePath } from "../lib/api";
 import type { Shelf as ShelfData, ShelfItem } from "../lib/types";
 import { artistNames, artworkAtLeast } from "../lib/types";
 import { playEntity, transport } from "../lib/playback";
@@ -71,7 +72,7 @@ export function Shelf({
         <div className="shelf__header">
           <h2 className="shelf__title">{shelf.title}</h2>
           {shelf.showAllId ? (
-            <Link className="shelf__showall" to={`/browse/${encodeURIComponent(shelf.showAllId)}`}>
+            <Link className="shelf__showall" to={browsePath(shelf.showAllId, shelf.showAllParams)}>
               Show all
             </Link>
           ) : null}

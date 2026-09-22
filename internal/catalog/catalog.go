@@ -38,7 +38,9 @@ type Catalog interface {
 	Home(ctx context.Context) (domain.BrowsePage, error)
 
 	// Browse reads any shelf- or grid-shaped surface by identifier.
-	Browse(ctx context.Context, surfaceID string) (domain.BrowsePage, error)
+	// Browse fetches a surface. params narrows it, as the mood-and-genre
+	// tiles do: every tile shares one browse ID and differs only in params.
+	Browse(ctx context.Context, surfaceID, params string) (domain.BrowsePage, error)
 
 	// Search queries the catalog. An empty filter searches everything, which
 	// returns a top-result card; a set filter returns a single uniform shelf.

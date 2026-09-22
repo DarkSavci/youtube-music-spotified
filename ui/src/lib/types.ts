@@ -58,7 +58,7 @@ export interface ShelfItem {
 
 export interface Shelf {
   title: string; items: ShelfItem[];
-  showAllId?: string; continuation?: string;
+  showAllId?: string; showAllParams?: string; continuation?: string;
 }
 
 export interface MoodChip { id: string; params?: string; title: string; color?: string }

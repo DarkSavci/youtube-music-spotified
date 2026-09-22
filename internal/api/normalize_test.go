@@ -21,7 +21,7 @@ type emptyCatalog struct{}
 func (emptyCatalog) Home(context.Context) (domain.BrowsePage, error) {
 	return domain.BrowsePage{Title: "Home"}, nil
 }
-func (emptyCatalog) Browse(context.Context, string) (domain.BrowsePage, error) {
+func (emptyCatalog) Browse(context.Context, string, string) (domain.BrowsePage, error) {
 	return domain.BrowsePage{Title: "Browse"}, nil
 }
 func (emptyCatalog) Search(context.Context, string, domain.SearchFilter) (domain.SearchResults, error) {

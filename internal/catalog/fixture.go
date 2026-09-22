@@ -95,7 +95,8 @@ var surfaceFixtures = map[string]string{
 	SurfaceMoods:       "moods",
 }
 
-func (f *Fixture) Browse(ctx context.Context, surfaceID string) (domain.BrowsePage, error) {
+// Browse ignores params: fixtures are recorded per surface, not per tile.
+func (f *Fixture) Browse(ctx context.Context, surfaceID, _ string) (domain.BrowsePage, error) {
 	name, ok := surfaceFixtures[surfaceID]
 	if !ok {
 		// An unrecorded surface is a gap in the fixture set, not a crash. Say

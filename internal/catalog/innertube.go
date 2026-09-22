@@ -45,11 +45,15 @@ func (c *InnerTube) call(ctx context.Context, endpoint string, body map[string]a
 }
 
 func (c *InnerTube) Home(ctx context.Context) (domain.BrowsePage, error) {
-	return c.Browse(ctx, SurfaceHome)
+	return c.Browse(ctx, SurfaceHome, "")
 }
 
-func (c *InnerTube) Browse(ctx context.Context, surfaceID string) (domain.BrowsePage, error) {
-	doc, err := c.call(ctx, "browse", map[string]any{"browseId": surfaceID})
+func (c *InnerTube) Browse(ctx context.Context, surfaceID, params string) (domain.BrowsePage, error) {
+	body := map[string]any{"browseId": surfaceID}
+	if params != "" {
+		body["params"] = params
+	}
+	doc, err := c.call(ctx, "browse", body)
 	if err != nil {
 		return domain.BrowsePage{}, err
 	}

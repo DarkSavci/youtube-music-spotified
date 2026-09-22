@@ -4,7 +4,7 @@ import { transport } from "../lib/playback";
 import { artworkAtLeast } from "../lib/types";
 import { IconPlay } from "../components/Icon";
 import { Link } from "react-router-dom";
-import { api, ApiError } from "../lib/api";
+import { api, ApiError, browsePath } from "../lib/api";
 import { Shelf } from "../components/Shelf";
 import { PageState, ShelfSkeleton } from "../components/States";
 import type { BrowsePage } from "../lib/types";
@@ -63,7 +63,7 @@ export function BrowseContent({ page }: { page: BrowsePage }) {
               <Link
                 key={`${mood.id}:${mood.title}`}
                 className="mood"
-                to={`/browse/${encodeURIComponent(mood.id)}`}
+                to={browsePath(mood.id, mood.params)}
                 style={{ "--tile-color": mood.color } as React.CSSProperties}
               >
                 <span>{mood.title}</span>

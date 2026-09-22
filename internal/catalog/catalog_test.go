@@ -115,7 +115,7 @@ func TestCatalogEntities(t *testing.T) {
 // empty page that looks like a successful render.
 func TestFixtureUnknownSurfaceIsLoud(t *testing.T) {
 	f := catalog.NewFixture("../../testdata/fixtures", nil)
-	if _, err := f.Browse(context.Background(), "FEmusic_not_recorded"); err == nil {
+	if _, err := f.Browse(context.Background(), "FEmusic_not_recorded", ""); err == nil {
 		t.Error("expected an error for an unrecorded surface")
 	}
 }

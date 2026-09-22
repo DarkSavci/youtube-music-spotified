@@ -54,8 +54,11 @@ export const api = {
   me: (signal?: AbortSignal) => get<Me>("/me", signal),
 
   home: (signal?: AbortSignal) => get<BrowsePage>("/home", signal),
-  browse: (surface: string, signal?: AbortSignal) =>
-    get<BrowsePage>(`/browse/${encodeURIComponent(surface)}`, signal),
+  browse: (surface: string, signal?: AbortSignal, params?: string) =>
+    get<BrowsePage>(
+      `/browse/${encodeURIComponent(surface)}${params ? `?params=${encodeURIComponent(params)}` : ""}`,
+      signal,
+    ),
 
   search: (query: string, filter = "", signal?: AbortSignal) =>
     get<SearchResults>(
@@ -83,3 +86,14 @@ export const api = {
   radio: (trackId: string, signal?: AbortSignal) =>
     get<Track[]>(`/radio/${encodeURIComponent(trackId)}`, signal),
 };
+
+/**
+ * The in-app route for a browse surface.
+ *
+ * The mood-and-genre tiles all share one browse ID and differ only in
+ * params, so a link that drops params opens the same generic page for every
+ * tile. Every link to a tile goes through here for that reason.
+ */
+export function browsePath(id: string, params?: string): string {
+  return `/browse/${encodeURIComponent(id)}${params ? `?params=${encodeURIComponent(params)}` : ""}`;
+}

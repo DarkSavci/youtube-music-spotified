@@ -30,7 +30,7 @@ type brokenCatalog struct{ err error }
 func (b brokenCatalog) Home(context.Context) (domain.BrowsePage, error) {
 	return domain.BrowsePage{}, b.err
 }
-func (b brokenCatalog) Browse(context.Context, string) (domain.BrowsePage, error) {
+func (b brokenCatalog) Browse(context.Context, string, string) (domain.BrowsePage, error) {
 	return domain.BrowsePage{}, b.err
 }
 func (b brokenCatalog) Search(context.Context, string, domain.SearchFilter) (domain.SearchResults, error) {

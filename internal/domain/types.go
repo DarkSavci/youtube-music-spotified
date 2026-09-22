@@ -207,6 +207,10 @@ type Shelf struct {
 	// ShowAllID addresses the full grid behind this Shelf, empty when there
 	// isn't one.
 	ShowAllID string `json:"showAllId,omitempty"`
+	// ShowAllParams goes with ShowAllID. Some surfaces (a mood page's
+	// shelves among them) share one browse ID and are told apart only by
+	// params, and asked for without them YouTube answers 404.
+	ShowAllParams string `json:"showAllParams,omitempty"`
 
 	// Continuation fetches more items in this Shelf, empty when exhausted.
 	Continuation string `json:"continuation,omitempty"`

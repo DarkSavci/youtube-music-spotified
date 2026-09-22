@@ -34,7 +34,7 @@ func (s *stubCatalog) RadioPage(ctx context.Context, seed, _ string) ([]domain.T
 func (s *stubCatalog) Home(context.Context) (domain.BrowsePage, error) {
 	return domain.BrowsePage{}, nil
 }
-func (s *stubCatalog) Browse(context.Context, string) (domain.BrowsePage, error) {
+func (s *stubCatalog) Browse(context.Context, string, string) (domain.BrowsePage, error) {
 	return domain.BrowsePage{}, nil
 }
 func (s *stubCatalog) Search(context.Context, string, domain.SearchFilter) (domain.SearchResults, error) {

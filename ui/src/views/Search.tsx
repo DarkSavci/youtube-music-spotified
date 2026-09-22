@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, browsePath } from "../lib/api";
 import { Card, Shelf } from "../components/Shelf";
 import { TrackTable } from "../components/TrackTable";
 import { PageState, ShelfSkeleton } from "../components/States";
@@ -134,7 +134,7 @@ export function Search() {
               <a
                 key={`${mood.id}:${mood.title}`}
                 className="mood"
-                href={`#/browse/${encodeURIComponent(mood.id)}`}
+                href={`#${browsePath(mood.id, mood.params)}`}
                 style={{ "--tile-color": mood.color } as React.CSSProperties}
               >
                 <span>{mood.title}</span>

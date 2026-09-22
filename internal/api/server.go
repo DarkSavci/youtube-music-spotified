@@ -295,7 +295,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
-	page, err := s.deps.Catalog.Browse(r.Context(), r.PathValue("surface"))
+	page, err := s.deps.Catalog.Browse(r.Context(), r.PathValue("surface"), r.URL.Query().Get("params"))
 	if err != nil {
 		s.fail(w, r, err)
 		return

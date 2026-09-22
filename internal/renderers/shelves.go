@@ -103,6 +103,7 @@ func ParseShelf(n Node, kind string, pc ParseContext) (domain.Shelf, bool) {
 		// "Show all" hangs off the header's trailing button.
 		if more := Find(hdr, "browseEndpoint"); more != nil {
 			sh.ShowAllID = more.Str("browseId")
+			sh.ShowAllParams = more.Str("params")
 		}
 		for _, c := range n.Nodes("contents") {
 			sh.Items = append(sh.Items, parseShelfChild(c, pc)...)
