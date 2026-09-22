@@ -2,6 +2,18 @@
 
 Every release of Youtube Music Spotified, newest first.
 
+## 0.1.6 — 2026-09-22
+
+### New
+
+- Generate the changelog from commits and show What's new in the app
+
+### Fixed
+
+- Show music videos saved in a playlist
+- Load every track of playlists longer than 100 songs
+
+
 ## 0.1.5 — 2026-09-22
 
 ### New
