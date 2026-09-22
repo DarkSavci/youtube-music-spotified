@@ -245,9 +245,11 @@ async function main() {
     appVersion: require("./package.json").version,
     // Stamped into the .exe, which is what Explorer and the taskbar read.
     icon: path.join(__dirname, "branding", "icon.ico"),
-    // Only what the app actually runs. node_modules is excluded because the
-    // main process has no runtime dependencies beyond Electron itself.
-    ignore: [/^\/node_modules/, /^\/build\.js$/, /^\/make-thumbar-icons\.js$/, /^\/dist-desktop/, /^\/vendor/, /^\/branding\/installer\.nsh$/],
+    // Only what the app actually runs. node_modules ships pruned to the
+    // production dependencies (electron-updater and its own), so Electron and
+    // the build tools stay out.
+    prune: true,
+    ignore: [/^\/build\.js$/, /^\/readme-shots\.js$/, /^\/make-thumbar-icons\.js$/, /^\/dist-desktop/, /^\/vendor/, /^\/branding\/installer\.nsh$/],
     // branding/ ships: main.js loads the PNG for the window icon at runtime.
     // yt-dlp sits beside the core in resources/, where main.js looks for it.
     extraResource: [core, ytdlp],
