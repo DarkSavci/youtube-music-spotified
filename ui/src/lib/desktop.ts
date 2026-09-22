@@ -8,6 +8,14 @@
 
 import type { TrayAction, TrayState } from "./traystate";
 
+/** Where the app's updater is. Mirrors desktop/updater.js. */
+export type UpdateStatus =
+  | { status: "unavailable" | "idle" | "checking" }
+  | { status: "none"; checkedAt: number }
+  | { status: "downloading"; version: string; percent: number }
+  | { status: "ready"; version: string }
+  | { status: "error"; error: string };
+
 export interface AuthResult {
   ok: boolean;
   count?: number;
@@ -17,6 +25,10 @@ export interface AuthResult {
 interface DesktopBridge {
   corePort(): Promise<number>;
   dataDir(): Promise<string>;
+  /** Absent in shells older than 0.1.2. */
+  version?(): Promise<{ version: string; update: UpdateStatus }>;
+  checkForUpdate?(): Promise<UpdateStatus>;
+  installUpdate?(): void;
   onMediaKey(handler: (action: string) => void): () => void;
   onCoreStatus(handler: (status: { running: boolean; code?: number }) => void): () => void;
   auth: {
@@ -89,6 +101,21 @@ export const desktop = {
   async refreshAuth(): Promise<AuthResult> {
     if (!window.spotifier) return { ok: false, reason: "unavailable" };
     return window.spotifier.auth.refresh();
+  },
+
+  /** This copy's version and the updater's state, or null outside the desktop app. */
+  async version(): Promise<{ version: string; update: UpdateStatus } | null> {
+    return (await window.spotifier?.version?.()) ?? null;
+  },
+
+  /** Asks the updater to look now. A found update downloads on its own. */
+  async checkForUpdate(): Promise<UpdateStatus | null> {
+    return (await window.spotifier?.checkForUpdate?.()) ?? null;
+  },
+
+  /** Quits, installs the waiting update and starts again. */
+  installUpdate(): void {
+    window.spotifier?.installUpdate?.();
   },
 
   /** Hardware media keys. Returns an unsubscribe function, or a no-op. */

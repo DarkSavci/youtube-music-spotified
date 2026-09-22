@@ -71,6 +71,11 @@ contextBridge.exposeInMainWorld("spotifier", {
   corePort: () => ipcRenderer.invoke("core-port"),
   dataDir: () => ipcRenderer.invoke("data-dir"),
 
+  /** This copy's version, and whether an update is downloaded and waiting. */
+  version: () => ipcRenderer.invoke("app:version"),
+  checkForUpdate: () => ipcRenderer.invoke("app:check-update"),
+  installUpdate: () => ipcRenderer.send("app:install-update"),
+
   /** Hardware media keys, forwarded from the main process. */
   onMediaKey: (handler) => {
     const listener = (_event, action) => handler(action);

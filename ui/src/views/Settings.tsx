@@ -5,7 +5,7 @@ import { useSettings, applyDocumentSettings, type Settings as Prefs } from "../l
 import { SHORTCUTS, describeKeys } from "../lib/shortcuts";
 import { engineCapabilities, engineName, transport } from "../lib/playback";
 import { usePlayer } from "../lib/player";
-import { desktop } from "../lib/desktop";
+import { desktop, type UpdateStatus } from "../lib/desktop";
 import { pendingCount } from "../lib/playlog";
 import { diagnostics } from "../lib/diagnostics";
 import { Equaliser } from "../components/Equaliser";
@@ -261,6 +261,7 @@ export function SettingsView() {
       </Section>
 
       <Section title="Diagnostics">
+        {desktop.available && <AppVersion />}
         {diagnostics.available && <ProblemReport />}
         <Row label="Playback engine" hint="Which engine is currently producing sound.">
           <span className="settings__value">
@@ -281,6 +282,64 @@ export function SettingsView() {
         </Row>
       </Section>
     </div>
+  );
+}
+
+/** Which release this is, a way to look for a newer one, and to take it. */
+function AppVersion() {
+  const [info, setInfo] = useState<{ version: string; update: UpdateStatus } | null>(null);
+  const refresh = () => desktop.version().then(setInfo);
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  // While the updater is busy, follow it; it has no way to tell the page.
+  const busy = info?.update.status === "checking" || info?.update.status === "downloading";
+  useEffect(() => {
+    if (!busy) return;
+    const id = window.setInterval(() => void refresh(), 1000);
+    return () => window.clearInterval(id);
+  }, [busy]);
+
+  if (!info) return null;
+  const u = info.update;
+  const hint =
+    u.status === "checking"
+      ? "Checking for updates…"
+      : u.status === "downloading"
+        ? `Downloading ${u.version}… ${u.percent}%`
+        : u.status === "ready"
+          ? `Version ${u.version} is downloaded and installs when you quit.`
+          : u.status === "none"
+            ? "You're on the latest version."
+            : u.status === "error"
+              ? `Could not check for updates: ${u.error}`
+              : u.status === "unavailable"
+                ? "Updates are not available in a development build."
+                : "Updates download in the background and install when you quit.";
+
+  return (
+    <Row label="Version" hint={hint}>
+      <div className="settings__inline">
+        <span className="settings__value">{info.version}</span>
+        {u.status === "ready" ? (
+          <button className="chip" onClick={() => desktop.installUpdate()}>
+            Restart to update
+          </button>
+        ) : (
+          <button
+            className="chip"
+            disabled={busy || u.status === "unavailable"}
+            onClick={async () => {
+              const update = await desktop.checkForUpdate();
+              if (update) setInfo({ ...info, update });
+            }}
+          >
+            {busy ? "Checking…" : "Check for updates"}
+          </button>
+        )}
+      </div>
+    </Row>
   );
 }
 

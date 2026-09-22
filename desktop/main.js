@@ -547,6 +547,10 @@ ipcMain.handle("window:is-maximized", (e) =>
   BrowserWindow.fromWebContents(e.sender)?.isMaximized() ?? false,
 );
 ipcMain.handle("data-dir", () => dataDir());
+// The version this copy is, and one downloaded and waiting to install.
+ipcMain.handle("app:version", () => ({ version: app.getVersion(), update: updater.status() }));
+ipcMain.handle("app:check-update", () => updater.checkNow());
+ipcMain.on("app:install-update", () => updater.install());
 
 /* ---------- diagnostics ---------- */
 
