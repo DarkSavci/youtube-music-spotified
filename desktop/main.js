@@ -17,6 +17,8 @@ const path = require("node:path");
 const net = require("node:net");
 const fs = require("node:fs");
 const auth = require("./auth");
+const tray = require("./tray");
+const miniplayer = require("./miniplayer");
 
 const isDev = !app.isPackaged;
 const CORE_PORT = 8674;
@@ -338,6 +340,23 @@ function shutdown() {
 
 /* ---------- window ---------- */
 
+/**
+ * Where the UI bundle is: `{ url }` or `{ dir }`.
+ *
+ * Prefer the dev server when it is up so hot reload works, and fall back to
+ * the built bundle otherwise — so `electron .` runs standalone. Packaged, the
+ * bundle is copied next to main.js; in development it is the sibling ui/dist
+ * produced by the build. The tray flyout is a second page of the same bundle.
+ */
+function uiSource() {
+  const dist = app.isPackaged
+    ? path.join(__dirname, "ui", "dist")
+    : path.join(__dirname, "..", "ui", "dist");
+  if (isDev && devServerUp) return { url: DEV_URL };
+  if (fs.existsSync(path.join(dist, "index.html"))) return { dir: dist };
+  return { url: DEV_URL };
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     // The window and its taskbar button. The .exe carries the .ico for
@@ -382,26 +401,24 @@ function createWindow() {
   mainWindow.on("enter-full-screen", sendMaximized);
   mainWindow.on("leave-full-screen", sendMaximized);
 
-  // Prefer the dev server when it is up so hot reload works, and fall back to
-  // the built bundle otherwise — so `electron .` runs standalone.
-  // Packaged, the bundle is copied next to main.js; in development it is the
-  // sibling ui/dist produced by the build.
-  const dist = app.isPackaged
-    ? path.join(__dirname, "ui", "dist", "index.html")
-    : path.join(__dirname, "..", "ui", "dist", "index.html");
-  if (isDev && devServerUp) {
-    mainWindow.loadURL(DEV_URL);
-  } else if (fs.existsSync(dist)) {
-    mainWindow.loadFile(dist);
-  } else {
-    mainWindow.loadURL(DEV_URL);
-  }
+  const source = uiSource();
+  if (source.url) mainWindow.loadURL(source.url);
+  else mainWindow.loadFile(path.join(source.dir, "index.html"));
 
-  // External links belong in the user's browser, not in the app shell.
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+  // The mini player is the one window the page may open; external links
+  // belong in the user's browser, not in the app shell.
+  mainWindow.webContents.setWindowOpenHandler((details) => {
+    const mini = miniplayer.openHandler(details);
+    if (mini) return mini;
+    shell.openExternal(details.url);
     return { action: "deny" };
   });
+  mainWindow.webContents.on("did-create-window", (child, { frameName }) => {
+    if (frameName === miniplayer.FRAME) miniplayer.adopt(child);
+  });
+
+  // Closing hides to the tray rather than quitting, while that setting is on.
+  tray.attach(mainWindow);
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -433,14 +450,13 @@ function registerMediaKeys() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
-  });
+  // The window may be hidden in the tray rather than minimised, so this
+  // shows it as well as restoring it.
+  app.on("second-instance", () => tray.showWindow());
 
   app.whenReady().then(async () => {
     auth.register(dataDir, () => mainWindow, CORE_PORT, restartCore);
+    miniplayer.register(dataDir());
 
     // Re-read the owned session before launching the core. This is what makes
     // YouTube's cookie rotation a non-issue: the session is ours, so the
@@ -463,6 +479,7 @@ if (!app.requestSingleInstanceLock()) {
     }
     devServerUp = isDev && (await probe(5219, 400));
     createWindow();
+    tray.create(() => mainWindow, uiSource());
     registerMediaKeys();
 
     app.on("activate", () => {
@@ -477,7 +494,10 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", shutdown);
-app.on("will-quit", () => globalShortcut.unregisterAll());
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
+  tray.destroy();
+});
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
@@ -511,3 +531,5 @@ ipcMain.handle("window:is-maximized", (e) =>
   BrowserWindow.fromWebContents(e.sender)?.isMaximized() ?? false,
 );
 ipcMain.handle("data-dir", () => dataDir());
+// From the mini player and the tray: bring the full window back.
+ipcMain.on("window:show-main", () => tray.showWindow());

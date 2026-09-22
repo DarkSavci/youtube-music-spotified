@@ -70,6 +70,15 @@ export interface Settings {
   resumeOnLaunch: boolean;
 
   /**
+   * The close button hides the window to the notification area and the music
+   * keeps playing; quitting is from the tray icon's menu. Desktop only.
+   *
+   * On by default: a player that stops when its window is closed treats the
+   * window as the product, and here the music is.
+   */
+  closeToTray: boolean;
+
+  /**
    * Whether listening here is sent to YouTube.
    *
    * Off by default, and the only setting that writes to the account: it feeds
@@ -140,6 +149,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   reduceMotion: false,
   resumeOnLaunch: true,
+  closeToTray: true,
   reportToYouTube: true,
   volumeBoost: false,
   cacheMaxMB: 2048,

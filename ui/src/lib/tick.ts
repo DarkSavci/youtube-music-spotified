@@ -1,5 +1,15 @@
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { currentPosition, usePlayer } from "./player";
+
+/**
+ * The window whose frames drive the loop below.
+ *
+ * Normally this one. The mini player is drawn into its own window from this
+ * one's React tree, and must tick on that window's frames: this window may be
+ * hidden in the tray, and a hidden window's frames are not the ones on
+ * screen.
+ */
+export const FrameWindow = createContext<Window>(window);
 
 /**
  * The playback position, sampled on a frame loop.
@@ -15,6 +25,7 @@ export function usePlaybackPosition(): number {
   const anchor = usePlayer((s) => s.anchor);
   const track = usePlayer((s) => s.track);
   const playing = usePlayer((s) => s.state === "playing");
+  const frames = useContext(FrameWindow);
   const [, force] = useState(0);
 
   useEffect(() => {
@@ -22,11 +33,11 @@ export function usePlaybackPosition(): number {
     let raf = 0;
     const tick = () => {
       force((n) => n + 1);
-      raf = requestAnimationFrame(tick);
+      raf = frames.requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [playing]);
+    raf = frames.requestAnimationFrame(tick);
+    return () => frames.cancelAnimationFrame(raf);
+  }, [playing, frames]);
 
   return currentPosition({ anchor, track });
 }

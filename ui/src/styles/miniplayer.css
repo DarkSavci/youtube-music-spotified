@@ -1,0 +1,370 @@
+/*
+ * The mini player.
+ *
+ * Drawn into its own window from the main window's tree, so these rules
+ * arrive there by being copied with the rest of the app's styles. The window
+ * is frameless: the head strip is what drags it, and every control inside a
+ * drag region opts back out, or it could not be clicked.
+ *
+ * The shape follows the window (see components/MiniPlayer.tsx); within each
+ * shape, container queries drop what no longer fits rather than squeezing it.
+ */
+
+.mini-doc {
+  margin: 0;
+  overflow: hidden;
+  background: var(--surface-raised);
+  user-select: none;
+}
+.mini-root {
+  height: 100%;
+}
+
+.mini {
+  --art: #2a2a2a;
+  position: relative;
+  isolation: isolate;
+  height: 100%;
+  overflow: hidden;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  container-type: size;
+}
+
+/* The artwork's colour washed down from the top, as on the tray flyout and
+   the lyrics view. A layer of its own so it crossfades between songs. */
+.mini::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--art);
+  opacity: 0.6;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 85%);
+  mask-image: linear-gradient(to bottom, #000 0%, transparent 85%);
+  transition: background-color var(--duration-slow) var(--ease-in-out);
+}
+.mini[data-layout="bar"]::before {
+  opacity: 0.45;
+  -webkit-mask-image: linear-gradient(to right, #000 0%, transparent 70%);
+  mask-image: linear-gradient(to right, #000 0%, transparent 70%);
+}
+
+.mini__drag {
+  -webkit-app-region: drag;
+}
+.mini__drag button,
+.mini__drag input,
+.mini__drag a,
+.mini__drag .slider,
+.mini__panel {
+  -webkit-app-region: no-drag;
+}
+
+/* ---------- shared pieces ---------- */
+
+.mini__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: var(--space-1) var(--space-1) 0 var(--space-4);
+}
+.mini__headmain {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.mini__label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--text-primary);
+}
+
+.mini__winbtns {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+.mini__winbtns .iconbtn {
+  width: 28px;
+  height: 28px;
+}
+
+.mini__meta {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+.mini__title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+  text-align: left;
+}
+button.mini__title:hover {
+  text-decoration: underline;
+}
+.mini__artist {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.mini__cover--none {
+  background: var(--surface-card);
+}
+.mini__thumb {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.mini__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.mini__transport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+.mini__skip {
+  width: 36px;
+  height: 36px;
+  color: var(--text-primary);
+}
+.mini__play {
+  width: 40px;
+  height: 40px;
+  margin: 0 var(--space-1);
+}
+
+.mini__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.mini__time {
+  min-width: 34px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.mini__progress[data-buffering] .slider__fill {
+  animation: barbuffer 1.1s var(--ease-out) infinite;
+}
+
+.mini__extras {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.mini__volume {
+  margin-left: auto;
+  gap: var(--space-1);
+}
+.mini__volume .slider--volume {
+  width: 88px;
+}
+
+.mini__thin {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+  transition: opacity var(--duration-base) var(--ease-out);
+}
+.mini__thin > div {
+  height: 100%;
+  background: var(--text-primary);
+}
+
+/* ---------- bar ---------- */
+
+.mini__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 100%;
+  padding: 0 var(--space-2) 0 var(--space-3);
+}
+.mini__bar .mini__thumb {
+  width: min(56px, calc(100cqh - 24px));
+  height: min(56px, calc(100cqh - 24px));
+}
+.mini__bar .mini__transport {
+  gap: 2px;
+}
+.mini__bar .mini__play {
+  width: 36px;
+  height: 36px;
+}
+
+/* ---------- square ---------- */
+
+.mini__square {
+  position: relative;
+  height: 100%;
+}
+.mini__square .mini__cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* The controls sit over the artwork only while the pointer is on it, as in
+   Spotify's square. Hidden, they must not catch clicks either. */
+.mini__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.6) 0%,
+    rgba(0, 0, 0, 0) 28%,
+    rgba(0, 0, 0, 0) 36%,
+    rgba(0, 0, 0, 0.88) 100%
+  );
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-base) var(--ease-out);
+}
+.mini__square:hover .mini__overlay,
+.mini__square:focus-within .mini__overlay {
+  opacity: 1;
+  pointer-events: auto;
+}
+.mini__square:hover .mini__thin,
+.mini__square:focus-within .mini__thin {
+  opacity: 0;
+}
+.mini__bottom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0 var(--space-3) var(--space-3);
+}
+.mini__square .mini__artist,
+.mini__square .mini__time {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+/* ---------- wide ---------- */
+
+.mini__wide {
+  display: flex;
+  height: 100%;
+}
+.mini__wide .mini__cover {
+  flex: none;
+  height: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+.mini__side {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+  padding-bottom: var(--space-3);
+}
+.mini__side .mini__head {
+  padding-left: var(--space-4);
+}
+.mini__side > :not(.mini__head) {
+  margin: 0 var(--space-4);
+}
+
+/* ---------- tall ---------- */
+
+.mini__tall {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.mini__panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.mini__tall[data-panel="art"] .mini__panel {
+  display: grid;
+  place-items: center;
+  padding: var(--space-2) var(--space-5);
+  overflow: hidden;
+  container-type: size;
+}
+.mini__tall[data-panel="art"] .mini__cover {
+  width: min(100cqw, 100cqh);
+  height: min(100cqw, 100cqh);
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+}
+.mini__tall[data-panel="queue"] .mini__panel {
+  padding: 0 var(--space-2) var(--space-3);
+}
+/* Lyrics on a flat colour from the cover, as everywhere else they appear:
+   large white type has to read against all of it. */
+.mini__tall[data-panel="lyrics"] {
+  background: var(--art);
+  transition: background-color var(--duration-slow) var(--ease-in-out);
+}
+.mini__tall[data-panel="lyrics"] .lyrics {
+  font-size: var(--text-md);
+}
+.mini__foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4) var(--space-3);
+}
+.mini__tall[data-panel="lyrics"] .mini__foot {
+  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.35) 30%);
+}
+
+/* ---------- what fits ---------- */
+
+@container (max-width: 400px) {
+  .mini__bar > .iconbtn {
+    display: none; /* the heart; the transport stays */
+  }
+}
+@container (max-width: 330px) {
+  .mini__bar .mini__winbtns .iconbtn:first-child {
+    display: none; /* open app: the title does the same */
+  }
+}
+@container (max-height: 270px) {
+  .mini__square .mini__extras,
+  .mini__square .mini__time {
+    display: none;
+  }
+}
+@container (max-height: 210px) {
+  .mini__square .mini__progress {
+    display: none;
+  }
+}
+@container (max-width: 520px) {
+  .mini__wide .mini__volume .slider {
+    display: none;
+  }
+}

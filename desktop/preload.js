@@ -33,11 +33,38 @@ contextBridge.exposeInMainWorld("spotifier", {
     toggleMaximize: () => ipcRenderer.send("window:toggle-maximize"),
     close: () => ipcRenderer.send("window:close"),
     isMaximized: () => ipcRenderer.invoke("window:is-maximized"),
+    /** Shows and focuses the main window, from wherever it was hidden. */
+    showMain: () => ipcRenderer.send("window:show-main"),
     onMaximizeChange: (fn) => {
       const handler = (_e, value) => fn(value);
       ipcRenderer.on("window:maximized", handler);
       return () => ipcRenderer.removeListener("window:maximized", handler);
     },
+  },
+
+  /**
+   * Tray icon, flyout and taskbar buttons. The renderer owns the player, the
+   * liked list and the close preference, so it pushes a snapshot; the shell
+   * draws it and hands every action back through onAction.
+   */
+  tray: {
+    setState: (state) => ipcRenderer.send("tray:state", state),
+    setCloseToTray: (on) => ipcRenderer.send("tray:close-to-tray", Boolean(on)),
+    onAction: (fn) => {
+      const handler = (_e, action) => fn(action);
+      ipcRenderer.on("tray:action", handler);
+      return () => ipcRenderer.removeListener("tray:action", handler);
+    },
+  },
+
+  /**
+   * The mini player's window. The page opens and draws it itself; these are
+   * the parts only the shell can do.
+   */
+  mini: {
+    prefs: () => ipcRenderer.invoke("mini:prefs"),
+    setAlwaysOnTop: (on) => ipcRenderer.send("mini:always-on-top", Boolean(on)),
+    ensureSize: (width, height) => ipcRenderer.send("mini:ensure-size", { width, height }),
   },
 
   /** Port the Go core listens on, so the UI can build its base URL. */

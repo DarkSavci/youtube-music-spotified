@@ -29,6 +29,8 @@ import { PageState, TrackListSkeleton } from "./components/States";
 import { Announcer, SkipLink } from "./components/Announcer";
 import { applyPlaybackSettings, installAudioDebug, startPlayback, stopPlayback } from "./lib/playback";
 import { installMediaSession } from "./lib/mediasession";
+import { TrayBridge } from "./components/TrayBridge";
+import { MiniPlayerHost } from "./components/MiniPlayer";
 import { useSettings, applyDocumentSettings } from "./lib/settings";
 import { PlaybackNotice } from "./components/PlaybackNotice";
 import { FullScreenPlayer } from "./components/FullScreenPlayer";
@@ -111,6 +113,10 @@ export function App() {
       {/* One listener for every icon-only control in the app. */}
       <Tooltips />
       <Toast />
+      {/* The desktop tray, flyout and taskbar buttons. */}
+      <TrayBridge />
+      {/* Draws into the mini player's own window while it is open. */}
+      <MiniPlayerHost />
       <Shortcuts
         onToggleQueue={() => {
           setQueueOpen((q) => !q);

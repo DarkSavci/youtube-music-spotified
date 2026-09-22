@@ -138,8 +138,8 @@ function LyricsLines({
   );
 }
 
-/** The body shared by the panel and the full view. */
-function LyricsBody({ large }: { large: boolean }) {
+/** The body shared by the panel, the full view and the mini player. */
+export function LyricsBody({ large }: { large: boolean }) {
   const { track, timed, data, isPending, error } = useLyrics();
   const positionMs = usePlaybackPosition();
 

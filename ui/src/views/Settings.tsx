@@ -137,6 +137,15 @@ export function SettingsView() {
           onChange={(v) => prefs.set("resumeOnLaunch", v)}
         />
 
+        {desktop.available && (
+          <Toggle
+            label="Close to tray"
+            hint="The close button hides the window and the music keeps playing. Open it again, or quit, from the icon in the notification area."
+            checked={prefs.closeToTray}
+            onChange={(v) => prefs.set("closeToTray", v)}
+          />
+        )}
+
         {/* The only setting here that writes to the account, so it says so
             plainly rather than describing only the benefit. */}
         <Toggle

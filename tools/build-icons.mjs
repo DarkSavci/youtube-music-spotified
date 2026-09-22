@@ -46,6 +46,8 @@ const SIMPLE = [
   ["IconExpand", "open_in_full"],
   ["IconSettings", "settings-fill"],
   ["IconShare", "share"],
+  ["IconMiniPlayer", "picture_in_picture_alt"],
+  ["IconOpenApp", "open_in_new"],
 ];
 
 /** Icons with an active state, which Spotify shows by filling them in. */
@@ -53,6 +55,8 @@ const TOGGLING = [
   ["IconHome", "home", "home-fill"],
   ["IconLibrary", "library_music", "library_music-fill"],
   ["IconHeart", "favorite", "favorite-fill"],
+  // The mini player's always-on-top toggle: pinned is filled.
+  ["IconPin", "keep", "keep-fill"],
 ];
 
 function pathOf(glyph) {
@@ -109,7 +113,7 @@ for (const [name, glyph] of SIMPLE) {
 
 parts.push(`
 /*
- * The three with an active state.
+ * The ones with an active state.
  *
  * Spotify fills these in rather than tinting them — the destination you are
  * on, and the track you have saved — so both shapes are carried and the

@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 
 const CORE = "http://127.0.0.1:8674";
 
@@ -53,6 +54,16 @@ function csp() {
 
 export default defineConfig({
   plugins: [react(), csp()],
+  build: {
+    rollupOptions: {
+      // The desktop tray flyout is a second page, so it gets the app's styles
+      // and components without loading the app.
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        tray: fileURLToPath(new URL("./tray.html", import.meta.url)),
+      },
+    },
+  },
   // Relative asset paths. The packaged app loads index.html over file://,
   // where an absolute "/assets/..." resolves to the filesystem root rather
   // than next to the HTML — so the page renders nothing at all.

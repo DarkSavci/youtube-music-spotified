@@ -1,0 +1,433 @@
+import { useContext, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { usePlayer } from "../lib/player";
+import { transport } from "../lib/playback";
+import { usePlaybackPosition, FrameWindow } from "../lib/tick";
+import { useLikedIds, useToggleLike } from "../lib/liked";
+import { useArtColor } from "../lib/artcolor";
+import { desktop } from "../lib/desktop";
+import { closeMini, ensureMiniSize, useMini } from "../lib/miniplayer";
+import { artistNames, artworkAtLeast, formatDuration } from "../lib/types";
+import { MenuProvider } from "./ContextMenu";
+import { ArtistLinks } from "./EntityLinks";
+import { QueueList } from "./QueuePanel";
+import { LyricsBody } from "./Lyrics";
+import { Slider } from "./Slider";
+import { VolumeControl } from "./VolumeControl";
+import {
+  IconClose, IconHeart, IconLyrics, IconOpenApp, IconPause, IconPin, IconPlay,
+  IconQueue, IconRepeat, IconShuffle, IconSkipNext, IconSkipPrev,
+} from "./Icon";
+
+/**
+ * The mini player.
+ *
+ * Spotify's, with the two things people ask it for: the queue and the lyrics.
+ * One component, four shapes, chosen by the window's size rather than by a
+ * setting — drag a corner and it becomes whatever fits, as Spotify's does:
+ *
+ *   bar     a strip: artwork, title, transport
+ *   square  the artwork, with the controls over it when the pointer is
+ *   wide    artwork beside the controls, all of them visible
+ *   tall    the controls under a panel: artwork, queue or lyrics
+ *
+ * Asking for the queue or the lyrics in a shape without room for them grows
+ * the window into the tall one.
+ *
+ * Rendered from the main window's React tree into the mini player's window
+ * (see lib/miniplayer.ts), so everything here is live without being synced.
+ */
+
+type Layout = "bar" | "square" | "wide" | "tall";
+type Panel = "art" | "queue" | "lyrics";
+
+// What the queue and the lyrics need to be worth showing.
+const PANEL_SIZE = { width: 340, height: 580 };
+
+function layoutFor(w: number, h: number): Layout {
+  if (h < 140) return "bar";
+  if (h >= 400 || (h >= 300 && w / h < 0.8)) return "tall";
+  if (w / h <= 1.35) return "square";
+  return "wide";
+}
+
+/** Mounted once by the app; draws into the mini window while it is open. */
+export function MiniPlayerHost() {
+  const { win, root } = useMini();
+  if (!win || !root) return null;
+  return createPortal(
+    // Frames from the mini window, which is on screen even when the main one
+    // is hidden in the tray; menus in it, not behind it in the main window.
+    <FrameWindow.Provider value={win}>
+      <MenuProvider>
+        <MiniPlayer win={win} />
+      </MenuProvider>
+    </FrameWindow.Provider>,
+    root,
+  );
+}
+
+function useWindowSize(win: Window) {
+  const [size, setSize] = useState({ w: win.innerWidth, h: win.innerHeight });
+  useEffect(() => {
+    const onResize = () => setSize({ w: win.innerWidth, h: win.innerHeight });
+    win.addEventListener("resize", onResize);
+    onResize();
+    return () => win.removeEventListener("resize", onResize);
+  }, [win]);
+  return size;
+}
+
+function MiniPlayer({ win }: { win: Window }) {
+  const { w, h } = useWindowSize(win);
+  const layout = layoutFor(w, h);
+  const [panel, setPanel] = useState<Panel>("art");
+  const track = usePlayer((s) => s.track);
+  const color = useArtColor(artworkAtLeast(track?.artwork ?? [], 300));
+
+  const choosePanel = (next: Panel) => {
+    if (layout === "tall" && panel === next) return setPanel("art");
+    setPanel(next);
+    if (layout !== "tall") ensureMiniSize(PANEL_SIZE.width, PANEL_SIZE.height);
+  };
+
+  // The taskbar and Alt+Tab name the window after what is playing.
+  useEffect(() => {
+    win.document.title = track ? `${track.title} • ${artistNames(track.artists)}` : "Mini player";
+  }, [track, win]);
+
+  // Space plays and pauses from anywhere in the window but a control, which
+  // handles Space itself.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as Element | null;
+      if (e.key !== " " || target?.closest?.("button, input, textarea, [role='button']")) return;
+      e.preventDefault();
+      transport.toggle();
+    };
+    win.addEventListener("keydown", onKey);
+    return () => win.removeEventListener("keydown", onKey);
+  }, [win]);
+
+  const panelProps = { panel: layout === "tall" ? panel : "art", onPanel: choosePanel };
+
+  return (
+    <div className="mini" data-layout={layout} style={{ "--art": color } as CSSProperties}>
+      {layout === "bar" ? <Bar /> : null}
+      {layout === "square" ? <Square {...panelProps} /> : null}
+      {layout === "wide" ? <Wide {...panelProps} /> : null}
+      {layout === "tall" ? <Tall {...panelProps} /> : null}
+    </div>
+  );
+}
+
+/* ---------- the four shapes ---------- */
+
+interface PanelProps {
+  panel: Panel;
+  onPanel: (p: Panel) => void;
+}
+
+function Bar() {
+  return (
+    <>
+      <div className="mini__bar mini__drag">
+        <Cover size={120} className="mini__thumb" />
+        <Meta />
+        <LikeButton />
+        <Transport compact />
+        <WindowButtons compact />
+      </div>
+      <ThinProgress />
+    </>
+  );
+}
+
+function Square(props: PanelProps) {
+  return (
+    <div className="mini__square">
+      <Cover size={544} className="mini__cover" />
+      <div className="mini__overlay">
+        <Head />
+        <div className="mini__bottom">
+          <div className="mini__row">
+            <Meta />
+            <LikeButton />
+          </div>
+          <Progress />
+          <Transport />
+          <Extras {...props} />
+        </div>
+      </div>
+      <ThinProgress />
+    </div>
+  );
+}
+
+function Wide(props: PanelProps) {
+  return (
+    <div className="mini__wide">
+      <Cover size={544} className="mini__cover" />
+      <div className="mini__side">
+        <Head>
+          <Meta />
+          <LikeButton />
+        </Head>
+        <Progress />
+        <Transport />
+        <Extras {...props} />
+      </div>
+    </div>
+  );
+}
+
+function Tall({ panel, onPanel }: PanelProps) {
+  return (
+    <div className="mini__tall" data-panel={panel}>
+      <Head>
+        <span className="mini__label">
+          {panel === "queue" ? "Queue" : panel === "lyrics" ? "Lyrics" : null}
+        </span>
+      </Head>
+      <div className="mini__panel scroll">
+        {panel === "art" ? <Cover size={544} className="mini__cover" /> : null}
+        {panel === "queue" ? <QueueList onNavigate={desktop.showMainWindow} /> : null}
+        {panel === "lyrics" ? <LyricsBody large={false} /> : null}
+      </div>
+      <div className="mini__foot">
+        <div className="mini__row">
+          {panel !== "art" ? <Cover size={120} className="mini__thumb" /> : null}
+          <Meta />
+          <LikeButton />
+        </div>
+        <Progress />
+        <Transport />
+        <Extras panel={panel} onPanel={onPanel} />
+      </div>
+    </div>
+  );
+}
+
+/* ---------- pieces ---------- */
+
+/** The strip the window is dragged by, with its buttons on the right. */
+function Head({ children }: { children?: ReactNode }) {
+  return (
+    <div className="mini__head mini__drag">
+      <div className="mini__headmain">{children}</div>
+      <WindowButtons />
+    </div>
+  );
+}
+
+function Cover({ size, className }: { size: number; className: string }) {
+  const track = usePlayer((s) => s.track);
+  const src = artworkAtLeast(track?.artwork ?? [], size);
+  if (!src) return <div className={`${className} mini__cover--none`} />;
+  return <img className={className} src={src} alt="" draggable={false} />;
+}
+
+function Meta() {
+  const track = usePlayer((s) => s.track);
+  if (!track) {
+    return (
+      <div className="mini__meta">
+        <span className="mini__title">Nothing playing</span>
+        <span className="mini__artist">Pick something in the app</span>
+      </div>
+    );
+  }
+  return (
+    <div className="mini__meta">
+      {/* Back to the full app, as clicking the title does in Spotify's. */}
+      <button className="mini__title truncate" title={track.title} onClick={desktop.showMainWindow}>
+        {track.title}
+      </button>
+      <span className="mini__artist truncate">
+        <ArtistLinks artists={track.artists} onNavigate={desktop.showMainWindow} />
+      </span>
+    </div>
+  );
+}
+
+function LikeButton() {
+  const track = usePlayer((s) => s.track);
+  const likedIds = useLikedIds();
+  const toggleLike = useToggleLike();
+  const canLike = useQueryClient().getQueryState(["liked"])?.status === "success";
+  if (!track || !canLike) return null;
+  const liked = likedIds.has(track.id);
+  const label = liked ? "Remove from Liked Music" : "Add to Liked Music";
+  return (
+    <button
+      className="iconbtn"
+      aria-label={label}
+      title={label}
+      aria-pressed={liked}
+      data-active={liked || undefined}
+      onClick={() => toggleLike.mutate({ trackId: track.id, liked, track })}
+    >
+      <IconHeart size={18} filled={liked} />
+    </button>
+  );
+}
+
+function Transport({ compact = false }: { compact?: boolean }) {
+  const { track, state, shuffle, repeat } = usePlayer();
+  // Intent, as on the bar: buffering is still "playing".
+  const playing = state === "playing" || state === "loading" || state === "stalled";
+  return (
+    <div className="mini__transport">
+      {compact ? null : (
+        <button
+          className="iconbtn"
+          aria-label="Shuffle"
+          title="Shuffle"
+          aria-pressed={shuffle}
+          data-active={shuffle || undefined}
+          onClick={() => transport.toggleShuffle()}
+        >
+          <IconShuffle size={18} />
+        </button>
+      )}
+      <button className="iconbtn mini__skip" aria-label="Previous" title="Previous" disabled={!track} onClick={() => transport.prev()}>
+        <IconSkipPrev size={22} />
+      </button>
+      <button
+        className="playbtn mini__play"
+        aria-label={playing ? "Pause" : "Play"}
+        title={playing ? "Pause" : "Play"}
+        disabled={!track}
+        onClick={() => transport.toggle()}
+      >
+        {playing ? <IconPause size={22} /> : <IconPlay size={22} />}
+      </button>
+      <button className="iconbtn mini__skip" aria-label="Next" title="Next" disabled={!track} onClick={() => transport.next()}>
+        <IconSkipNext size={22} />
+      </button>
+      {compact ? null : (
+        <button
+          className="iconbtn"
+          aria-label={`Repeat: ${repeat}`}
+          title={`Repeat: ${repeat}`}
+          data-active={repeat !== "off" || undefined}
+          onClick={() => transport.cycleRepeat()}
+        >
+          <IconRepeat size={18} />
+          {repeat === "one" ? <span className="repeatone" aria-hidden="true">1</span> : null}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Progress() {
+  const track = usePlayer((s) => s.track);
+  const buffering = usePlayer((s) => s.state === "loading" || s.state === "stalled");
+  const position = usePlaybackPosition();
+  const frames = useContext(FrameWindow);
+  const [scrub, setScrub] = useState<number | null>(null);
+  const duration = track?.durationMs ?? 0;
+  const shown = scrub ?? position;
+  return (
+    <div className="mini__progress" data-buffering={buffering || undefined}>
+      <span className="mini__time">{formatDuration(shown)}</span>
+      <Slider
+        label="Seek"
+        value={shown}
+        max={duration}
+        disabled={!track}
+        step={1000}
+        onChange={(v) => {
+          setScrub(v);
+          transport.seek(v);
+          frames.requestAnimationFrame(() => setScrub(null));
+        }}
+      />
+      <span className="mini__time">{formatDuration(duration)}</span>
+    </div>
+  );
+}
+
+/** A hairline of progress for the shapes that hide the real control. */
+function ThinProgress() {
+  const duration = usePlayer((s) => s.track?.durationMs ?? 0);
+  const position = usePlaybackPosition();
+  const pct = duration > 0 ? Math.min(100, (position / duration) * 100) : 0;
+  return (
+    <div className="mini__thin" aria-hidden="true">
+      <div style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+function Extras({ panel, onPanel }: PanelProps) {
+  return (
+    <div className="mini__extras">
+      <button
+        className="iconbtn"
+        aria-label="Queue"
+        title="Queue"
+        aria-pressed={panel === "queue"}
+        data-active={panel === "queue" || undefined}
+        onClick={() => onPanel("queue")}
+      >
+        <IconQueue size={18} />
+      </button>
+      <button
+        className="iconbtn"
+        aria-label="Lyrics"
+        title="Lyrics"
+        aria-pressed={panel === "lyrics"}
+        data-active={panel === "lyrics" || undefined}
+        onClick={() => onPanel("lyrics")}
+      >
+        <IconLyrics size={18} />
+      </button>
+      <VolumeControl className="mini__volume" />
+    </div>
+  );
+}
+
+/** Keep on top, back to the app, close. */
+function WindowButtons({ compact = false }: { compact?: boolean }) {
+  const [pinned, setPinned] = useState<boolean | null>(null);
+  const shell = window.spotifier?.mini;
+
+  useEffect(() => {
+    if (!shell) return;
+    let live = true;
+    void shell.prefs().then((p) => live && setPinned(p.alwaysOnTop));
+    return () => {
+      live = false;
+    };
+  }, [shell]);
+
+  const pinLabel = pinned ? "Don't keep on top" : "Keep on top";
+  return (
+    <div className="mini__winbtns">
+      {shell && pinned !== null && !compact ? (
+        <button
+          className="iconbtn"
+          aria-label={pinLabel}
+          title={pinLabel}
+          aria-pressed={pinned}
+          data-active={pinned || undefined}
+          onClick={() => {
+            shell.setAlwaysOnTop(!pinned);
+            setPinned(!pinned);
+          }}
+        >
+          <IconPin size={16} filled={pinned} />
+        </button>
+      ) : null}
+      <button className="iconbtn" aria-label="Open app" title="Open app" onClick={desktop.showMainWindow}>
+        <IconOpenApp size={16} />
+      </button>
+      <button className="iconbtn" aria-label="Close mini player" title="Close" onClick={closeMini}>
+        <IconClose size={16} />
+      </button>
+    </div>
+  );
+}

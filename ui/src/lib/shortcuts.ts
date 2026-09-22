@@ -1,6 +1,7 @@
 import { usePlayer } from "./player";
 import { transport } from "./playback";
 import { desktop } from "./desktop";
+import { toggleMini } from "./miniplayer";
 
 /**
  * Keyboard control.
@@ -226,6 +227,14 @@ export const SHORTCUTS: Shortcut[] = [
     label: "Now playing, full screen",
     group: "Interface",
     run: (nav) => nav.toggleFullScreen(),
+  },
+  {
+    // "m" is mute; "p" for picture-in-picture, which is what it is.
+    id: "miniplayer",
+    keys: "p",
+    label: "Mini player",
+    group: "Interface",
+    run: () => toggleMini(),
   },
   {
     id: "newplaylist",

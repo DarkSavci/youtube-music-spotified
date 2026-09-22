@@ -6,8 +6,9 @@ import { transport } from "../lib/playback";
 import { artworkAtLeast, formatDuration } from "../lib/types";
 import { Slider } from "./Slider";
 import {
-  IconExpand, IconHeart, IconLyrics, IconPause, IconPlay, IconQueue,
+  IconExpand, IconHeart, IconLyrics, IconMiniPlayer, IconPause, IconPlay, IconQueue,
   IconRepeat, IconShuffle, IconSkipNext, IconSkipPrev, IconShare } from "./Icon";
+import { miniSupported, toggleMini, useMini } from "../lib/miniplayer";
 import { useLikedIds, useToggleLike } from "../lib/liked";
 import { VolumeControl } from "./VolumeControl";
 
@@ -70,6 +71,7 @@ export function NowPlayingBar({
   const likedIds = useLikedIds();
   const toggleLike = useToggleLike();
   const liked = Boolean(track && likedIds.has(track.id));
+  const miniOpen = useMini((s) => s.win !== null);
 
   return (
     <footer className="bar panel" aria-label="Playback">
@@ -207,6 +209,18 @@ export function NowPlayingBar({
           <IconQueue size={18} />
         </button>
         <VolumeControl />
+        {/* Where Spotify puts it: after the volume, at the far right. */}
+        {miniSupported() ? (
+          <button
+            className="iconbtn"
+            aria-label={miniOpen ? "Close mini player" : "Open mini player"}
+            aria-pressed={miniOpen}
+            data-active={miniOpen || undefined}
+            onClick={toggleMini}
+          >
+            <IconMiniPlayer size={18} />
+          </button>
+        ) : null}
       </div>
     </footer>
   );

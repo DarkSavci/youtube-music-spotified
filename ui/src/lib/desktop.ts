@@ -6,6 +6,8 @@
  * than assuming, so nothing has to be stubbed out for the web build.
  */
 
+import type { TrayAction, TrayState } from "./traystate";
+
 export interface AuthResult {
   ok: boolean;
   count?: number;
@@ -27,12 +29,28 @@ interface DesktopBridge {
   /** Absolute origin of the Go core. See lib/base.ts for why this exists. */
   coreOrigin?: string;
 
+  /** Tray icon, flyout and taskbar buttons. Absent in older shells. */
+  tray?: {
+    setState(state: TrayState): void;
+    setCloseToTray(on: boolean): void;
+    /** Returns an unsubscribe function. */
+    onAction(fn: (action: TrayAction) => void): () => void;
+  };
+
+  /** The mini player window's shell-side controls. Absent in older shells. */
+  mini?: {
+    prefs(): Promise<{ alwaysOnTop: boolean }>;
+    setAlwaysOnTop(on: boolean): void;
+    ensureSize(width: number, height: number): void;
+  };
+
   /** Title-bar controls, present because the window is frameless. */
   window?: {
     minimize(): void;
     toggleMaximize(): void;
     close(): void;
     isMaximized(): Promise<boolean>;
+    showMain?(): void;
     /** Returns an unsubscribe function. */
     onMaximizeChange(fn: (maximized: boolean) => void): () => void;
   };
@@ -80,5 +98,25 @@ export const desktop = {
 
   onCoreStatus(handler: (s: { running: boolean; code?: number }) => void): () => void {
     return window.spotifier?.onCoreStatus(handler) ?? (() => {});
+  },
+
+  /** The snapshot every tray surface draws from. */
+  setTrayState(state: TrayState): void {
+    window.spotifier?.tray?.setState(state);
+  },
+
+  setCloseToTray(on: boolean): void {
+    window.spotifier?.tray?.setCloseToTray(on);
+  },
+
+  /** Brings the main window back, from the tray or the mini player. */
+  showMainWindow(): void {
+    window.spotifier?.window?.showMain?.();
+    window.focus();
+  },
+
+  /** Actions from the tray, the flyout and the taskbar buttons. */
+  onTrayAction(fn: (action: TrayAction) => void): () => void {
+    return window.spotifier?.tray?.onAction(fn) ?? (() => {});
   },
 };

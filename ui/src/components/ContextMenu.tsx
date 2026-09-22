@@ -74,9 +74,12 @@ function Menu({ state, onClose }: { state: MenuState; onClose: () => void }) {
     if (!el) return;
     const { width, height } = el.getBoundingClientRect();
     const pad = 8;
+    // The window the menu is actually in: the mini player draws into its
+    // own, from this one's React tree.
+    const view = el.ownerDocument.defaultView ?? window;
     setPos({
-      x: Math.min(state.x, window.innerWidth - width - pad),
-      y: Math.min(state.y, window.innerHeight - height - pad),
+      x: Math.min(state.x, view.innerWidth - width - pad),
+      y: Math.min(state.y, view.innerHeight - height - pad),
     });
   }, [state]);
 
@@ -115,15 +118,19 @@ function Menu({ state, onClose }: { state: MenuState; onClose: () => void }) {
     // A scroll under an open menu leaves it pointing at nothing.
     const onScroll = () => onClose();
 
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey, true);
-    window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", onScroll);
+    // Listened for in the menu's own window, which is not this one when it
+    // opens in the mini player.
+    const doc = ref.current?.ownerDocument ?? document;
+    const view = doc.defaultView ?? window;
+    doc.addEventListener("mousedown", onDown);
+    view.addEventListener("keydown", onKey, true);
+    view.addEventListener("scroll", onScroll, true);
+    view.addEventListener("resize", onScroll);
     return () => {
-      document.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", onScroll);
+      doc.removeEventListener("mousedown", onDown);
+      view.removeEventListener("keydown", onKey, true);
+      view.removeEventListener("scroll", onScroll, true);
+      view.removeEventListener("resize", onScroll);
     };
   }, [onClose, state.items, active]);
 

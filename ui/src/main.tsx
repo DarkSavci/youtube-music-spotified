@@ -11,6 +11,7 @@ import { installFlushHooks } from "./lib/playlog";
 import "./styles/global.css";
 import "./styles/shell.css";
 import "./styles/content.css";
+import "./styles/miniplayer.css";
 
 /**
  * HashRouter rather than BrowserRouter: the packaged desktop app loads from a

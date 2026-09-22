@@ -53,6 +53,7 @@ desktop/branding/icon-render.html
 /shots/
 *.png
 !desktop/branding/*.png
+!desktop/branding/thumbar/*.png
 !ui/public/*.png
 
 # Editor and OS noise.
