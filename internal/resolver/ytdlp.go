@@ -44,6 +44,12 @@ type Ytdlp struct {
 	// internally, and an unbounded call would hang the player rather than
 	// letting the failure ladder run.
 	Timeout time.Duration
+	// Deno is the JavaScript runtime yt-dlp solves YouTube's player
+	// challenges with. Without one, signed-in requests fail outright ("The
+	// page needs to be reloaded") and anonymous ones lose every audio format.
+	// Empty leaves yt-dlp to find a runtime on PATH, which on most machines
+	// does not exist.
+	Deno string
 
 	once    sync.Once
 	present bool
@@ -137,6 +143,9 @@ func (y *Ytdlp) resolveWith(ctx context.Context, videoID string, extra []string,
 		if _, err := os.Stat(y.CookiePath); err == nil {
 			args = append(args, "--cookies", y.CookiePath)
 		}
+	}
+	if y.Deno != "" {
+		args = append(args, "--js-runtimes", "deno:"+y.Deno)
 	}
 	args = append(args, extra...)
 	args = append(args, base+videoID)

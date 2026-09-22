@@ -129,6 +129,76 @@ async function fetchYtdlp() {
 }
 
 /*
+ * Deno ships with the app too.
+ *
+ * yt-dlp needs a JavaScript runtime to solve the challenges in YouTube's
+ * player. Without one, signed-in requests fail with "The page needs to be
+ * reloaded" and anonymous ones come back with no audio formats — every track
+ * fails. It only ever worked on machines that happened to have Deno on PATH.
+ * Electron's own Node cannot stand in: yt-dlp rejects Node 20 as unsupported.
+ *
+ * Deno is the runtime yt-dlp recommends. Fetched from the official release
+ * and checked against its published hash (a PowerShell-formatted file, hence
+ * the loose parse), cached for a month, and required: packaging without it
+ * would ship an app that plays nothing on most machines.
+ */
+const DENO_RELEASE = "https://github.com/denoland/deno/releases/latest/download";
+const DENO_ASSET = "deno-x86_64-pc-windows-msvc.zip";
+const denoDir = path.join(vendor, "deno");
+const denoCached = path.join(denoDir, "deno.exe");
+const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function fetchDeno() {
+  if (fs.existsSync(denoCached) && Date.now() - fs.statSync(denoCached).mtimeMs < MONTH_MS && denoVersion(denoCached)) {
+    console.log("deno: using cached copy");
+    return denoDir;
+  }
+  try {
+    console.log("deno: downloading the latest release...");
+    const [zip, sum] = await Promise.all([
+      download(`${DENO_RELEASE}/${DENO_ASSET}`),
+      download(`${DENO_RELEASE}/${DENO_ASSET}.sha256sum`),
+    ]);
+    const expected = (/\b[0-9a-f]{64}\b/i.exec(sum.toString("utf8")) || [])[0]?.toLowerCase();
+    const actual = crypto.createHash("sha256").update(zip).digest("hex");
+    if (!expected || expected !== actual) {
+      throw new Error(`checksum mismatch (expected ${expected || "none"}, got ${actual})`);
+    }
+    fs.mkdirSync(vendor, { recursive: true });
+    const zipPath = path.join(vendor, DENO_ASSET);
+    fs.writeFileSync(zipPath, zip);
+    fs.rmSync(denoDir, { recursive: true, force: true });
+    fs.mkdirSync(denoDir, { recursive: true });
+    execFileSync(windowsTar(), ["-xf", zipPath, "-C", denoDir]);
+    fs.rmSync(zipPath, { force: true });
+    const version = denoVersion(denoCached);
+    if (!version) throw new Error("the unpacked binary does not run");
+    const now = new Date();
+    fs.utimesSync(denoCached, now, now);
+    console.log(`deno: verified ${version} (${actual.slice(0, 16)}…)`);
+    return denoDir;
+  } catch (err) {
+    console.warn("deno: download failed (" + err.message + ")");
+  }
+  if (fs.existsSync(denoCached) && denoVersion(denoCached)) {
+    console.warn("deno: using the older cached copy");
+    return denoDir;
+  }
+  console.error("deno: no working copy available; refusing to package without it");
+  process.exit(1);
+}
+
+/** The version a deno binary reports, or null when it does not run. */
+function denoVersion(bin) {
+  try {
+    const out = execFileSync(bin, ["--version"], { encoding: "utf8", timeout: 60000 });
+    return (/^deno (\S+)/m.exec(out) || [])[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/*
  * Windows' own tar, which reads zip archives. Named in full: a shell with Git
  * on PATH finds GNU tar first, which takes "C:" for a remote host.
  */
@@ -234,6 +304,7 @@ async function main() {
   }
 
   const ytdlp = await fetchYtdlp();
+  const deno = await fetchDeno();
 
   const paths = await packager({
     dir: __dirname,
@@ -251,8 +322,8 @@ async function main() {
     prune: true,
     ignore: [/^\/build\.js$/, /^\/readme-shots\.js$/, /^\/make-thumbar-icons\.js$/, /^\/dist-desktop/, /^\/vendor/, /^\/branding\/installer\.nsh$/],
     // branding/ ships: main.js loads the PNG for the window icon at runtime.
-    // yt-dlp sits beside the core in resources/, where main.js looks for it.
-    extraResource: [core, ytdlp],
+    // yt-dlp and deno sit beside the core in resources/, where main.js looks.
+    extraResource: [core, ytdlp, deno],
     // The renderer bundle is copied in below rather than by packager, so its
     // path inside the app matches what main.js expects.
     asar: false,
@@ -271,6 +342,7 @@ async function main() {
   console.log(`  executable : ${path.join(appDir, "Youtube Music Spotified.exe")}`);
   console.log(`  core       : ${path.join(appDir, "resources", "spotifier.exe")}`);
   console.log(`  yt-dlp     : ${path.join(appDir, "resources", "yt-dlp", "yt-dlp.exe")}`);
+  console.log(`  deno       : ${path.join(appDir, "resources", "deno", "deno.exe")}`);
   console.log(`  ui bundle  : ${uiTarget}`);
 }
 

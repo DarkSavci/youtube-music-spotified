@@ -72,6 +72,21 @@ function ytdlpPath() {
 }
 
 /*
+ * Deno, which build.js bundles beside yt-dlp.
+ *
+ * yt-dlp solves YouTube's player challenges in JavaScript and cannot play
+ * anything without a runtime for it. Bundled rather than looked for on PATH,
+ * which is how it only ever worked on machines that had Deno installed.
+ */
+function denoPath() {
+  const exe = process.platform === "win32" ? "deno.exe" : "deno";
+  const bundled = isDev
+    ? path.join(__dirname, "vendor", "deno", exe)
+    : path.join(process.resourcesPath, "deno", exe);
+  return fs.existsSync(bundled) ? bundled : null;
+}
+
+/*
  * Keeps yt-dlp current, at most once a day.
  *
  * yt-dlp tracks YouTube's changes, and a copy frozen at build time is the
@@ -222,6 +237,9 @@ function startCore() {
   ];
   const ytdlp = ytdlpPath();
   if (ytdlp) args.push("-ytdlp", ytdlp);
+  const deno = denoPath();
+  if (deno) args.push("-deno", deno);
+  else console.warn("[core] no bundled deno; yt-dlp will look for one on PATH");
 
   const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
 

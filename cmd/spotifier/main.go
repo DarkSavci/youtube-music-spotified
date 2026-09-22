@@ -49,6 +49,7 @@ func main() {
 		verbose      = flag.Bool("v", false, "debug logging")
 		resolverMode = flag.String("resolver", "auto", "stream resolver: auto | ytdlp | library")
 		ytdlpBin     = flag.String("ytdlp", "", "path to yt-dlp (default: found on PATH)")
+		denoBin      = flag.String("deno", "", "path to deno, the JavaScript runtime yt-dlp needs (default: found on PATH)")
 		cacheDir     = flag.String("cache", "", "song cache directory (default: beside the credentials)")
 	)
 	flag.Parse()
@@ -97,7 +98,7 @@ func main() {
 	 * those cookies — doing so turns a working stream into a 403 — so it
 	 * serves standard tiers and stands as the fallback.
 	 */
-	deps.Resolver = buildResolver(*resolverMode, *ytdlpBin, *credPath, creds, log)
+	deps.Resolver = buildResolver(*resolverMode, *ytdlpBin, *denoBin, *credPath, creds, log)
 
 	// Audio on disk beside the rest of the app's data, so a track played or
 	// prefetched once starts without resolving. The cap is the client's to
@@ -287,7 +288,7 @@ Cookies reach yt-dlp as a file because that is the only form it takes. It is a
 live session in plain text, so it goes to a per-process temporary directory
 that is removed on exit, never beside the binary or into the project.
 */
-func buildResolver(mode, ytdlpBin, credPath string, creds *innertube.Credentials, log *slog.Logger) resolver.Resolver {
+func buildResolver(mode, ytdlpBin, denoBin, credPath string, creds *innertube.Credentials, log *slog.Logger) resolver.Resolver {
 	library := resolver.NewLibrary()
 	if mode == "library" {
 		return library
@@ -317,6 +318,12 @@ func buildResolver(mode, ytdlpBin, credPath string, creds *innertube.Credentials
 	}
 
 	yt := resolver.NewYtdlp(ytdlpBin, cookiePath)
+	yt.Deno = denoBin
+	if denoBin == "" {
+		log.Warn("no JavaScript runtime given to yt-dlp; playback works only if deno is on PATH")
+	} else {
+		log.Info("yt-dlp will solve player challenges with deno", "path", denoBin)
+	}
 	if mode == "ytdlp" {
 		return resolver.NewChain(yt, nil, log)
 	}
