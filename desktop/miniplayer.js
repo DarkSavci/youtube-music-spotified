@@ -22,6 +22,7 @@ const DEFAULT_SIZE = { width: 320, height: 320 };
 const MIN_SIZE = { width: 260, height: 72 };
 
 let win = null;
+let keeper = null;
 let prefsFile = null;
 let prefs = { bounds: null, alwaysOnTop: true };
 let saveTimer = null;
@@ -105,11 +106,63 @@ function openHandler({ frameName, url }) {
   };
 }
 
+/*
+ * Staying on top, and staying there.
+ *
+ * Setting it once was not enough. On Windows a call to setAlwaysOnTop is
+ * sometimes simply dropped — measured on this machine, one call in several,
+ * with no pattern to which — and the window then never becomes topmost at
+ * all: every app went over it. When a call does take, it holds through focus
+ * changes, minimising and resizing, and Electron's own isAlwaysOnTop() always
+ * agreed with the window's real WS_EX_TOPMOST flag.
+ *
+ * So the setting is checked and re-applied rather than trusted: every second
+ * while the mini player is open, and at once whenever it is shown, restored or
+ * loses focus. The check itself costs nothing (no call into the OS), and the
+ * setting is only re-applied when the check fails.
+ *
+ * Being topmost is not the whole of it, either. Windows keeps its topmost
+ * windows in the order they were last activated, so another app's own
+ * always-on-top window (Task Manager, a chat overlay, a browser's picture-in-
+ * picture) clicked after the mini player covered it — measured: every time,
+ * old code and new alike, until the mini player also moved itself back to the
+ * top of that band. It does that on the same one-second check. Moving to the
+ * top does not activate the window, so it never takes focus from what you are
+ * typing into; it only skips it while the mini player is the focused window,
+ * where it is on top already.
+ */
+const ON_TOP_LEVEL = "screen-saver";
+const KEEP_EVERY_MS = 1000;
+
+function applyOnTop() {
+  if (!win || win.isDestroyed()) return;
+  if (!prefs.alwaysOnTop) {
+    win.setAlwaysOnTop(false);
+    return;
+  }
+  if (!win.isAlwaysOnTop()) {
+    win.setAlwaysOnTop(true, ON_TOP_LEVEL);
+    if (!win.isAlwaysOnTop()) console.warn("[mini] always-on-top did not take; retrying");
+  }
+  if (win.isVisible() && !win.isMinimized() && !win.isFocused()) win.moveTop();
+}
+
+function keepOnTop() {
+  clearInterval(keeper);
+  keeper = null;
+  applyOnTop();
+  if (prefs.alwaysOnTop && win && !win.isDestroyed()) {
+    keeper = setInterval(applyOnTop, KEEP_EVERY_MS);
+    keeper.unref?.();
+  }
+}
+
 /** Takes charge of the window once Electron has made it. */
 function adopt(child) {
   win = child;
-  // Above ordinary always-on-top windows too, as Picture-in-Picture is.
-  if (prefs.alwaysOnTop) win.setAlwaysOnTop(true, "floating");
+  keepOnTop();
+  for (const event of ["show", "restore", "ready-to-show"]) win.on(event, applyOnTop);
+  win.on("blur", applyOnTop);
 
   const remember = () => {
     if (!win || win.isDestroyed() || win.isMinimized()) return;
@@ -123,6 +176,8 @@ function adopt(child) {
   win.on("resize", remember);
   win.on("close", remember);
   win.on("closed", () => {
+    clearInterval(keeper);
+    keeper = null;
     win = null;
   });
 }
@@ -135,7 +190,7 @@ function register(dataDir) {
   ipcMain.on("mini:always-on-top", (_e, on) => {
     prefs.alwaysOnTop = Boolean(on);
     save();
-    if (win && !win.isDestroyed()) win.setAlwaysOnTop(prefs.alwaysOnTop, "floating");
+    keepOnTop();
   });
 
   /*

@@ -137,7 +137,7 @@ function Bar() {
         <Meta />
         <LikeButton />
         <Transport compact />
-        <WindowButtons compact />
+        <WindowButtons />
       </div>
       <ThinProgress />
     </>
@@ -390,8 +390,14 @@ function Extras({ panel, onPanel }: PanelProps) {
   );
 }
 
-/** Keep on top, back to the app, close. */
-function WindowButtons({ compact = false }: { compact?: boolean }) {
+/**
+ * Keep on top, back to the app, close.
+ *
+ * The pin shows in every shape, the bar included. It used to be left out of
+ * the bar, so a mini player turned off-top and then shrunk to a bar had no
+ * way back: every other app went over it and nothing said why.
+ */
+function WindowButtons() {
   const [pinned, setPinned] = useState<boolean | null>(null);
   const shell = window.spotifier?.mini;
 
@@ -404,12 +410,12 @@ function WindowButtons({ compact = false }: { compact?: boolean }) {
     };
   }, [shell]);
 
-  const pinLabel = pinned ? "Don't keep on top" : "Keep on top";
+  const pinLabel = pinned ? "Keeping on top — click to stop" : "Not on top — click to keep on top";
   return (
     <div className="mini__winbtns">
-      {shell && pinned !== null && !compact ? (
+      {shell && pinned !== null ? (
         <button
-          className="iconbtn"
+          className="iconbtn mini__pin"
           aria-label={pinLabel}
           title={pinLabel}
           aria-pressed={pinned}
@@ -422,7 +428,7 @@ function WindowButtons({ compact = false }: { compact?: boolean }) {
           <IconPin size={16} filled={pinned} />
         </button>
       ) : null}
-      <button className="iconbtn" aria-label="Open app" title="Open app" onClick={desktop.showMainWindow}>
+      <button className="iconbtn mini__openapp" aria-label="Open app" title="Open app" onClick={desktop.showMainWindow}>
         <IconOpenApp size={16} />
       </button>
       <button className="iconbtn" aria-label="Close mini player" title="Close" onClick={closeMini}>

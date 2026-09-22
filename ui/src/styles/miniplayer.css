@@ -92,6 +92,10 @@
   width: 28px;
   height: 28px;
 }
+/* On top or not has to be readable at a glance: the accent when it is. */
+.mini__winbtns .mini__pin[data-active] {
+  color: var(--accent);
+}
 
 .mini__meta {
   display: flex;
@@ -348,8 +352,8 @@ button.mini__title:hover {
   }
 }
 @container (max-width: 330px) {
-  .mini__bar .mini__winbtns .iconbtn:first-child {
-    display: none; /* open app: the title does the same */
+  .mini__bar .mini__winbtns .mini__openapp {
+    display: none; /* the title does the same */
   }
 }
 @container (max-height: 270px) {
