@@ -1,30 +1,29 @@
 # Builds the Windows installer and publishes it as a GitHub release, which the
 # app's updater (desktop/updater.js) picks up.
 #
-# A release happens when desktop/package.json carries a version that has no
-# release yet:
-#   - push a commit to master that bumps the version, or
-#   - run this workflow by hand (Actions → Release → Run workflow), which bumps
-#     the version for you, commits it and releases it.
-# Pushes that leave the version alone build nothing.
+# Releases are made by hand, never by a push: Actions → Release → Run workflow,
+# on master, with the new version number. The release contains every commit on
+# master at that moment.
+#
+# The version is checked (x.y.z, higher than the current one, not released
+# yet), then the tests run and the installer is built. Only once all of that
+# has worked is the version commit pushed and the release published from it,
+# so a failed run leaves master and the releases untouched.
 
 name: Release
 
 on:
-  push:
-    branches: [master]
   workflow_dispatch:
     inputs:
-      bump:
-        description: Version bump
-        type: choice
-        options: [patch, minor, major]
-        default: patch
+      version:
+        description: New version number (e.g. 0.1.5)
+        type: string
+        required: true
 
 permissions:
   contents: write
 
-# One release at a time; a second push waits instead of racing for the tag.
+# One release at a time; a second run waits instead of racing for the tag.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -37,66 +36,75 @@ jobs:
         shell: bash
     env:
       GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
     steps:
+      - name: Release from master only
+        if: github.ref_name != 'master'
+        run: |
+          echo "::error::Run the release from master, not ${{ github.ref_name }}."
+          exit 1
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Bump version
-        if: github.event_name == 'workflow_dispatch'
+      - name: Check the version
+        run: |
+          VERSION="${VERSION#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          current=$(node -p "require('./desktop/package.json').version")
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::\"$VERSION\" is not a version number like 0.1.5."
+            exit 1
+          fi
+          # One line: a multi-line -e script is lost on the Windows runner.
+          newer=$(node -e 'const [a, b] = process.argv.slice(1).map((v) => v.split(".").map(Number)); const i = [0, 1, 2].find((k) => a[k] !== b[k]); console.log(i !== undefined && a[i] > b[i]);' "$VERSION" "$current")
+          if [ "$newer" != "true" ]; then
+            echo "::error::$VERSION is not higher than the current version, $current."
+            exit 1
+          fi
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::v$VERSION is already released."
+            exit 1
+          fi
+          echo "Releasing v$VERSION (current: $current)."
+
+      - name: Set the version
         working-directory: desktop
         run: |
-          npm version "${{ inputs.bump }}" --no-git-tag-version
-          version=$(node -p "require('./package.json').version")
+          npm version "$VERSION" --no-git-tag-version
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore: release v$version"
-          git push origin "HEAD:${{ github.ref_name }}"
-
-      - name: Check for an existing release
-        id: version
-        run: |
-          version=$(node -p "require('./desktop/package.json').version")
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if gh release view "v$version" >/dev/null 2>&1; then
-            echo "v$version is already released; nothing to do."
-            echo "release=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "release=true" >> "$GITHUB_OUTPUT"
-          fi
+          git commit -am "chore: release v$VERSION"
 
       - uses: actions/setup-go@v5
-        if: steps.version.outputs.release == 'true'
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
       - name: Test
-        if: steps.version.outputs.release == 'true'
         run: go test ./...
 
       - name: Install dependencies
-        if: steps.version.outputs.release == 'true'
         run: |
           npm ci --prefix ui
           npm ci --prefix desktop
 
       - name: Build installer
-        if: steps.version.outputs.release == 'true'
         working-directory: desktop
         run: npm run installer
 
       - name: Publish release
-        if: steps.version.outputs.release == 'true'
         run: |
-          version="${{ steps.version.outputs.version }}"
-          setup="dist-installer/Youtube-Music-Spotified-Setup-$version.exe"
+          # The version commit goes to master only now that the build worked.
+          git push origin HEAD:master
+          setup="dist-installer/Youtube-Music-Spotified-Setup-$VERSION.exe"
           # latest.yml and the blockmap are what the updater reads; the
           # installer is what both it and new users download.
-          gh release create "v$version" \
+          gh release create "v$VERSION" \
             "$setup" "$setup.blockmap" dist-installer/latest.yml \
             --target "$(git rev-parse HEAD)" \
-            --title "v$version" \
+            --title "v$VERSION" \
             --generate-notes
