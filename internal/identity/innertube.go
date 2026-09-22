@@ -65,6 +65,12 @@ func (i *InnerTube) LikedSongs(ctx context.Context) (domain.Playlist, error) {
 	if !ok {
 		return domain.Playlist{}, fmt.Errorf("identity: liked songs did not parse")
 	}
+	err = renderers.AppendPlaylistPages(&pl, doc, func(token string) (renderers.Node, error) {
+		return i.call(ctx, "browse", map[string]any{"continuation": token})
+	})
+	if err != nil {
+		return domain.Playlist{}, err
+	}
 	pl.ID = "LM"
 	if pl.Title == "" {
 		pl.Title = "Liked Music"

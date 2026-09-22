@@ -134,6 +134,12 @@ func (c *InnerTube) Playlist(ctx context.Context, id string) (domain.Playlist, e
 	if !ok {
 		return domain.Playlist{ID: id}, fmt.Errorf("catalog: playlist %s did not parse", id)
 	}
+	err = renderers.AppendPlaylistPages(&pl, doc, func(token string) (renderers.Node, error) {
+		return c.call(ctx, "browse", map[string]any{"continuation": token})
+	})
+	if err != nil {
+		return domain.Playlist{ID: id}, err
+	}
 	return pl, nil
 }
 

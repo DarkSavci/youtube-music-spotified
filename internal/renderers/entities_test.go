@@ -81,6 +81,55 @@ func TestParsePlaylistFixture(t *testing.T) {
 	}
 }
 
+// A playlist past 100 tracks arrives a page at a time; every page must be read.
+func TestAppendPlaylistPages(t *testing.T) {
+	doc := loadFixture(t, "playlist")
+	pl, ok := ParsePlaylist(doc, "VLtest", ParseContext{})
+	if !ok {
+		t.Fatal("playlist did not parse")
+	}
+	first := len(pl.Tracks)
+
+	// Shape as recorded from a 300-track playlist: the track list ends in a
+	// continuation entry, and each continuation appends to it.
+	shelf := FindAll(doc, "musicPlaylistShelfRenderer")[0]
+	entries := shelf.List("contents")
+	row := entries[0]
+	more := func(tok string) map[string]any {
+		return map[string]any{"continuationItemRenderer": map[string]any{
+			"continuationEndpoint": map[string]any{
+				"continuationCommand": map[string]any{"token": tok},
+			},
+		}}
+	}
+	shelf["contents"] = append(entries, more("page2"))
+	pages := map[string][]any{
+		"page2": {row, row, more("page3")},
+		"page3": {row},
+	}
+
+	var fetched []string
+	err := AppendPlaylistPages(&pl, doc, func(tok string) (Node, error) {
+		fetched = append(fetched, tok)
+		items, ok := pages[tok]
+		if !ok {
+			t.Fatalf("fetched %q, which is not a track page", tok)
+		}
+		return Node{"onResponseReceivedActions": []any{map[string]any{
+			"appendContinuationItemsAction": map[string]any{"continuationItems": items},
+		}}}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(fetched, ",") != "page2,page3" {
+		t.Errorf("fetched %v, want page2 then page3", fetched)
+	}
+	if got := len(pl.Tracks); got != first+3 {
+		t.Errorf("tracks = %d, want %d", got, first+3)
+	}
+}
+
 func TestParseWatchQueueFixture(t *testing.T) {
 	doc := loadFixture(t, "next")
 	tracks, lyricsID := ParseWatchQueue(doc)

@@ -243,16 +243,8 @@ func ParsePlaylist(doc Node, id string, pc ParseContext) (domain.Playlist, bool)
 		return domain.Playlist{}, false
 	}
 
-	for _, kind := range []string{NodeShelf, "musicPlaylistShelfRenderer"} {
-		for _, n := range FindAll(doc, kind) {
-			for _, c := range n.Nodes("contents") {
-				if inner := c.Child(NodeListItem); inner != nil {
-					if tr, ok := ParseTrack(inner); ok {
-						pl.Tracks = append(pl.Tracks, tr)
-					}
-				}
-			}
-		}
+	for _, n := range playlistShelves(doc) {
+		pl.Tracks = append(pl.Tracks, listTracks(n.Nodes("contents"))...)
 	}
 	if pl.TrackCount == 0 {
 		pl.TrackCount = len(pl.Tracks)
@@ -261,6 +253,93 @@ func ParsePlaylist(doc Node, id string, pc ParseContext) (domain.Playlist, bool)
 		pl.DurationMs += t.DurationMs
 	}
 	return pl, true
+}
+
+// maxPlaylistPages bounds the paging. YouTube caps a playlist at 5,000
+// tracks, which is 50 pages of 100.
+const maxPlaylistPages = 60
+
+/*
+AppendPlaylistPages pages in the rest of a playlist's tracks.
+
+A playlist browse returns only its first 100 tracks; the rest come 100 at a
+time from continuation calls, which fetch makes. first is the first page, the
+one pl was parsed from. An error from fetch is returned as is, since a
+playlist silently missing its tail looks complete when it is not.
+*/
+func AppendPlaylistPages(pl *domain.Playlist, first Node, fetch func(token string) (Node, error)) error {
+	derivedCount := pl.TrackCount == len(pl.Tracks)
+	tok := playlistContinuation(playlistShelves(first))
+	for page := 0; tok != "" && page < maxPlaylistPages; page++ {
+		doc, err := fetch(tok)
+		if err != nil {
+			return err
+		}
+		items := Find(doc, "appendContinuationItemsAction").Nodes("continuationItems")
+		tracks := listTracks(items)
+		if len(tracks) == 0 {
+			break
+		}
+		pl.Tracks = append(pl.Tracks, tracks...)
+		for _, t := range tracks {
+			pl.DurationMs += t.DurationMs
+		}
+		tok = continuationItemToken(items)
+	}
+	if derivedCount {
+		pl.TrackCount = len(pl.Tracks)
+	}
+	return nil
+}
+
+// playlistShelves are the shelves holding a playlist page's tracks.
+func playlistShelves(doc Node) []Node {
+	var out []Node
+	for _, kind := range []string{NodeShelf, "musicPlaylistShelfRenderer"} {
+		out = append(out, FindAll(doc, kind)...)
+	}
+	return out
+}
+
+// listTracks reads the tracks out of a track list's entries.
+func listTracks(entries []Node) []domain.Track {
+	var out []domain.Track
+	for _, c := range entries {
+		if inner := c.Child(NodeListItem); inner != nil {
+			if tr, ok := ParseTrack(inner); ok {
+				out = append(out, tr)
+			}
+		}
+	}
+	return out
+}
+
+/*
+playlistContinuation is the token for the tracks after a playlist's first page.
+
+It is read from the entry ending the track list, never from the page as a
+whole: the section list below carries its own continuation, which pages in
+suggestions rather than tracks.
+*/
+func playlistContinuation(shelves []Node) string {
+	for _, n := range shelves {
+		if tok := continuationItemToken(n.Nodes("contents")); tok != "" {
+			return tok
+		}
+	}
+	return ""
+}
+
+// continuationItemToken is the token of the continuation entry ending a list,
+// empty when the list is the last of it.
+func continuationItemToken(entries []Node) string {
+	for _, c := range entries {
+		cmd := c.Child("continuationItemRenderer").Child("continuationEndpoint").Child("continuationCommand")
+		if tok := cmd.Str("token"); tok != "" {
+			return tok
+		}
+	}
+	return ""
 }
 
 // pageType marking the lyrics tab of a `next` response. Stable across
