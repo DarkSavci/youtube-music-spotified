@@ -14,7 +14,8 @@
  *                transport. Controls only — anything to watch, like progress,
  *                the queue or lyrics, is the mini player's.
  *   right-click  a native menu, dark, for the things menus are for: quick
- *                transport, the mini player, showing the window, quitting.
+ *                transport, the mini player, showing the window, a waiting
+ *                update, quitting.
  *   taskbar      previous / play-pause / next on the window's thumbnail, as
  *                Spotify has.
  *
@@ -27,6 +28,7 @@
 const { app, Tray, Menu, BrowserWindow, ipcMain, nativeImage, nativeTheme, screen } = require("electron");
 const path = require("node:path");
 const miniplayer = require("./miniplayer");
+const updater = require("./updater");
 
 // Windows truncates a tray tooltip past 127 characters, mid-word.
 const TOOLTIP_MAX = 127;
@@ -134,8 +136,12 @@ function buildMenu() {
       ? { label: "Hide window", click: () => mainWindow()?.hide() }
       : { label: `Open ${app.getName()}`, click: showWindow },
     { type: "separator" },
-    { label: `Quit ${app.getName()}`, click: () => app.quit() },
   );
+  const update = updater.pending();
+  if (update) {
+    template.push({ label: `Restart to update to ${update}`, click: updater.install });
+  }
+  template.push({ label: `Quit ${app.getName()}`, click: () => app.quit() });
   return Menu.buildFromTemplate(template);
 }
 

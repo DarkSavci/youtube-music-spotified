@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron .",
     "package": "node build.js",
-    "installer": "node build.js && electron-builder --win nsis --prepackaged \"../dist-desktop/Youtube Music Spotified-win32-x64\""
+    "installer": "node build.js && electron-builder --win nsis --publish never --prepackaged \"../dist-desktop/Youtube Music Spotified-win32-x64\""
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",
@@ -45,10 +45,20 @@
       "artifactName": "Youtube-Music-Spotified-Setup-${version}.${ext}",
       "include": "branding/installer.nsh"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "DarkSavci",
+        "repo": "youtube-music-spotified"
+      }
+    ],
     "forceCodeSigning": false,
     "toolsets": {
       "nsis": "1.2.1"
     }
   },
-  "author": "DarkSavci"
+  "author": "DarkSavci",
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
 }

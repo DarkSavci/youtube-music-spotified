@@ -19,6 +19,7 @@ const fs = require("node:fs");
 const auth = require("./auth");
 const tray = require("./tray");
 const miniplayer = require("./miniplayer");
+const updater = require("./updater");
 
 const isDev = !app.isPackaged;
 const CORE_PORT = 8674;
@@ -481,6 +482,7 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     tray.create(() => mainWindow, uiSource());
     registerMediaKeys();
+    updater.start();
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
