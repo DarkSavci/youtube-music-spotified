@@ -28,6 +28,11 @@ interface Props {
    * Lists that are a whole (an album, a playlist) play as themselves.
    */
   playMode?: "list" | "radio";
+  /**
+   * Keeps music videos even with them hidden in Settings. A video in a
+   * playlist was put there on purpose, like one found under the Videos filter.
+   */
+  keepVideos?: boolean;
 }
 
 /**
@@ -46,6 +51,7 @@ export function TrackTable({
   playlistId,
   showArtwork = true,
   playMode = "list",
+  keepVideos = false,
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
   const currentId = usePlayer((s) => s.track?.id);
@@ -63,7 +69,10 @@ export function TrackTable({
    * same indices — filtering later would play a different track from the one
    * the row shows.
    */
-  const tracks = useMemo(() => filterTracks(allTracks), [filterTracks, allTracks]);
+  const tracks = useMemo(
+    () => (keepVideos ? allTracks : filterTracks(allTracks)),
+    [keepVideos, filterTracks, allTracks],
+  );
 
   const virtualizer = useVirtualizer({
     count: tracks.length,

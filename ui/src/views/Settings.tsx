@@ -161,7 +161,7 @@ export function SettingsView() {
       <Section title="Content">
         <Toggle
           label="Show music videos"
-          hint="Off by default. This is an audio-first player; videos appear in their own shelves when enabled."
+          hint="Off by default. This is an audio-first player; videos appear in their own shelves when enabled. Videos in a playlist always show."
           checked={prefs.showMusicVideos}
           onChange={(v) => prefs.set("showMusicVideos", v)}
         />

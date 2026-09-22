@@ -132,7 +132,7 @@ export function PlaylistView() {
         <EntityActions kind="playlist" id={data.id} title={data.title} tracks={tracks} />
       </div>
       {tracks.length > 0 ? (
-        <TrackTable tracks={tracks} origin={data.title} playlistId={data.id} />
+        <TrackTable tracks={tracks} origin={data.title} playlistId={data.id} keepVideos />
       ) : (
         <PageState
           title="This playlist is empty"
