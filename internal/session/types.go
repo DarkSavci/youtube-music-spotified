@@ -167,6 +167,10 @@ type LogEntry struct {
 	// Artwork is the cover's URL, for the same reason: On Repeat is built
 	// from this log and has nothing else to show.
 	Artwork string
+	// Album is what Top albums and the album lookup group by. Empty for a
+	// track that has none (a video, an upload), which those simply skip.
+	AlbumID string
+	Album   string
 
 	At         time.Time
 	PlayedMs   int64

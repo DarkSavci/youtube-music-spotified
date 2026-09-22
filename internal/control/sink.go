@@ -42,6 +42,8 @@ func (s *Sink) Record(ctx context.Context, entries []session.LogEntry) {
 			Title:      e.Title,
 			ArtistID:   e.ArtistID,
 			Artist:     e.Artist,
+			AlbumID:    e.AlbumID,
+			Album:      e.Album,
 			PlayedMs:   e.PlayedMs,
 			Completed:  e.Completed,
 			Failed:     e.Failed,

@@ -96,17 +96,31 @@ func (s *Server) handleTopArtists(w http.ResponseWriter, r *http.Request) {
 	s.write(w, http.StatusOK, out)
 }
 
+// onRepeatMinPlays is how many plays in the window put a track on repeat.
+const onRepeatMinPlays = 2
+
 func (s *Server) handleOnRepeat(w http.ResponseWriter, r *http.Request) {
 	if !s.requireControl(w) {
 		return
 	}
-	out, err := s.deps.Control.OnRepeat(r.Context(), control.DefaultUserID, limitFrom(r, 30))
+	all, err := s.deps.Control.OnRepeat(r.Context(), control.DefaultUserID, limitFrom(r, 30))
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	if out == nil {
-		out = []control.TrackStat{}
+	/*
+	 * A song heard once is not on repeat.
+	 *
+	 * The store's OnRepeat is the whole recent top list, which the On Repeat
+	 * mix wants from the very first listen. The section on the listening
+	 * page makes a claim, though, and a track played once under a heading
+	 * that says "on repeat" read as wrong data.
+	 */
+	out := []control.TrackStat{}
+	for _, t := range all {
+		if t.Plays >= onRepeatMinPlays {
+			out = append(out, t)
+		}
 	}
 	s.write(w, http.StatusOK, out)
 }
@@ -117,6 +131,64 @@ func (s *Server) handleAffinity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := s.deps.Control.Affinity(r.Context(), control.DefaultUserID, r.PathValue("id"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.write(w, http.StatusOK, out)
+}
+
+func (s *Server) handleTopAlbums(w http.ResponseWriter, r *http.Request) {
+	if !s.requireControl(w) {
+		return
+	}
+	out, err := s.deps.Control.TopAlbums(r.Context(), control.DefaultUserID, periodFrom(r), limitFrom(r, 50))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if out == nil {
+		out = []control.AlbumStat{}
+	}
+	s.write(w, http.StatusOK, out)
+}
+
+func (s *Server) handleStatsSummary(w http.ResponseWriter, r *http.Request) {
+	if !s.requireControl(w) {
+		return
+	}
+	out, err := s.deps.Control.Summary(r.Context(), control.DefaultUserID, periodFrom(r))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.write(w, http.StatusOK, out)
+}
+
+// handleStatsLookup searches the listener's own history by name.
+func (s *Server) handleStatsLookup(w http.ResponseWriter, r *http.Request) {
+	if !s.requireControl(w) {
+		return
+	}
+	out, err := s.deps.Control.Lookup(r.Context(), control.DefaultUserID, r.URL.Query().Get("q"), limitFrom(r, 8))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.write(w, http.StatusOK, out)
+}
+
+// handleStatsDetail is the listener's figures for one song, artist or album.
+func (s *Server) handleStatsDetail(w http.ResponseWriter, r *http.Request) {
+	if !s.requireControl(w) {
+		return
+	}
+	kind, id := r.URL.Query().Get("kind"), r.URL.Query().Get("id")
+	if id == "" || (kind != "track" && kind != "artist" && kind != "album") {
+		s.write(w, http.StatusBadRequest, apiError{Error: "kind must be track, artist or album, and id is required"})
+		return
+	}
+	out, err := s.deps.Control.Detail(r.Context(), control.DefaultUserID, kind, id)
 	if err != nil {
 		s.fail(w, r, err)
 		return

@@ -523,6 +523,21 @@ func firstArtistID(t *domain.Track) string {
 	return t.Artists[0].ID
 }
 
+// albumID and albumName name the album a track is from, blank when it has none.
+func albumID(t *domain.Track) string {
+	if t == nil || t.Album == nil {
+		return ""
+	}
+	return t.Album.ID
+}
+
+func albumName(t *domain.Track) string {
+	if t == nil || t.Album == nil {
+		return ""
+	}
+	return t.Album.Name
+}
+
 func firstArtistName(t *domain.Track) string {
 	if t == nil || len(t.Artists) == 0 {
 		return ""
@@ -560,6 +575,8 @@ func (c *Core) handleFailure(reason string) []LogEntry {
 		ArtistID:   firstArtistID(cur),
 		Artist:     firstArtistName(cur),
 		Artwork:    cur.Artwork.AtLeast(226).URL,
+		AlbumID:    albumID(cur),
+		Album:      albumName(cur),
 		At:         c.clk.Now(),
 		PlayedMs:   c.playedMs,
 		Failed:     true,
@@ -620,6 +637,8 @@ func (c *Core) closeOutCurrent(completed bool) []LogEntry {
 		ArtistID:  firstArtistID(cur),
 		Artist:    firstArtistName(cur),
 		Artwork:   cur.Artwork.AtLeast(226).URL,
+		AlbumID:   albumID(cur),
+		Album:     albumName(cur),
 		At:        c.clk.Now(),
 		PlayedMs:  c.playedMs,
 		Completed: completed,

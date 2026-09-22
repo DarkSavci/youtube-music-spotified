@@ -1,4 +1,5 @@
 import type { Track } from "./types";
+import { artworkAtLeast } from "./types";
 import { apiUrl } from "./base";
 
 /**
@@ -27,6 +28,8 @@ export interface PlayEvent {
   FailReason: string;
   Origin: string;
   PlayedAt: string;
+  /** Cover URL. Optional so events queued by older versions still send. */
+  Artwork?: string;
 }
 
 const STORAGE_KEY = "spotifier.playlog.pending";
@@ -78,6 +81,9 @@ export function recordPlay(
     ArtistID: artist?.id ?? "",
     Album: track.album?.name ?? "",
     AlbumID: track.album?.id ?? "",
+    // The cover travels with the play, as it does from the core, so what is
+    // built from the log later has a picture without a lookup.
+    Artwork: artworkAtLeast(track.artwork, 226) ?? "",
     PlayedMs: Math.max(0, Math.round(opts.playedMs)),
     Completed: Boolean(opts.completed),
     Failed: Boolean(opts.failed),

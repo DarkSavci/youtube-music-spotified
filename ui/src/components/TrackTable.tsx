@@ -83,12 +83,13 @@ export function TrackTable({
    */
   const showAlbum = variant !== "album" && showArtwork && tracks.some((t) => t.album?.name);
   const lastColumn = tracks.some((t) => t.durationMs > 0) ? "Time" : "Plays";
+  const showListened = variant !== "album" && tracks.some((t) => t.listenedMs !== undefined);
   const columns =
     variant === "album"
       ? "32px 1fr 96px 56px"
-      : showAlbum
-        ? "32px minmax(0,3fr) minmax(0,2fr) 96px 56px"
-        : "32px minmax(0,3fr) 96px 56px";
+      : ["32px", "minmax(0,3fr)", showAlbum ? "minmax(0,2fr)" : "", showListened ? "96px" : "", "96px", "56px"]
+          .filter(Boolean)
+          .join(" ");
 
   if (tracks.length === 0) return null;
 
@@ -98,6 +99,11 @@ export function TrackTable({
         <span role="columnheader">#</span>
         <span role="columnheader">Title</span>
         {showAlbum ? <span role="columnheader">Album</span> : null}
+        {showListened ? (
+          <span role="columnheader" className="trackrow__duration">
+            Listened
+          </span>
+        ) : null}
         <span role="columnheader" className="trackrow__duration">
           {lastColumn}
         </span>
@@ -129,6 +135,7 @@ export function TrackTable({
                   variant={variant}
                   showArtwork={showArtwork}
                   showAlbum={showAlbum}
+                  showListened={showListened}
                   onPlay={() =>
                     playMode === "radio"
                       ? transport.playRadio(track)
@@ -157,6 +164,7 @@ function TrackRow({
   variant,
   showArtwork,
   showAlbum,
+  showListened,
   onPlay,
   onContextMenu,
   liked,
@@ -169,6 +177,7 @@ function TrackRow({
   variant: "playlist" | "album";
   showArtwork: boolean;
   showAlbum: boolean;
+  showListened: boolean;
   onPlay: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   liked: boolean;
@@ -242,6 +251,10 @@ function TrackRow({
         </span>
       ) : null}
 
+      {showListened ? (
+        <span className="trackrow__duration">{formatListened(track.listenedMs ?? 0)}</span>
+      ) : null}
+
       <span className="trackrow__duration">
         {track.durationMs > 0
           ? formatDuration(track.durationMs)
@@ -274,4 +287,14 @@ function TrackRow({
       </span>
     </div>
   );
+}
+
+/** Listening time as minutes, or hours and minutes once it runs past an hour. */
+function formatListened(ms: number): string {
+  const minutes = Math.round(ms / 60000);
+  if (ms > 0 && minutes === 0) return "<1 min";
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h} h ${m} min` : `${h} h`;
 }

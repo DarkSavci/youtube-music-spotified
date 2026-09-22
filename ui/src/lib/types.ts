@@ -18,6 +18,9 @@ export interface Track {
   isVideo: boolean;
   playable: boolean;
   playCount?: string;
+  /** Time spent listening to this track, from the local play log. Only the
+   *  listening page sets it; a table shows the column when a row has it. */
+  listenedMs?: number;
   playlistItemId?: string;
   addedAt?: string;
 }

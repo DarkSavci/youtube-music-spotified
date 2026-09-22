@@ -52,6 +52,9 @@ type ArtistStat struct {
 	Tracks   int       `json:"distinctTracks"`
 	TotalMs  int64     `json:"totalMs"`
 	LastAt   time.Time `json:"lastPlayedAt"`
+	// Artwork is a cover from one of their tracks: something to show while
+	// (or instead of, when it cannot be had) the artist's own photo.
+	Artwork string `json:"artwork,omitempty"`
 }
 
 // ArtistAffinity is what an artist page shows in place of monthly listeners
@@ -109,7 +112,7 @@ func (s *Store) TopArtists(ctx context.Context, userID int64, p Period, limit in
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT COALESCE(NULLIF(artist_id, ''), artist) AS aid,
 		       MAX(artist), COUNT(*), COUNT(DISTINCT track_id),
-		       SUM(played_ms), MAX(played_at)
+		       SUM(played_ms), MAX(played_at), MAX(artwork)
 		FROM plays
 		WHERE user_id = ? AND played_at BETWEEN ? AND ? AND `+countedPlays+`
 		  AND artist <> ''
@@ -126,7 +129,7 @@ func (s *Store) TopArtists(ctx context.Context, userID int64, p Period, limit in
 		var a ArtistStat
 		var last sqlTime
 		if err := rows.Scan(&a.ArtistID, &a.Artist, &a.Plays, &a.Tracks,
-			&a.TotalMs, &last); err != nil {
+			&a.TotalMs, &last, &a.Artwork); err != nil {
 			return nil, err
 		}
 		a.LastAt = last.Time
