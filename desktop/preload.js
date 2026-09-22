@@ -96,5 +96,15 @@ contextBridge.exposeInMainWorld("spotifier", {
     status: () => ipcRenderer.invoke("auth:status"),
   },
 
+  /**
+   * The app's log file. The page can add lines and ask for the bundle; it
+   * cannot read the file back or choose where anything is written.
+   */
+  logs: {
+    write: (entries) => ipcRenderer.send("logs:write", entries),
+    exportBundle: (page) => ipcRenderer.invoke("logs:export", page),
+    openFolder: () => ipcRenderer.send("logs:open-folder"),
+  },
+
   isDesktop: true,
 });

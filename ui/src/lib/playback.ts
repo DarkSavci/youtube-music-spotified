@@ -170,6 +170,16 @@ function deriveTarget(): Target {
 }
 
 function onEngineEvent(e: EngineEvent) {
+  // Everything but the once-a-second position reports is worth a line in the
+  // log: it is the engine's side of any "it skipped" or "it never started".
+  if (e.kind !== "position") {
+    const track = usePlayer.getState().track;
+    const detail = "reason" in e && e.reason ? ` (${e.reason})` : "";
+    const line = `[engine] ${e.kind}${detail} epoch=${e.epoch} track=${track?.id ?? "-"} "${track?.title ?? ""}"`;
+    if (e.kind === "failed" || e.kind === "blocked") console.warn(line);
+    else console.info(line);
+  }
+
   if (serverAuthoritative && session) {
     // The core owns the queue, the failure ladder and the play log. Forward
     // the report and let the projection that follows update the UI, rather

@@ -20,6 +20,7 @@ const auth = require("./auth");
 const tray = require("./tray");
 const miniplayer = require("./miniplayer");
 const updater = require("./updater");
+const logs = require("./logs");
 
 const isDev = !app.isPackaged;
 const CORE_PORT = 8674;
@@ -184,6 +185,9 @@ const DATA_DIR_NAME = "Spotifier";
 // has then. Setting the path later left a stray folder behind on every launch.
 app.setPath("userData", path.join(app.getPath("appData"), DATA_DIR_NAME));
 
+// The log opens next, before anything below has a chance to say something.
+logs.init(dataDir());
+
 /*
  * Keep playback running at full speed in the background.
  *
@@ -221,8 +225,7 @@ function startCore() {
 
   const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
 
-  child.stdout.on("data", (b) => process.stdout.write(`[core] ${b}`));
-  child.stderr.on("data", (b) => process.stderr.write(`[core] ${b}`));
+  logs.attachCore(child);
 
   child.on("exit", (code, signal) => {
     if (core === child) core = null;
@@ -421,6 +424,17 @@ function createWindow() {
   // Closing hides to the tray rather than quitting, while that setting is on.
   tray.attach(mainWindow);
 
+  // A renderer that dies or hangs takes the player with it, and leaves no
+  // trace of its own; the shell is the only one left to write it down.
+  mainWindow.webContents.on("render-process-gone", (_e, details) => {
+    console.error(`[window] renderer gone: ${details.reason} (exit ${details.exitCode})`);
+  });
+  mainWindow.webContents.on("unresponsive", () => console.warn("[window] renderer unresponsive"));
+  mainWindow.webContents.on("responsive", () => console.log("[window] renderer responsive again"));
+  mainWindow.webContents.on("did-fail-load", (_e, code, description, url) => {
+    console.error(`[window] failed to load ${url}: ${description} (${code})`);
+  });
+
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -533,5 +547,13 @@ ipcMain.handle("window:is-maximized", (e) =>
   BrowserWindow.fromWebContents(e.sender)?.isMaximized() ?? false,
 );
 ipcMain.handle("data-dir", () => dataDir());
+
+/* ---------- diagnostics ---------- */
+
+ipcMain.on("logs:write", (_e, entries) => logs.fromPage(entries));
+ipcMain.handle("logs:export", (_e, page) =>
+  logs.exportBundle({ dataDir: dataDir(), corePort: CORE_PORT, ytdlp: ytdlpPath(), page }),
+);
+ipcMain.on("logs:open-folder", () => logs.openFolder());
 // From the mini player and the tray: bring the full window back.
 ipcMain.on("window:show-main", () => tray.showWindow());

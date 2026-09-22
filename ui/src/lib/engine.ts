@@ -302,6 +302,9 @@ export class NativeEngine implements Engine {
     if (!id || el !== this.deck || currentVideoId(el) !== id || this.recoveries >= 2) return false;
     this.recoveries += 1;
     const at = this.lastGoodAt;
+    console.info(
+      `[engine] retrying ${id} at ${Math.round(at)}s (attempt ${this.recoveries}, media error ${el.error?.code ?? "none"})`,
+    );
     el.src = `${this.srcFor(id)}?retry=${this.recoveries}`;
     el.addEventListener(
       "loadedmetadata",

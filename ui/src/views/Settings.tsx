@@ -7,6 +7,7 @@ import { engineCapabilities, engineName, transport } from "../lib/playback";
 import { usePlayer } from "../lib/player";
 import { desktop } from "../lib/desktop";
 import { pendingCount } from "../lib/playlog";
+import { diagnostics } from "../lib/diagnostics";
 import { Equaliser } from "../components/Equaliser";
 
 /**
@@ -260,6 +261,7 @@ export function SettingsView() {
       </Section>
 
       <Section title="Diagnostics">
+        {diagnostics.available && <ProblemReport />}
         <Row label="Playback engine" hint="Which engine is currently producing sound.">
           <span className="settings__value">
             {engineName() === "native"
@@ -279,6 +281,42 @@ export function SettingsView() {
         </Row>
       </Section>
     </div>
+  );
+}
+
+/**
+ * The one thing to do when something breaks: save the log and send it.
+ *
+ * The hint says what is in the file and what is not, because "send us your
+ * logs" is only a reasonable ask when people can see it is safe to.
+ */
+function ProblemReport() {
+  const [status, setStatus] = useState<"idle" | "working" | { path: string } | { error: string }>("idle");
+  const hint =
+    typeof status === "object"
+      ? "path" in status
+        ? `Saved to ${status.path}. Send that file along with what happened and roughly when.`
+        : `Could not create the report: ${status.error}`
+      : "Saves a zip to your Downloads folder with the app's log and a short system summary, for sending with a bug report. It lists the songs that played, but never your cookies, sign-in or email address.";
+  return (
+    <Row label="Problem report" hint={hint}>
+      <div className="settings__inline">
+        <button
+          className="chip"
+          disabled={status === "working"}
+          onClick={async () => {
+            setStatus("working");
+            const res = await diagnostics.exportBundle();
+            setStatus(res.ok && res.path ? { path: res.path } : { error: res.reason ?? "unknown error" });
+          }}
+        >
+          {status === "working" ? "Saving…" : "Save report"}
+        </button>
+        <button className="chip" onClick={() => diagnostics.openFolder()}>
+          Open log folder
+        </button>
+      </div>
+    </Row>
   );
 }
 

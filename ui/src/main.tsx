@@ -8,6 +8,7 @@ import { HashRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { installFlushHooks } from "./lib/playlog";
+import { installLogForwarding } from "./lib/diagnostics";
 import "./styles/global.css";
 import "./styles/shell.css";
 import "./styles/content.css";
@@ -26,6 +27,9 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// First, so whatever goes wrong while the app starts reaches the log file.
+installLogForwarding();
 
 // Queued listening events are flushed when the window is hidden or closed,
 // so history is not lost on exit.

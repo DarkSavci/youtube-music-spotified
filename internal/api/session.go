@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"spotifier/internal/domain"
 	"spotifier/internal/session"
 )
 
@@ -74,6 +75,7 @@ func (s *Server) handleSessionCommand(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	s.logCommand(body.Command, reject)
 	s.write(w, http.StatusOK, map[string]any{
 		"rejected":   string(reject),
 		"projection": s.deps.Session.Projection(),
@@ -94,8 +96,77 @@ func (s *Server) handleSessionEngineEvent(w http.ResponseWriter, r *http.Request
 		s.write(w, http.StatusBadRequest, apiError{Error: "invalid body"})
 		return
 	}
+	if body.Event.Kind == session.EvPosition {
+		s.deps.Session.EngineEvent(r.Context(), body.DeviceID, body.Event)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	before := s.deps.Session.Projection().State
 	s.deps.Session.EngineEvent(r.Context(), body.DeviceID, body.Event)
+	s.logEngineEvent(body.Event, before, s.deps.Session.Projection().State)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+/*
+logCommand records what the listener asked for.
+
+The log a user sends is read backwards from a symptom — "it played the wrong
+song", "it stopped" — and the first question is always what was pressed. The
+frequent, uninteresting commands (volume, seek) stay at debug.
+*/
+func (s *Server) logCommand(cmd session.Command, reject session.Reject) {
+	attrs := []any{"kind", cmd.Kind}
+	if reject != session.RejectNone {
+		attrs = append(attrs, "rejected", reject)
+	}
+	switch cmd.Kind {
+	case session.CmdPlay:
+		attrs = append(attrs, "tracks", len(cmd.Tracks), "start", cmd.StartIndex, "origin", cmd.Origin)
+		if cmd.StartIndex >= 0 && cmd.StartIndex < len(cmd.Tracks) {
+			t := cmd.Tracks[cmd.StartIndex]
+			attrs = append(attrs, "video", t.ID, "title", t.Title)
+		}
+	case session.CmdSeek:
+		s.deps.Log.Debug("session command", append(attrs, "ms", cmd.PositionMs)...)
+		return
+	case session.CmdSetVolume:
+		s.deps.Log.Debug("session command", append(attrs, "volume", cmd.Volume)...)
+		return
+	}
+	s.deps.Log.Info("session command", attrs...)
+}
+
+/*
+logEngineEvent records what a device's player reported, and what the core did
+about it.
+
+A failure is logged with the track it was about, and the outcome is spelled
+out when the core gave up: three failures in a row stop playback, and without
+this line a log shows three errors and then silence.
+*/
+func (s *Server) logEngineEvent(ev session.EngineEvent, before, after domain.Session) {
+	attrs := []any{"kind", ev.Kind, "epoch", ev.Epoch}
+	if ev.Reason != "" {
+		attrs = append(attrs, "reason", ev.Reason)
+	}
+	if t := before.Queue.Current(); t != nil {
+		attrs = append(attrs, "index", before.Queue.Index, "video", t.ID, "title", t.Title)
+	}
+	if ev.Epoch != before.Epoch {
+		// Reported against a track already replaced; the core ignores it.
+		attrs = append(attrs, "stale", true)
+	}
+	switch ev.Kind {
+	case session.EvFailed:
+		s.deps.Log.Warn("track failed", attrs...)
+		if after.State == domain.StatePaused && before.State != domain.StatePaused {
+			s.deps.Log.Warn("playback stopped after a failure", "failedInQueue", len(after.Degraded))
+		}
+	case session.EvBlocked, session.EvStalled:
+		s.deps.Log.Warn("playback "+string(ev.Kind), attrs...)
+	default:
+		s.deps.Log.Info("engine "+string(ev.Kind), attrs...)
+	}
 }
 
 // handleSessionCapabilities records what a Device's engine can do, which may
