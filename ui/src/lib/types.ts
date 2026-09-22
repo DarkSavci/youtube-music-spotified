@@ -94,11 +94,39 @@ export interface Health {
   unknownNodes: { surface: string; type: string; count: number }[];
 }
 
-/** Smallest artwork at least `min` wide, else the largest available. */
+/**
+ * Smallest artwork at least `min` wide.
+ *
+ * When none is that big, the largest is asked for at the size wanted. A song
+ * in the queue carries covers of only 60 and 120 pixels, which the full-screen
+ * player then stretched across half the screen. Google's image servers resize
+ * on request, by the size in the URL's suffix ("=w120-h120-l90-rj",
+ * "=s88-c-k"), up to the original (1440 pixels for the covers measured), so
+ * the same image is simply fetched larger. Other URLs are returned as they
+ * are; the size wanted is scaled by the screen's pixel density, as an <img>
+ * is drawn in device pixels.
+ */
 export function artworkAtLeast(set: Artwork[] | undefined, min: number): string | undefined {
   if (!set || set.length === 0) return undefined;
   for (const a of set) if (a.width >= min) return a.url;
-  return set[set.length - 1]?.url;
+  const largest = set[set.length - 1];
+  if (!largest) return undefined;
+  const dpr = typeof window !== "undefined" ? Math.min(2, window.devicePixelRatio || 1) : 1;
+  return resizedArtwork(largest.url, Math.min(2048, Math.ceil(min * dpr))) ?? largest.url;
+}
+
+const RESIZABLE_HOST = /^https:\/\/(?:lh\d+\.googleusercontent\.com|yt\d*\.googleusercontent\.com|yt\d*\.ggpht\.com)\//;
+
+/** The same Google-hosted image at `size` pixels, or null for any other URL. */
+export function resizedArtwork(url: string, size: number): string | null {
+  if (!RESIZABLE_HOST.test(url)) return null;
+  const eq = url.lastIndexOf("=");
+  if (eq < 0) return null;
+  const suffix = url.slice(eq + 1);
+  let next = suffix.replace(/\bw\d+-h\d+\b/, `w${size}-h${size}`);
+  if (next === suffix) next = suffix.replace(/^s\d+\b/, `s${size}`);
+  if (next === suffix) return null;
+  return url.slice(0, eq + 1) + next;
 }
 
 /** "3:45" / "1:07:10" from milliseconds. */
