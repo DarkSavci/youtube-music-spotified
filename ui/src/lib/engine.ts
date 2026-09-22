@@ -707,7 +707,12 @@ export class NativeEngine implements Engine {
      * a gap. Spotify's crossfade is heard as one song flowing into the next,
      * and this is what that takes.
      */
-    const sound = t.videoId ? this.edges.get(t.videoId) : undefined;
+    const measured = t.videoId ? this.edges.get(t.videoId) : undefined;
+    // A measurement of part of the file is not a measurement of this track:
+    // it once ended a nine-minute song at 0:30. Trusted only when it is as
+    // long as what is playing.
+    const sound =
+      measured && Math.abs(measured.durationS - playing.duration) <= 2 ? measured : undefined;
     const end = sound ? Math.min(sound.endS, playing.duration) : playing.duration;
     const remaining = (end - playing.currentTime) * 1000;
     if (!Number.isFinite(remaining) || remaining > ms) return;

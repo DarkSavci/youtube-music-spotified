@@ -52,6 +52,17 @@ async function measure(videoId: string, preload: boolean): Promise<Edges | null>
   const res = await fetch(apiUrl(`/v1/stream/${encodeURIComponent(videoId)}${preload ? "?preload=1" : ""}`));
   if (!res.ok) return null;
   const bytes = await res.arrayBuffer();
+  /*
+   * Only the whole file will do.
+   *
+   * A track still downloading can be answered from upstream instead, in the
+   * one-megabyte windows upstream serves: about half a minute of audio. That
+   * decodes cleanly, and measured as the whole track it put the "end" of a
+   * nine-minute song at 0:30, so the crossfade skipped nearly all of it. A
+   * partial answer is no answer; the caller asks again once the file is in.
+   */
+  const total = Number(/\/(\d+)\s*$/.exec(res.headers.get("Content-Range") ?? "")?.[1] ?? NaN);
+  if (Number.isFinite(total) && bytes.byteLength < total) return null;
   const ctx = new OfflineAudioContext(1, 1, RATE);
   const audio = await ctx.decodeAudioData(bytes);
   return edgesOf(audio);
