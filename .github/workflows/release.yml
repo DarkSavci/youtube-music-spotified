@@ -16,6 +16,10 @@
 
 name: Release
 
+# The run is named for the version it is releasing, so the Actions list reads
+# as a release history rather than a column of identical "Release" rows.
+run-name: Release ${{ inputs.version }}
+
 on:
   workflow_dispatch:
     inputs:
