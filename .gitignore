@@ -64,3 +64,4 @@ Thumbs.db
 *.swp
 /dist-installer/
 /desktop/vendor/
+*.tsbuildinfo
