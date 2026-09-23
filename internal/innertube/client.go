@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -114,16 +115,39 @@ response hands out pre-signed URLs on s.youtube.com and the client pings them
 directly. They carry their own parameters and need only the session cookies,
 so this is deliberately thin — no JSON body, no client context, no parsing.
 
+The one thing added is the client's identity. The signed URLs do not say which
+player they were issued to, and a ping that does not name one is attributed to
+plain YouTube — so the play lands in YouTube's watch history rather than
+YouTube Music's. YouTube Music's own player sends c and cver, and so does this.
+
 Returns the status so the caller can tell a refusal from a network fault; the
 body is discarded because these endpoints answer with nothing worth reading.
 */
 func (c *Client) GetSigned(ctx context.Context, rawURL string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return 0, err
+	}
+	q := u.Query()
+	q.Set("c", ClientName)
+	// A missing version degrades to an unversioned ping rather than none.
+	if cfg, err := c.config(ctx); err == nil && cfg.ClientVersion != "" {
+		q.Set("cver", cfg.ClientVersion)
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return 0, err
 	}
 	req.Header.Set("Cookie", c.creds.cookie())
-	req.Header.Set("User-Agent", defaultUserAgent)
+	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("Origin", Origin)
+	req.Header.Set("Referer", Origin+"/")
+	if auth := c.creds.authorization(Origin); auth != "" {
+		req.Header.Set("Authorization", auth)
+		req.Header.Set("X-Origin", Origin)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return 0, err
