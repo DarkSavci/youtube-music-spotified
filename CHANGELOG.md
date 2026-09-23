@@ -2,6 +2,13 @@
 
 Every release of Youtube Music Spotified, newest first.
 
+## 0.1.7 — 2026-09-23
+
+### Fixed
+
+- Report plays to YouTube Music history instead of YouTube
+
+
 ## 0.1.6 — 2026-09-22
 
 ### New
