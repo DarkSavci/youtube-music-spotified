@@ -111,5 +111,6 @@ contextBridge.exposeInMainWorld("spotifier", {
     openFolder: () => ipcRenderer.send("logs:open-folder"),
   },
 
+  platform: process.platform,
   isDesktop: true,
 });

@@ -141,8 +141,8 @@ export function SettingsView() {
 
         {desktop.available && (
           <Toggle
-            label="Close to tray"
-            hint="The close button hides the window and the music keeps playing. Open it again, or quit, from the icon in the notification area."
+            label={desktop.isMac ? "Close to menu bar" : "Close to tray"}
+            hint={desktop.isMac ? "Keep playing when the window closes. Reopen from the Dock or menu bar; use Quit to exit. When off, closing the window quits the app." : "The close button hides the window and the music keeps playing. Open it again, or quit, from the icon in the notification area."}
             checked={prefs.closeToTray}
             onChange={(v) => prefs.set("closeToTray", v)}
           />
@@ -316,7 +316,9 @@ function AppVersion() {
             : u.status === "error"
               ? `Could not check for updates: ${u.error}`
               : u.status === "unavailable"
-                ? "Updates are not available in a development build."
+                ? desktop.isMac
+                  ? "This Mac build is updated manually. Pull the latest source and rebuild the app; use --refresh-tools to refresh playback tools."
+                  : "Updates are not available in a development build."
                 : "Updates download in the background and install when you quit.";
 
   return (

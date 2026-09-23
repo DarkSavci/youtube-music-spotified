@@ -7,7 +7,8 @@
   "scripts": {
     "start": "electron .",
     "package": "node build.js",
-    "installer": "node build.js && electron-builder --win nsis --publish never --prepackaged \"../dist-desktop/Youtube Music Spotified-win32-x64\""
+    "installer": "node build.js && electron-builder --win nsis --publish never --prepackaged \"../dist-desktop/Youtube Music Spotified-win32-x64\"",
+    "test": "node --test test/*.test.js"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",
@@ -60,5 +61,8 @@
   "author": "DarkSavci",
   "dependencies": {
     "electron-updater": "^6.8.9"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

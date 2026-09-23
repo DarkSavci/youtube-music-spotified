@@ -35,7 +35,9 @@ export const useSignIn = create<SignInState>((set, get) => ({
               ? "The browser closed before sign-in finished."
               : result.reason === "closed"
                 ? null
-                : "Sign-in did not complete. Try again.",
+                : result.reason === "browser-not-found"
+                  ? "Install Chrome, Edge, Brave, or Chromium in Applications to sign in."
+                  : "Sign-in did not complete. Try again.",
         });
       }
     } finally {

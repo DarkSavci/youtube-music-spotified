@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"spotifier/internal/audiocache"
 	"strings"
+	"syscall"
 	"time"
 
 	"spotifier/internal/account"
@@ -216,7 +217,7 @@ func main() {
 	}
 
 	// Shut down cleanly so the desktop shell never leaves an orphaned sidecar.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	go func() {

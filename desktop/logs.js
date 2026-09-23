@@ -318,7 +318,9 @@ async function exportBundle(opts) {
 
     const out = path.join(app.getPath("downloads"), `ytms-diagnostics-${stampForFile()}.zip`);
     // Windows ships bsdtar, which writes a zip when asked to (-a, by extension).
-    const tar = path.join(process.env.SystemRoot || "C:/Windows", "System32", "tar.exe");
+    const tar = process.platform === "darwin"
+      ? "/usr/bin/tar"
+      : path.join(process.env.SystemRoot || "C:/Windows", "System32", "tar.exe");
     await new Promise((resolve, reject) => {
       const child = spawn(tar, ["-a", "-c", "-f", out, "-C", staging, "."], { windowsHide: true });
       child.on("error", reject);
