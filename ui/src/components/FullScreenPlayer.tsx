@@ -1,3 +1,4 @@
+import { EndTime } from "./EndTime";
 import { VideoSurface, VideoSwitch, VideoNotice } from "./VideoPlayer";
 import { useVideo } from "../lib/video";
 import { useEffect, useRef, useState } from "react";
@@ -103,7 +104,7 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
               requestAnimationFrame(() => setScrubbing(null));
             }}
           />
-          <span className="fsp__time">{formatDuration(duration)}</span>
+          <EndTime className="fsp__time" duration={duration} position={shown} />
         </div>
 
         <div className="fsp__controls">

@@ -102,6 +102,7 @@ export interface Settings {
    * YouTube Music alone.
    */
   timedLyrics: boolean;
+  remainingTime: boolean;
 
   /**
    * Equaliser gains in decibels, one per band in `EQ_BANDS`.
@@ -156,6 +157,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoplay: true,
   showQualityBadge: true,
   timedLyrics: true,
+  remainingTime: false,
   eq: [0, 0, 0, 0, 0],
 };
 

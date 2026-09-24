@@ -1,3 +1,4 @@
+import { EndTime } from "./EndTime";
 import { VideoSwitch } from "./VideoPlayer";
 import { useEffect, useRef, useState } from "react";
 import { AlbumLink, ArtistLinks } from "./EntityLinks";
@@ -185,7 +186,7 @@ export function NowPlayingBar({
               requestAnimationFrame(() => setScrubbing(null));
             }}
           />
-          <span className="bar__time">{formatDuration(duration)}</span>
+          <EndTime className="bar__time" duration={duration} position={shown} />
         </div>
       </div>
 

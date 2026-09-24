@@ -62,6 +62,7 @@ export function App() {
   const location = useLocation();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [libraryExpanded, setLibraryExpanded] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
   // One side panel at a time: they occupy the same column, and showing both
   // would leave nothing for the content.
@@ -123,7 +124,7 @@ export function App() {
   return (
     <PromptProvider>
     <MenuProvider>
-    <div className="app-shell" data-platform={window.spotifier?.platform} data-nowplaying={queueOpen || lyricsOpen || undefined}>
+    <div className="app-shell" data-platform={window.spotifier?.platform} data-library-expanded={libraryExpanded || undefined} data-nowplaying={queueOpen || lyricsOpen || undefined}>
       <SkipLink />
       <Announcer />
       {/* One listener for every icon-only control in the app. */}
@@ -146,10 +147,10 @@ export function App() {
         onToggleFullScreen={() => setFullScreen((f) => !f)}
       />
       <PlaybackNotice />
-      <LibrarySidebar />
+      <TopBar scrollRef={scrollRef} onNavigate={() => setLibraryExpanded(false)} />
+      <LibrarySidebar expanded={libraryExpanded} onExpand={() => setLibraryExpanded(v => !v)} onNavigate={() => setLibraryExpanded(false)} />
 
       <main className="main panel">
-        <TopBar scrollRef={scrollRef} />
         <VideoNotice />
         {videoEnabled && !fullScreen ? <VideoSurface className="main-video" onExpand={() => setFullScreen(true)} /> : null}
         <div className="main__scroll scroll" ref={scrollRef}>

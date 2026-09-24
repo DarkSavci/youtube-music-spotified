@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { signInLabel, useSignIn } from "../lib/signin";
-import { IconChevronLeft, IconChevronRight, IconSearch, IconSettings } from "./Icon";
+import { IconHome, IconChevronLeft, IconChevronRight, IconSearch, IconSettings } from "./Icon";
 import { useTogether } from "../lib/together";
 import { WhatsNew } from "./WhatsNew";
 import { AccountMenu } from "./AccountMenu";
@@ -15,10 +15,12 @@ import { AccountMenu } from "./AccountMenu";
  */
 export function TopBar({
   scrollRef,
+  onNavigate,
   query,
   onQueryChange,
 }: {
   scrollRef: RefObject<HTMLElement>;
+  onNavigate?: () => void;
   query?: string;
   onQueryChange?: (value: string) => void;
 }) {
@@ -79,7 +81,7 @@ export function TopBar({
   });
 
   return (
-    <header className="topbar" data-scrolled={scrolled || undefined}>
+    <header onClick={onNavigate} className="topbar" data-scrolled={scrolled || undefined}>
       <div className="topbar__nav">
         <button className="iconbtn iconbtn--round" aria-label="Go back" onClick={() => navigate(-1)}>
           <IconChevronLeft size={20} />
@@ -93,8 +95,9 @@ export function TopBar({
         </button>
       </div>
 
-      <label className="searchfield">
-        <IconSearch size={18} />
+      <button className="iconbtn topbar__home" aria-label="Home" title="Home" onClick={() => navigate("/")}><IconHome size={24} filled={location.pathname === "/"} /></button>
+      <div className="searchfield">
+        <button className="iconbtn" aria-label="Search" title="Search" onClick={() => { navigate("/search"); inputRef.current?.focus(); }}><IconSearch size={20} /></button>
         <span className="sr-only">Search</span>
         <input
           ref={inputRef}
@@ -115,7 +118,7 @@ export function TopBar({
             }
           }}
         />
-      </label>
+      </div>
 
       <div className="topbar__spacer" />
       <WhatsNew />

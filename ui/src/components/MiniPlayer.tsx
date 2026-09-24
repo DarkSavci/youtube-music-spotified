@@ -1,3 +1,4 @@
+import { EndTime } from "./EndTime";
 import { VideoSurface, VideoNotice } from "./VideoPlayer";
 import { useVideo, setVideoEnabled } from "../lib/video";
 import { useContext, useEffect, useState, type CSSProperties, type ReactNode } from "react";
@@ -352,7 +353,7 @@ function Progress() {
           frames.requestAnimationFrame(() => setScrub(null));
         }}
       />
-      <span className="mini__time">{formatDuration(duration)}</span>
+      <EndTime className="mini__time" duration={duration} position={shown} />
     </div>
   );
 }

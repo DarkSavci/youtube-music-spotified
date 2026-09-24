@@ -1,3 +1,4 @@
+import { IconChevronRight, IconPlus, IconQueue, IconPlay, IconShare, IconHeart, IconLibrary, IconFolder, IconDelete, IconArtist, IconAlbum, IconRadio, IconPin } from "./Icon";
 import {
   createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState,
 } from "react";
@@ -17,7 +18,9 @@ import {
 
 export interface MenuItem {
   label: string;
-  onSelect: () => void;
+  onSelect?: () => void;
+  children?: MenuItem[];
+  icon?: React.ReactNode;
   /** Draws a rule above this item, for grouping unlike actions. */
   separated?: boolean;
   disabled?: boolean;
@@ -57,109 +60,87 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+function itemIcon(item: MenuItem) {
+  if (item.icon) return item.icon;
+  const label = item.label.toLowerCase();
+  const Icon = label.includes("delete") || label.startsWith("remove") ? IconDelete
+    : label.includes("radio") ? IconRadio : label.includes("album") ? IconAlbum
+    : label.includes("folder") || label.startsWith("move to") ? IconFolder
+    : label.includes("queue") ? IconQueue : label.startsWith("play") ? IconPlay
+    : label.includes("share") || label.includes("copy") ? IconShare
+    : label.includes("pin") ? IconPin : label.includes("save") || label.includes("liked") ? IconHeart
+    : label.startsWith("go to") ? IconArtist : label.includes("playlist") || label.startsWith("create") ? IconPlus : IconLibrary;
+  return <Icon size={18} />;
+}
+
 function Menu({ state, onClose }: { state: MenuState; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x: state.x, y: state.y });
-  const [active, setActive] = useState(0);
+  useEffect(() => {
+    const doc = ref.current?.ownerDocument ?? document;
+    const view = doc.defaultView ?? window;
+    const outside = (event: Event) => { if (!ref.current?.contains(event.target as Node)) onClose(); };
+    const escape = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented) onClose(); };
+    view.addEventListener("keydown", escape);
+    doc.addEventListener("mousedown", outside);
+    view.addEventListener("scroll", outside, true);
+    view.addEventListener("resize", onClose);
+    return () => { view.removeEventListener("keydown", escape); doc.removeEventListener("mousedown", outside); view.removeEventListener("scroll", outside, true); view.removeEventListener("resize", onClose); };
+  }, [onClose]);
+  return <div ref={ref}><MenuPanel items={state.items} x={state.x} y={state.y} onClose={onClose} /></div>;
+}
 
-  /*
-   * Keep the menu on screen.
-   *
-   * Measured after mount rather than estimated, because the height depends on
-   * how many items the caller passed. A menu opened near the bottom edge
-   * otherwise runs off it, which is where right-clicks in a long list land.
-   */
+function MenuPanel({ items, x, y, onClose, onBack, anchor }: {
+  items: MenuItem[]; x: number; y: number; onClose: () => void; onBack?: () => void; anchor?: DOMRect;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+  const [active, setActive] = useState(0);
+  const [sub, setSub] = useState<{ index: number; rect: DOMRect } | null>(null);
+  const [pos, setPos] = useState({ x, y });
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const { width, height } = el.getBoundingClientRect();
-    const pad = 8;
-    // The window the menu is actually in: the mini player draws into its
-    // own, from this one's React tree.
     const view = el.ownerDocument.defaultView ?? window;
-    setPos({
-      x: Math.min(state.x, view.innerWidth - width - pad),
-      y: Math.min(state.y, view.innerHeight - height - pad),
-    });
-  }, [state]);
-
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-        return;
-      }
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    const box = el.getBoundingClientRect();
+    const left = anchor && x + box.width > view.innerWidth - 8 ? anchor.left - box.width : x;
+    setPos({ x: Math.max(8, Math.min(left, view.innerWidth - box.width - 8)), y: Math.max(8, Math.min(y, view.innerHeight - box.height - 8)) });
+    buttons.current.find(b => b && !b.disabled)?.focus({ preventScroll: true });
+  }, [x, y, anchor]);
+  const openSub = (i: number) => {
+    const button = buttons.current[i];
+    if (items[i]?.children?.length && button) setSub({ index: i, rect: button.getBoundingClientRect() });
+  };
+  const choose = (i: number) => {
+    const item = items[i];
+    if (!item || item.disabled) return;
+    if (item.children) openSub(i);
+    else { item.onSelect?.(); onClose(); }
+  };
+  return <div ref={ref} className="ctxmenu" role="menu" style={{ left: pos.x, top: pos.y }} onContextMenu={e => e.preventDefault()}
+    onKeyDown={e => {
+      e.stopPropagation();
+      if (e.key === "Escape" || e.key === "ArrowLeft") { e.preventDefault(); (onBack ?? onClose)(); }
+      else if (e.key === "Tab") onClose();
+      else if (e.key === "ArrowRight") { e.preventDefault(); openSub(active); }
+      else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        setActive((i) => {
-          const step = e.key === "ArrowDown" ? 1 : -1;
-          const n = state.items.length;
-          // Skip disabled entries, or the keyboard stops on dead rows.
-          for (let k = 1; k <= n; k += 1) {
-            const next = (i + step * k + n * k) % n;
-            if (!state.items[next]?.disabled) return next;
-          }
-          return i;
-        });
-      }
-      if (e.key === "Enter") {
-        e.preventDefault();
-        const item = state.items[active];
-        if (item && !item.disabled) {
-          item.onSelect();
-          onClose();
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        for (let n = 1; n <= items.length; n++) {
+          const next = (active + step * n + items.length) % items.length;
+          if (!items[next]?.disabled) { setActive(next); setSub(null); buttons.current[next]?.focus(); break; }
         }
       }
-    };
-    // A scroll under an open menu leaves it pointing at nothing.
-    const onScroll = () => onClose();
-
-    // Listened for in the menu's own window, which is not this one when it
-    // opens in the mini player.
-    const doc = ref.current?.ownerDocument ?? document;
-    const view = doc.defaultView ?? window;
-    doc.addEventListener("mousedown", onDown);
-    view.addEventListener("keydown", onKey, true);
-    view.addEventListener("scroll", onScroll, true);
-    view.addEventListener("resize", onScroll);
-    return () => {
-      doc.removeEventListener("mousedown", onDown);
-      view.removeEventListener("keydown", onKey, true);
-      view.removeEventListener("scroll", onScroll, true);
-      view.removeEventListener("resize", onScroll);
-    };
-  }, [onClose, state.items, active]);
-
-  return (
-    <div
-      ref={ref}
-      className="ctxmenu"
-      role="menu"
-      style={{ left: pos.x, top: pos.y }}
-      // A second right-click inside the menu should not open another one.
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      {state.items.map((item, i) => (
-        <button
-          key={item.label}
-          role="menuitem"
-          className="ctxmenu__item"
-          data-separated={item.separated || undefined}
-          data-active={i === active || undefined}
-          disabled={item.disabled}
-          onMouseEnter={() => setActive(i)}
-          onClick={() => {
-            item.onSelect();
-            onClose();
-          }}
-        >
-          {item.label}
-        </button>
-      ))}
+    }}>
+    <div className="ctxmenu__scroll" onScroll={() => setSub(null)}>
+      {items.map((item, i) => <button key={`${item.label}:${i}`} ref={el => { buttons.current[i] = el; }} role="menuitem" className="ctxmenu__item"
+        aria-haspopup={item.children ? "menu" : undefined} aria-expanded={item.children ? sub?.index === i : undefined}
+        data-separated={item.separated || undefined} data-active={active === i || undefined} disabled={item.disabled}
+        onFocus={() => setActive(i)} onMouseEnter={() => { setActive(i); if (item.children) openSub(i); else setSub(null); }} onClick={() => choose(i)}>
+        {itemIcon(item)}<span>{item.label}</span>{item.children ? <IconChevronRight size={16} /> : null}
+      </button>)}
     </div>
-  );
+    {sub && items[sub.index]?.children ? <MenuPanel key={sub.index} items={items[sub.index]!.children!}
+      x={sub.rect.right} y={sub.rect.top} anchor={sub.rect} onClose={onClose}
+      onBack={() => { const i = sub.index; setSub(null); buttons.current[i]?.focus(); }} /> : null}
+  </div>;
 }

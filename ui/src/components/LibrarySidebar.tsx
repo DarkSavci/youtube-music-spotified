@@ -12,7 +12,7 @@ import {
 } from "../lib/playlists";
 import { usePrompt } from "./Prompt";
 import {
-  IconEqualizerStatic, IconGrid, IconHome, IconLibrary, IconList,
+  IconExpand, IconChevronLeft, IconChevronRight, IconGrid, IconLibrary, IconList,
   IconPlus, IconSearch,
 } from "./Icon";
 
@@ -43,7 +43,7 @@ const SORTS: { id: Sort; label: string }[] = [
  * than the viewport, so the rail can collapse to artwork-only independently of
  * the window size.
  */
-export function LibrarySidebar() {
+export function LibrarySidebar({ expanded, onExpand, onNavigate }: { expanded: boolean; onExpand: () => void; onNavigate: () => void }) {
   const menu = useMenu();
   const prompt = usePrompt();
   const createPlaylist = useCreatePlaylist();
@@ -105,6 +105,7 @@ export function LibrarySidebar() {
     return out;
   };
 
+  const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("");
   const [sort, setSort] = useState<Sort>("recents");
   const [compact, setCompact] = useState(false);
@@ -149,46 +150,20 @@ export function LibrarySidebar() {
     document.documentElement.style.setProperty("--sidebar-width", `${width}px`);
   }, [width]);
 
-  const items = data ?? [];
+  const query = search.trim().toLocaleLowerCase();
+  const items = (data ?? []).filter(item => !query || `${item.title} ${item.subtitle ?? ""} ${folders.find(f => f.id === item.folderId)?.name ?? ""}`.toLocaleLowerCase().includes(query));
 
   return (
-    <aside ref={asideRef} className="sidebar panel" aria-label="Your library">
-      <nav className="sidebar__nav">
-        {/*
-          * Filled when you are on it, outlined when you are not.
-          *
-          * That is how Spotify marks the current destination — a change of
-          * weight rather than only a change of colour, which also survives
-          * being looked at out of the corner of the eye. NavLink hands the
-          * active state to a render prop, so the icon can use it.
-          */}
-        <NavLink to="/" className="sidebar__navlink" end>
-          {({ isActive }) => (
-            <>
-              <IconHome size={22} filled={isActive} />
-              <span>Home</span>
-            </>
-          )}
-        </NavLink>
-        <NavLink to="/search" className="sidebar__navlink">
-          <IconSearch size={22} />
-          <span>Search</span>
-        </NavLink>
-        <NavLink to="/stats" className="sidebar__navlink">
-          <IconEqualizerStatic size={22} />
-          <span>Your listening</span>
-        </NavLink>
-      </nav>
-
+    <aside ref={asideRef} className="sidebar panel" data-expanded={expanded || undefined} data-grid={expanded && !compact || undefined} aria-label="Your library" onClick={e => { if ((e.target as HTMLElement).closest("a")) onNavigate(); }}>
       <div className="sidebar__header">
         <button
           className="sidebar__title"
-          onClick={() => setWidth((w) => (w <= 170 ? 280 : 72))}
+          onClick={() => { const next = width <= 170 ? 280 : 72; setWidth(next); try { localStorage.setItem("sidebar.width", String(next)); } catch {} }}
           aria-label="Toggle library width"
         >
           {/* The library is always the surface it sits on, so it is always
               the one you are looking at. */}
-          <IconLibrary size={22} filled />
+          <span className="sidebar__toggle"><IconLibrary className="sidebar__library-icon" size={22} filled />{width <= 170 ? <IconChevronRight className="sidebar__collapse-icon" size={22} /> : <IconChevronLeft className="sidebar__collapse-icon" size={22} />}</span>
           <span>Your Library</span>
         </button>
         <div className="sidebar__actions">
@@ -228,6 +203,7 @@ export function LibrarySidebar() {
           >
             <IconPlus size={18} />
           </button>
+          <button className="iconbtn" aria-label={expanded ? "Collapse library view" : "Expand library view"} title={expanded ? "Collapse library view" : "Expand library view"} onClick={onExpand}><IconExpand size={18} /></button>
         </div>
       </div>
 
@@ -244,6 +220,7 @@ export function LibrarySidebar() {
         ))}
       </div>
 
+      <label className="sidebar__search"><IconSearch size={16} /><input type="search" aria-label="Search in your library" placeholder="Search in your library" value={search} onChange={e => setSearch(e.target.value)} /></label>
       <div className="sidebar__tools">
         <select
           className="sidebar__sort"
@@ -269,6 +246,8 @@ export function LibrarySidebar() {
 
       <div className="sidebar__list scroll">
         <LibraryList
+          artworkSize={expanded ? 320 : 96}
+          searching={Boolean(query)}
           items={items}
           folders={folders}
           isPending={isPending}
@@ -313,6 +292,8 @@ export function LibrarySidebar() {
  * that resolves it — silence reads as breakage.
  */
 function LibraryList({
+  artworkSize,
+  searching,
   items,
   folders,
   isPending,
@@ -320,6 +301,8 @@ function LibraryList({
   onItemMenu,
   onFolderMenu,
 }: {
+  artworkSize: number;
+  searching: boolean;
   items: LibraryItem[];
   folders: { id: string; name: string }[];
   isPending: boolean;
@@ -356,6 +339,7 @@ function LibraryList({
   if (error) {
     return <EmptyState title="Could not load your library" body={String(error)} action="Retry" />;
   }
+  if (items.length === 0 && searching) return <p className="library-no-results">No matches in your library.</p>;
   if (items.length === 0) {
     return (
       <EmptyState
@@ -409,7 +393,7 @@ function LibraryList({
                 >
                   <img
                     className={`libitem__art ${item.kind === "artist" ? "libitem__art--round" : ""}`}
-                    src={artworkAtLeast(item.artwork, 96)}
+                    src={artworkAtLeast(item.artwork, artworkSize)}
                     alt=""
                     loading="lazy"
                   />
@@ -433,7 +417,7 @@ function LibraryList({
           >
             <img
               className={`libitem__art ${item.kind === "artist" ? "libitem__art--round" : ""}`}
-              src={artworkAtLeast(item.artwork, 96)}
+              src={artworkAtLeast(item.artwork, artworkSize)}
               alt=""
               loading="lazy"
             />

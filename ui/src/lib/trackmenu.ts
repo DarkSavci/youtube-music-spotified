@@ -47,17 +47,9 @@ export function useTrackMenu(): (
       onSelect: () => transport.playNext([track]),
     });
 
-    /*
-     * Adding to a playlist is flattened into the menu rather than nested.
-     *
-     * A submenu needs hover intent, edge flipping of its own and a keyboard
-     * path into and out of it; a handful of flat entries needs none of that,
-     * and most people have few enough playlists that the list is shorter than
-     * the submenu would have been. The count is capped so a large library
-     * cannot produce a menu taller than the window.
-     */
-    items.push({
-      label: "Add to a new playlist…",
+    const destinations: MenuItem[] = [];
+    destinations.push({
+      label: "New playlist…",
       separated: true,
       onSelect: () => {
         void (async () => {
@@ -70,12 +62,14 @@ export function useTrackMenu(): (
         })();
       },
     });
-    for (const pl of playlists.slice(0, 8)) {
-      items.push({
-        label: `Add to ${pl.title}`,
+    for (const pl of playlists) {
+      destinations.push({
+        label: pl.title,
         onSelect: () => addTo.mutate({ playlistId: pl.id, trackIds: [track.id] }),
       });
     }
+
+    items.push({ label: "Add to playlist", separated: true, children: destinations });
 
     // Only offered where the membership handle exists, which is on the
     // playlist the track was read from — the same track can appear twice, so
