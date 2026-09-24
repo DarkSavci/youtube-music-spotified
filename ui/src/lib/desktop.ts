@@ -24,7 +24,7 @@ export interface AuthResult {
 
 export interface SavedAccounts {
  activeId: string | null;
- accounts: { id: string; name: string; channel: string; channels: { id: string; name: string; handle?: string }[] }[];
+ accounts: { id: string; name: string; avatarUrl?: string; channel: string; channels: { id: string; name: string; handle?: string; avatarUrl?: string }[] }[];
 }
 
 interface DesktopBridge {

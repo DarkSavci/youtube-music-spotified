@@ -12,9 +12,10 @@ import (
 // ID is empty for the personal channel, otherwise YouTube's page ID.
 // Sign-in and delegation tokens never leave this parser.
 type Channel struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Handle string `json:"handle,omitempty"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Handle    string `json:"handle,omitempty"`
 }
 
 func (c *Client) Channels(ctx context.Context) ([]Channel, error) {
@@ -86,7 +87,7 @@ func parseChannels(raw json.RawMessage) ([]Channel, error) {
 				}
 				name := runsText(item["accountName"])
 				if name != "" && (id != "" || personal) && !seen[id] {
-					channels = append(channels, Channel{ID: id, Name: name, Handle: runsText(item["channelHandle"])})
+					channels = append(channels, Channel{ID: id, Name: name, Handle: runsText(item["channelHandle"]), AvatarURL: firstThumbnail(item["accountPhoto"])})
 					seen[id] = true
 				}
 				return

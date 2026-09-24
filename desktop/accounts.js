@@ -43,7 +43,7 @@ function register(getMainWindow, port, restartCore) {
   const refreshChannels = async () => {
     // Profile names must survive even if channel discovery fails.
     const me = await fromCore("/v1/me");
-    store.setName(me.account?.name);
+    store.setName(me.account?.name, me.account?.avatarUrl);
     const channels = await fromCore("/v1/me/channels");
     store.setChannels(channels);
     return store.publicState();

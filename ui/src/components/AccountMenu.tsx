@@ -5,6 +5,13 @@ import { desktop, type AuthResult, type SavedAccounts } from "../lib/desktop";
 import { useSignIn } from "../lib/signin";
 import { usePrompt } from "./Prompt";
 
+function Avatar({ name, url }: { name: string; url?: string }) {
+  const [failed, setFailed] = useState<string>();
+  return <span className="account-menu__avatar" aria-hidden="true">
+    {url && failed !== url ? <img src={url} alt="" onError={() => setFailed(url)} /> : name.slice(0, 1)}
+  </span>;
+}
+
 /** Anchored to the account chip, regardless of where inside it was clicked. */
 export function AccountMenu({ account }: { account: { name: string; handle?: string; avatarUrl?: string } }) {
   const anchor = useRef<HTMLButtonElement>(null);
@@ -29,7 +36,7 @@ export function AccountMenu({ account }: { account: { name: string; handle?: str
       try {
         const value = await auth.accounts!();
         if (!cancelled) setSaved(value);
-        if (value.activeId && !value.accounts.find((a) => a.id === value.activeId)?.channels.length && auth.channels) {
+        if (value.activeId && auth.channels) {
           const refreshed = await auth.channels();
           if (!cancelled) setSaved(refreshed);
         }
@@ -93,14 +100,14 @@ export function AccountMenu({ account }: { account: { name: string; handle?: str
       <div className="account-menu__list" aria-busy={busy}>
         {active?.channels.map((channel) => <button key={channel.id} role="menuitemradio" aria-checked={channel.id === active.channel}
           disabled={busy || signingIn || !auth?.selectChannel} onClick={() => channel.id === active.channel ? close() : void run(() => auth!.selectChannel!(channel.id))}>
-          <span className="account-menu__avatar" aria-hidden="true">{channel.name.slice(0, 1)}</span>
+          <Avatar name={channel.name} url={channel.avatarUrl || (channel.id === active.channel ? account.avatarUrl : undefined)} />
           <span className="account-menu__identity"><strong>{channel.name}</strong><small>{channel.handle || active.name}</small></span>
           {channel.id === active.channel && <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>}
         </button>)}
-        {!active?.channels.length && <div className="account-menu__hint">{account.name}{!saved && auth?.accounts && !error ? " · Loading…" : ""}</div>}
+        {!active?.channels.length && <div className="account-menu__hint account-menu__current"><Avatar name={account.name} url={account.avatarUrl} />{account.name}{!saved && auth?.accounts && !error ? " · Loading…" : ""}</div>}
         {saved?.accounts.filter((item) => item.id !== saved.activeId).map((item) => <button key={item.id} role="menuitem"
           disabled={busy || signingIn || !auth?.switchAccount} onClick={() => void run(() => auth!.switchAccount!(item.id))}>
-          <span className="account-menu__avatar" aria-hidden="true">{item.name.slice(0, 1)}</span>
+          <Avatar name={item.name} url={item.channels.find((c) => c.id === item.channel)?.avatarUrl || item.avatarUrl} />
           <span className="account-menu__identity"><strong>{item.name}</strong><small>{item.channels.find((c) => c.id === item.channel)?.name || "Google account"}</small></span>
         </button>)}
       </div>
