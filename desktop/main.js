@@ -11,7 +11,7 @@
  * shutdown function, including the abnormal ones.
  */
 
-const { app, BrowserWindow, ipcMain, shell, globalShortcut, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, globalShortcut, Menu, dialog } = require("electron");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const net = require("node:net");
@@ -23,6 +23,7 @@ const updater = require("./updater");
 const logs = require("./logs");
 const { vendorDirectory } = require("./platform");
 const { stopChild } = require("./child-process");
+const { waitForOwnedCore } = require("./core-ready");
 
 const isDev = !app.isPackaged;
 const CORE_PORT = 8674;
@@ -229,7 +230,7 @@ function startCore() {
   const bin = corePath();
   if (!fs.existsSync(bin)) {
     console.error(`[core] binary not found at ${bin}`);
-    return null;
+    throw new Error(`Core binary not found: ${bin}`);
   }
 
   const args = [
@@ -245,6 +246,7 @@ function startCore() {
 
   const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
 
+  child.ready = waitForOwnedCore(child);
   logs.attachCore(child);
 
   child.on("error", (err) => console.error("[core] could not start:", err.message));
@@ -288,8 +290,15 @@ async function restartCore() {
     restartingCore = false;
   }
   if (shuttingDown) return;
-  core = startCore();
-  if (core) await waitForCore();
+  try {
+    if (await probe(CORE_PORT, 400)) throw new Error(`Port ${CORE_PORT} is already in use. Stop the other Spotifier core or development server, then reopen the app.`);
+    core = startCore();
+    await core.ready;
+  } catch (err) {
+    await stopChild(core);
+    dialog.showErrorBox("Could not restart the music service", err.message);
+    throw err;
+  }
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload();
 }
 
@@ -304,26 +313,6 @@ function probe(port, timeoutMs) {
     socket.setTimeout(timeoutMs, () => done(false));
     socket.once("connect", () => done(true));
     socket.once("error", () => done(false));
-  });
-}
-
-/** Waits for the core to accept connections, so the window never loads against a dead port. */
-function waitForCore(timeoutMs = 15000) {
-  const deadline = Date.now() + timeoutMs;
-  return new Promise((resolve) => {
-    const attempt = () => {
-      const socket = net.connect(CORE_PORT, CORE_HOST);
-      socket.once("connect", () => {
-        socket.destroy();
-        resolve(true);
-      });
-      socket.once("error", () => {
-        socket.destroy();
-        if (Date.now() > deadline) return resolve(false);
-        setTimeout(attempt, 200);
-      });
-    };
-    attempt();
   });
 }
 
@@ -485,6 +474,11 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     if (process.platform === "darwin") installMacMenu();
+    if (await probe(CORE_PORT, 400)) {
+      dialog.showErrorBox("Music service port is busy", `Port ${CORE_PORT} is already in use. Stop the other Spotifier core or development server, then reopen the app. Your saved sign-in is unchanged.`);
+      app.quit();
+      return;
+    }
     auth.register(dataDir, () => mainWindow, CORE_PORT, restartCore);
     miniplayer.register(dataDir());
 
@@ -504,10 +498,7 @@ if (!app.requestSingleInstanceLock()) {
     core = startCore();
     // And the next one is looked for in the background, well clear of startup.
     setTimeout(() => void updateYtdlp(), 60_000).unref?.();
-    if (core) {
-      const up = await waitForCore();
-      if (!up) console.error("[core] did not become ready in time");
-    }
+    await core.ready;
     devServerUp = isDev && (await probe(5219, 400));
     createWindow();
     tray.create(() => mainWindow, uiSource());
@@ -518,6 +509,10 @@ if (!app.requestSingleInstanceLock()) {
       if (!mainWindow || mainWindow.isDestroyed()) createWindow();
       tray.showWindow();
     });
+  }).catch((err) => {
+    console.error("[core] startup failed:", err.message);
+    dialog.showErrorBox("Could not start the music service", err.message);
+    app.quit();
   });
 }
 

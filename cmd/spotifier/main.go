@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -206,6 +207,13 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	listener, err := net.Listen("tcp", *addr)
+	if err != nil {
+		log.Error("listen", "err", err)
+		os.Exit(1)
+	}
+	defer listener.Close()
+
 	log.Info("spotifier listening",
 		"addr", *addr,
 		"catalog", *catalogMode,
@@ -221,7 +229,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("listen", "err", err)
 			os.Exit(1)
 		}

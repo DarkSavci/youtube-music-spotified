@@ -40,6 +40,8 @@ export const useSignIn = create<SignInState>((set, get) => ({
                   : "Sign-in did not complete. Try again.",
         });
       }
+    } catch {
+      set({ problem: "Could not complete sign-in. Check the music service error and reopen the app to retry." });
     } finally {
       set({ signingIn: false });
     }
