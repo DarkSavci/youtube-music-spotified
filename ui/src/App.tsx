@@ -17,6 +17,7 @@ import { lazy, Suspense } from "react";
  * the entity pages are only fetched when navigated to, which keeps the startup
  * bundle to what is actually rendered on launch.
  */
+const Together = lazy(() => import("./views/Together").then((m) => ({ default: m.Together })));
 const Search = lazy(() => import("./views/Search").then((m) => ({ default: m.Search })));
 const Stats = lazy(() => import("./views/Stats").then((m) => ({ default: m.Stats })));
 const SettingsView = lazy(() => import("./views/Settings").then((m) => ({ default: m.SettingsView })));
@@ -40,6 +41,7 @@ import { LyricsPanel, LyricsView } from "./components/Lyrics";
 import { MenuProvider } from "./components/ContextMenu";
 import { PromptProvider } from "./components/Prompt";
 import { Shortcuts } from "./components/Shortcuts";
+import { leaveTogether } from "./lib/together";
 
 /**
  * The shell: library rail, scrolling content, optional right panel, and the
@@ -95,6 +97,7 @@ export function App() {
     const removeMediaSession = installMediaSession();
     return () => {
       removeMediaSession();
+      void leaveTogether();
       stopPlayback();
     };
   }, []);
@@ -140,6 +143,7 @@ export function App() {
           <div className="main__content" id="main-content" tabIndex={-1}>
             <Suspense fallback={<TrackListSkeleton />}>
             <Routes>
+              <Route path="/together" element={<Together />} />
               <Route path="/" element={<Home />} />
               <Route path="/search" element={<Search />} />
               <Route path="/stats" element={<Stats />} />

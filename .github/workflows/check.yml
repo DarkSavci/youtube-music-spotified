@@ -40,8 +40,11 @@ jobs:
           cache-dependency-path: |
             ui/package-lock.json
             desktop/package-lock.json
+            listen-together/package-lock.json
       - run: npm ci --prefix ui
       - run: npm ci --prefix desktop
+      - run: npm ci --prefix listen-together
+      - run: npm test --prefix listen-together
       - run: go test ./...
       - run: npm test --prefix desktop
       - run: npx --no-install electron test/audio-smoke.js

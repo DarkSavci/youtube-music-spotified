@@ -83,7 +83,7 @@ func (s *Server) RunAutoplay(ctx context.Context) {
 
 // topUp fetches more of the queue's radio when it is running low.
 func (s *Server) topUp(ctx context.Context, q domain.Queue) {
-	if len(q.Items) == 0 || len(q.Items)-1-q.Index >= autoplayLow {
+	if s.deps.Session.Projection().FollowingRoom || len(q.Items) == 0 || len(q.Items)-1-q.Index >= autoplayLow {
 		return
 	}
 	a := s.autoplay

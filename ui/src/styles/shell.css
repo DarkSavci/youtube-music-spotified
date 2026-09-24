@@ -1317,3 +1317,21 @@
 
 .account-menu__avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
 .account-menu__current { display: flex; align-items: center; gap: 12px; }
+
+.whats-new-button { position: relative; }
+.whats-new-button__dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.whats-new-dialog { width: min(600px, calc(100vw - 32px)); max-height: min(720px, calc(100vh - 48px)); padding: 0; margin: auto; border: 1px solid #ffffff24; border-radius: 16px; background: #181818; color: var(--text-primary); box-shadow: 0 20px 80px #0009; }
+.whats-new-dialog::backdrop { background: #0009; }
+.whats-new-dialog__body { display: flex; flex-direction: column; max-height: min(720px, calc(100vh - 48px)); }
+.whats-new-dialog__header { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid #ffffff16; }
+.whats-new-dialog__header h2 { font-size: 24px; }
+.whats-new-dialog__scroll { overflow-y: auto; min-height: 0; padding: 24px; }
+.whats-new-dialog__scroll .changelog { padding: 0; }
+.whats-new-dialog footer { padding: 16px 24px; border-top: 1px solid #ffffff16; }
+
+/* Native drag regions swallow pointer events. While a popup is open, let
+   clicks on the empty title bar dismiss it; restore dragging on close. */
+body:has(.account-menu, .whats-new-dialog[open]) .topbar,
+body:has(.account-menu, .whats-new-dialog[open]) .app-shell::before {
+  -webkit-app-region: no-drag;
+}

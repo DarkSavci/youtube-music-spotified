@@ -1556,3 +1556,20 @@ li[data-state="active"] .lyrics__line {
 .accounts label { display: flex; align-items: center; gap: 12px; }
 .accounts select { max-width: 360px; }
 .accounts [role="alert"] { color: #ff9b9b; }
+
+/* Private synchronized listening prototype. */
+.together-page { max-width: 960px; padding: 32px; }
+.together-page h1 { font-size: 32px; margin-bottom: 16px; }
+.together-page h2 { font-size: 22px; margin-bottom: 16px; }
+.together-page p { color: var(--text-secondary); line-height: 1.6; margin: 16px 0; }
+.together-badge { font-size: 12px; vertical-align: middle; padding: 5px 9px; border-radius: 12px; background: var(--surface-control); }
+.together-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; margin-top: 24px; }
+.together-card { padding: 24px; border: 1px solid #ffffff20; border-radius: 12px; }
+.together-card label { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.together-card input:not([type=checkbox]), .together-card textarea { width: 100%; color: var(--text-primary); background: var(--surface-control); padding: 12px; border: 1px solid #ffffff30; border-radius: 6px; }
+.together-card textarea { min-height: 92px; resize: vertical; }
+.together-card .together-consent { flex-direction: row; align-items: start; margin-top: 12px; }
+.together-card .chip { margin: 8px 8px 0 0; }
+.together-page .together-error { color: #ffb4ab; }
+.together-footnote { font-size: 13px; }
+.iconbtn[data-room-active] { color: var(--accent); }

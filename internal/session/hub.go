@@ -36,10 +36,11 @@ type Device struct {
 // Projection is the state plus the target, which is everything a subscriber
 // needs to render and to reconcile its engine.
 type Projection struct {
-	State   domain.Session `json:"state"`
-	Target  Target         `json:"target"`
-	Devices []Device       `json:"devices"`
-	Caps    Capabilities   `json:"capabilities"`
+	FollowingRoom bool           `json:"followingRoom"`
+	State         domain.Session `json:"state"`
+	Target        Target         `json:"target"`
+	Devices       []Device       `json:"devices"`
+	Caps          Capabilities   `json:"capabilities"`
 }
 
 // LogSink receives play-log entries. Implemented by the Control plane; the Core
@@ -278,10 +279,11 @@ func (h *Hub) projectionLocked() Projection {
 		state.Degraded = []domain.TrackFault{}
 	}
 	return Projection{
-		State:   state,
-		Target:  h.core.Target(),
-		Devices: devices,
-		Caps:    h.core.Capabilities(),
+		FollowingRoom: h.core.following,
+		State:         state,
+		Target:        h.core.Target(),
+		Devices:       devices,
+		Caps:          h.core.Capabilities(),
 	}
 }
 

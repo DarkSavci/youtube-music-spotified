@@ -35,6 +35,7 @@ type Core struct {
 	// skip, going back) rather than the last one ending. Skips cut; only an
 	// ending crossfades.
 	userChange bool
+	following  bool // Ephemeral: never restored after an application restart.
 
 	// unshuffled is the queue as it was before shuffle reordered it, so
 	// turning shuffle off puts it back. Shuffle rewrites the queue itself
@@ -114,7 +115,7 @@ func (c *Core) Target() Target {
 	// one let the engine fade into it, or start it when this one ended, while
 	// the session replayed the current track — the sound moved on and the
 	// player did not.
-	if next := c.peekNext(); next != nil && c.state.Repeat != domain.RepeatOne {
+	if next := c.peekNext(); !c.following && next != nil && c.state.Repeat != domain.RepeatOne {
 		t.PreloadVideoID = next.ID
 	}
 	return t
@@ -123,6 +124,9 @@ func (c *Core) Target() Target {
 // transition picks how to move into the next track, honouring both the user's
 // setting and what the engine can actually do.
 func (c *Core) transition() Transition {
+	if c.following {
+		return Transition{Kind: "cut"}
+	}
 	if c.settings.CrossfadeMs > 0 && c.caps.Crossfade != "none" {
 		return Transition{Kind: "crossfade", Ms: c.settings.CrossfadeMs}
 	}
@@ -137,7 +141,20 @@ func (c *Core) transition() Transition {
 // Apply folds a Command into the Session, returning why it was rejected (empty
 // when applied) and any play-log entries the change produced.
 func (c *Core) Apply(cmd Command) (Reject, []LogEntry) {
+	if c.following && cmd.Kind != CmdFollow && cmd.Kind != CmdLeaveRoom && cmd.Kind != CmdSetVolume {
+		return RejectNotOwner, nil
+	}
 	switch cmd.Kind {
+	case CmdFollow:
+		return c.followRoom(cmd)
+	case CmdLeaveRoom:
+		if c.following {
+			c.following = false
+			c.state.State = domain.StatePaused
+			c.state.PositionAt = c.clk.Now()
+			c.bump()
+		}
+		return RejectNone, nil
 	case CmdPlay:
 		return c.play(cmd)
 	case CmdToggle:
@@ -453,6 +470,11 @@ func (c *Core) HandleEngine(ev EngineEvent) []LogEntry {
 
 	case EvEnded:
 		logs := c.closeOutCurrent(true)
+		if c.following {
+			c.state.State = domain.StatePaused
+			c.bump()
+			return logs
+		}
 		_, more := c.advanceAfterEnd()
 		return append(logs, more...)
 
@@ -586,7 +608,7 @@ func (c *Core) handleFailure(reason string) []LogEntry {
 	c.loggedCurrent = true
 
 	c.consecutiveFaults++
-	if c.consecutiveFaults >= maxConsecutiveFaults {
+	if c.following || c.consecutiveFaults >= maxConsecutiveFaults {
 		// Stop rather than race to the end of the queue. Something systemic is
 		// wrong and the user should see it.
 		c.state.State = domain.StatePaused
@@ -753,3 +775,42 @@ func clampVolume(v float64) float64 {
 }
 
 var _ = time.Second
+
+// followRoom applies a single authoritative room snapshot without changing
+// local volume, repeat/shuffle preferences, or inventing listening progress.
+func (c *Core) followRoom(cmd Command) (Reject, []LogEntry) {
+	if len(cmd.Tracks) > 1 || cmd.PositionMs < 0 || cmd.PositionMs > 86400000 {
+		return RejectOutOfRange, nil
+	}
+	var logs []LogEntry
+	current := c.state.Queue.Current()
+	wasFollowing := c.following
+	if len(cmd.Tracks) == 1 && cmd.Tracks[0].ID == "" {
+		return RejectOutOfRange, nil
+	}
+	c.following = true
+	if len(cmd.Tracks) == 0 {
+		logs = c.closeOutCurrent(false)
+		c.state.Queue = domain.Queue{}
+		c.state.State = domain.StateIdle
+		c.state.Epoch++
+		c.bump()
+		return RejectNone, logs
+	}
+	track := cmd.Tracks[0]
+	if !wasFollowing || current == nil || current.ID != track.ID || !current.Playable {
+		logs = c.closeOutCurrent(false)
+		c.state.Queue = domain.Queue{Items: []domain.Track{track}, Index: 0, Origin: "Listen Together"}
+		c.unshuffled = nil
+		c.state.Degraded = nil
+		c.userChange = true
+		c.startTrack(0, cmd.PositionMs)
+	}
+	c.seek(cmd.PositionMs)
+	c.state.State = domain.StatePaused
+	if cmd.Playing {
+		c.state.State = domain.StatePlaying
+	}
+	c.bump()
+	return RejectNone, logs
+}

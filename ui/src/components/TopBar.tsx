@@ -5,6 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { signInLabel, useSignIn } from "../lib/signin";
 import { IconChevronLeft, IconChevronRight, IconSearch, IconSettings } from "./Icon";
+import { useTogether } from "../lib/together";
+import { WhatsNew } from "./WhatsNew";
 import { AccountMenu } from "./AccountMenu";
 
 /**
@@ -21,6 +23,7 @@ export function TopBar({
   onQueryChange?: (value: string) => void;
 }) {
   const navigate = useNavigate();
+  const roomStatus = useTogether(s => s.status);
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
   const [params] = useSearchParams();
@@ -115,6 +118,10 @@ export function TopBar({
       </label>
 
       <div className="topbar__spacer" />
+      <WhatsNew />
+      <button className="iconbtn" aria-label={roomStatus === "connected" ? "Listen Together — connected" : "Listen Together"} onClick={() => navigate("/together")} data-room-active={roomStatus === "connected" || undefined}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 14v-3a9 9 0 0 1 18 0v3M3 13h3v8H3zM18 13h3v8h-3z" /></svg>
+      </button>
 
       <button
         className="iconbtn"

@@ -25,6 +25,8 @@ import (
 type CommandKind string
 
 const (
+	CmdFollow     CommandKind = "follow_room"
+	CmdLeaveRoom  CommandKind = "leave_room"
 	CmdPlay       CommandKind = "play"
 	CmdToggle     CommandKind = "toggle"
 	CmdNext       CommandKind = "next"
@@ -44,7 +46,8 @@ const (
 // Command is an intent to change the Session. Exactly one payload field is
 // meaningful, selected by Kind.
 type Command struct {
-	Kind CommandKind
+	Kind    CommandKind
+	Playing bool // Desired room playback state for CmdFollow.
 
 	// Play
 	Tracks     []domain.Track
