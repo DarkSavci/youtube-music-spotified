@@ -75,6 +75,9 @@ export const api = {
   playlist: (id: string, signal?: AbortSignal) =>
     get<Playlist>(`/playlists/${encodeURIComponent(id)}`, signal),
 
+  playlistPage: (id: string, continuation = "", signal?: AbortSignal) =>
+    get<{ playlist: Playlist; next?: string }>(`/playlists/${encodeURIComponent(id)}?paged=1${continuation ? `&continuation=${encodeURIComponent(continuation)}` : ""}`, signal),
+
   library: (filter = "", sort = "alphabetical", signal?: AbortSignal) =>
     get<LibraryItem[]>(`/me/library?filter=${filter}&sort=${sort}`, signal),
   liked: (signal?: AbortSignal) => get<Playlist>("/me/liked", signal),

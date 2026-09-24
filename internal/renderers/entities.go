@@ -509,3 +509,27 @@ func ParseTimedLyrics(doc Node) (lines []domain.LyricLine, source string) {
 	}
 	return lines, source
 }
+
+// PlaylistNext reads only the playlist shelf's continuation, not suggestions.
+func PlaylistNext(doc Node) string { return playlistContinuation(playlistShelves(doc)) }
+
+// ParsePlaylistContinuation reads a single track page, retaining repeated
+// songs: duplicates can be intentional playlist entries.
+func ParsePlaylistContinuation(doc Node) ([]domain.Track, string) {
+	items := Find(doc, "appendContinuationItemsAction").Nodes("continuationItems")
+	if len(items) == 0 {
+		shelf := Find(doc, "musicPlaylistShelfContinuation")
+		items = shelf.Nodes("contents")
+		tracks := listTracks(items)
+		next := continuationItemToken(items)
+		if next == "" {
+			for _, c := range shelf.Nodes("continuations") {
+				if next = c.Child("nextContinuationData").Str("continuation"); next != "" {
+					break
+				}
+			}
+		}
+		return tracks, next
+	}
+	return listTracks(items), continuationItemToken(items)
+}

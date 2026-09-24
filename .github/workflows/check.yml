@@ -50,4 +50,6 @@ jobs:
       - run: npx --no-install electron test/audio-smoke.js
         working-directory: desktop
       - run: npm run package --prefix desktop
+      - run: npx --no-install electron test/playlist-smoke.js
+        working-directory: desktop
       - run: node desktop/test/package-smoke.js

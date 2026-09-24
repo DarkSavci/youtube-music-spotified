@@ -222,12 +222,14 @@
 }
 .main__scroll {
   flex: 1;
+  min-height: 0;
 }
 .main__content {
   padding: 0 var(--space-5) var(--space-7);
 }
 
 .topbar {
+  flex-shrink: 0;
   position: sticky;
   top: 0;
   z-index: var(--z-panel);

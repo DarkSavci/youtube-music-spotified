@@ -354,6 +354,28 @@ func (s *Server) handleArtist(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePlaylist(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("paged") == "1" {
+		if pages, ok := s.deps.Catalog.(interface {
+			PlaylistPage(context.Context, string, string) (domain.PlaylistPage, error)
+		}); ok {
+			page, err := pages.PlaylistPage(r.Context(), r.PathValue("id"), r.URL.Query().Get("continuation"))
+			if err != nil {
+				s.fail(w, r, err)
+				return
+			}
+			page.Playlist = normalizePlaylist(page.Playlist)
+			s.write(w, http.StatusOK, page)
+			return
+		}
+		// Fixture adapters have a finite, already complete list.
+		pl, err := s.deps.Catalog.Playlist(r.Context(), r.PathValue("id"))
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		s.write(w, http.StatusOK, domain.PlaylistPage{Playlist: normalizePlaylist(pl)})
+		return
+	}
 	pl, err := s.deps.Catalog.Playlist(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.fail(w, r, err)
