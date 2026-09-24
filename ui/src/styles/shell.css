@@ -1284,3 +1284,7 @@
   text-align: center;
   pointer-events: none;
 }
+
+/* Native Mac traffic lights sit above the sidebar, outside the content grid. */
+.app-shell[data-platform="darwin"] { padding-top: 38px; }
+.app-shell[data-platform="darwin"]::before { height: 30px; }

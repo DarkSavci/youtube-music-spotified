@@ -131,7 +131,7 @@ function openHandler({ frameName, url }) {
  * typing into; it only skips it while the mini player is the focused window,
  * where it is on top already.
  */
-const ON_TOP_LEVEL = "screen-saver";
+const ON_TOP_LEVEL = process.platform === "darwin" ? "floating" : "screen-saver";
 const KEEP_EVERY_MS = 1000;
 
 function applyOnTop() {
@@ -144,7 +144,7 @@ function applyOnTop() {
     win.setAlwaysOnTop(true, ON_TOP_LEVEL);
     if (!win.isAlwaysOnTop()) console.warn("[mini] always-on-top did not take; retrying");
   }
-  if (win.isVisible() && !win.isMinimized() && !win.isFocused()) win.moveTop();
+  if (process.platform === "win32" && win.isVisible() && !win.isMinimized() && !win.isFocused()) win.moveTop();
 }
 
 function keepOnTop() {

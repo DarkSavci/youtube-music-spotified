@@ -23,6 +23,7 @@ export interface AuthResult {
 }
 
 interface DesktopBridge {
+  platform?: string;
   corePort(): Promise<number>;
   dataDir(): Promise<string>;
   /** Absent in shells older than 0.1.2. */
@@ -75,6 +76,9 @@ declare global {
 }
 
 export const desktop = {
+  get isMac(): boolean {
+    return typeof window !== "undefined" && window.spotifier?.platform === "darwin";
+  },
   get available(): boolean {
     return typeof window !== "undefined" && window.spotifier?.isDesktop === true;
   },

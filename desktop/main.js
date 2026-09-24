@@ -11,7 +11,7 @@
  * shutdown function, including the abnormal ones.
  */
 
-const { app, BrowserWindow, ipcMain, shell, globalShortcut } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, globalShortcut, Menu, dialog } = require("electron");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const net = require("node:net");
@@ -21,6 +21,9 @@ const tray = require("./tray");
 const miniplayer = require("./miniplayer");
 const updater = require("./updater");
 const logs = require("./logs");
+const { vendorDirectory } = require("./platform");
+const { stopChild } = require("./child-process");
+const { waitForOwnedCore } = require("./core-ready");
 
 const isDev = !app.isPackaged;
 const CORE_PORT = 8674;
@@ -66,7 +69,7 @@ function ytdlpPath() {
   const updated = path.join(updatedYtdlpDir(), "current", YTDLP_EXE);
   if (!isDev && fs.existsSync(updated)) return updated;
   const bundled = isDev
-    ? path.join(__dirname, "vendor", "yt-dlp", YTDLP_EXE)
+    ? path.join(vendorDirectory(__dirname), "yt-dlp", YTDLP_EXE)
     : path.join(process.resourcesPath, "yt-dlp", YTDLP_EXE);
   return fs.existsSync(bundled) ? bundled : null;
 }
@@ -81,7 +84,7 @@ function ytdlpPath() {
 function denoPath() {
   const exe = process.platform === "win32" ? "deno.exe" : "deno";
   const bundled = isDev
-    ? path.join(__dirname, "vendor", "deno", exe)
+    ? path.join(vendorDirectory(__dirname), "deno", exe)
     : path.join(process.resourcesPath, "deno", exe);
   return fs.existsSync(bundled) ? bundled : null;
 }
@@ -227,7 +230,7 @@ function startCore() {
   const bin = corePath();
   if (!fs.existsSync(bin)) {
     console.error(`[core] binary not found at ${bin}`);
-    return null;
+    throw new Error(`Core binary not found: ${bin}`);
   }
 
   const args = [
@@ -243,8 +246,10 @@ function startCore() {
 
   const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
 
+  child.ready = waitForOwnedCore(child);
   logs.attachCore(child);
 
+  child.on("error", (err) => console.error("[core] could not start:", err.message));
   child.on("exit", (code, signal) => {
     if (core === child) core = null;
     if (shuttingDown || restartingCore) return;
@@ -281,22 +286,19 @@ async function restartCore() {
   if (old && old.exitCode === null) {
     restartingCore = true;
     // The replacement binds the same port, so the old one must be gone first.
-    await new Promise((resolve) => {
-      old.once("exit", resolve);
-      old.kill();
-      setTimeout(() => {
-        try {
-          process.kill(old.pid, "SIGKILL");
-        } catch {
-          /* already gone */
-        }
-        resolve();
-      }, 3000).unref?.();
-    });
+    await stopChild(old);
     restartingCore = false;
   }
-  core = startCore();
-  if (core) await waitForCore();
+  if (shuttingDown) return;
+  try {
+    if (await probe(CORE_PORT, 400)) throw new Error(`Port ${CORE_PORT} is already in use. Stop the other Spotifier core or development server, then reopen the app.`);
+    core = startCore();
+    await core.ready;
+  } catch (err) {
+    await stopChild(core);
+    dialog.showErrorBox("Could not restart the music service", err.message);
+    throw err;
+  }
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload();
 }
 
@@ -314,26 +316,6 @@ function probe(port, timeoutMs) {
   });
 }
 
-/** Waits for the core to accept connections, so the window never loads against a dead port. */
-function waitForCore(timeoutMs = 15000) {
-  const deadline = Date.now() + timeoutMs;
-  return new Promise((resolve) => {
-    const attempt = () => {
-      const socket = net.connect(CORE_PORT, CORE_HOST);
-      socket.once("connect", () => {
-        socket.destroy();
-        resolve(true);
-      });
-      socket.once("error", () => {
-        socket.destroy();
-        if (Date.now() > deadline) return resolve(false);
-        setTimeout(attempt, 200);
-      });
-    };
-    attempt();
-  });
-}
-
 /**
  * Single shutdown path.
  *
@@ -341,23 +323,13 @@ function waitForCore(timeoutMs = 15000) {
  * uncaught exception, because a sidecar that outlives the app holds a port and
  * a live session.
  */
+let shutdownPromise = null;
+let shutdownComplete = false;
 function shutdown() {
-  if (shuttingDown) return;
+  if (shutdownPromise) return shutdownPromise;
   shuttingDown = true;
-  if (core && !core.killed) {
-    core.kill();
-    // On Windows a polite kill is not always honoured; escalate rather than
-    // leaving the process behind.
-    setTimeout(() => {
-      if (core && !core.killed) {
-        try {
-          process.kill(core.pid, "SIGKILL");
-        } catch {
-          /* already gone */
-        }
-      }
-    }, 2000).unref?.();
-  }
+  shutdownPromise = Promise.all([stopChild(core, 6000), auth.cancelSignIn()]);
+  return shutdownPromise;
 }
 
 /* ---------- window ---------- */
@@ -395,7 +367,7 @@ function createWindow() {
     // strip above a dark app with a menu we do not use, and it cannot be
     // themed — so the frame goes and the controls move into the top bar,
     // where the rest of the chrome already lives.
-    frame: false,
+    frame: process.platform === "darwin",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -461,6 +433,9 @@ function createWindow() {
 /* ---------- media keys ---------- */
 
 function registerMediaKeys() {
+  // Chromium Media Session owns Mac media keys and Now Playing. Registering
+  // global shortcuts as well can toggle playback twice and require access.
+  if (process.platform === "darwin") return;
   const send = (action) => () => mainWindow?.webContents.send("media-key", action);
   const bindings = {
     MediaPlayPause: send("playpause"),
@@ -476,6 +451,16 @@ function registerMediaKeys() {
   }
 }
 
+function installMacMenu() {
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { role: "appMenu" },
+    { role: "fileMenu" },
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
+  ]));
+}
+
 /* ---------- lifecycle ---------- */
 
 // A second launch should focus the running window rather than starting a
@@ -488,6 +473,12 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", () => tray.showWindow());
 
   app.whenReady().then(async () => {
+    if (process.platform === "darwin") installMacMenu();
+    if (await probe(CORE_PORT, 400)) {
+      dialog.showErrorBox("Music service port is busy", `Port ${CORE_PORT} is already in use. Stop the other Spotifier core or development server, then reopen the app. Your saved sign-in is unchanged.`);
+      app.quit();
+      return;
+    }
     auth.register(dataDir, () => mainWindow, CORE_PORT, restartCore);
     miniplayer.register(dataDir());
 
@@ -501,15 +492,13 @@ if (!app.requestSingleInstanceLock()) {
       console.warn("[auth] refresh failed:", err.message);
     }
 
+    if (shuttingDown) return;
     // A yt-dlp update staged last time goes live before the core starts.
     promoteYtdlpUpdate();
     core = startCore();
     // And the next one is looked for in the background, well clear of startup.
     setTimeout(() => void updateYtdlp(), 60_000).unref?.();
-    if (core) {
-      const up = await waitForCore();
-      if (!up) console.error("[core] did not become ready in time");
-    }
+    await core.ready;
     devServerUp = isDev && (await probe(5219, 400));
     createWindow();
     tray.create(() => mainWindow, uiSource());
@@ -517,17 +506,28 @@ if (!app.requestSingleInstanceLock()) {
     updater.start();
 
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+      tray.showWindow();
     });
+  }).catch((err) => {
+    console.error("[core] startup failed:", err.message);
+    dialog.showErrorBox("Could not start the music service", err.message);
+    app.quit();
   });
 }
 
 app.on("window-all-closed", () => {
-  shutdown();
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", shutdown);
+app.on("before-quit", (event) => {
+  if (shutdownComplete) return;
+  event.preventDefault();
+  void shutdown().finally(() => {
+    shutdownComplete = true;
+    app.quit();
+  });
+});
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
   tray.destroy();
@@ -535,7 +535,6 @@ app.on("will-quit", () => {
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
-    shutdown();
     app.quit();
   });
 }
@@ -543,7 +542,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 // Even on an unhandled crash the sidecar must not be left behind.
 process.on("uncaughtException", (err) => {
   console.error("[main] uncaught:", err);
-  shutdown();
+  app.quit();
 });
 
 ipcMain.handle("core-port", () => CORE_PORT);

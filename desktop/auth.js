@@ -17,10 +17,12 @@
  * data directory and read only by the local sidecar.
  */
 
-const { app, BrowserWindow, session, ipcMain, net } = require("electron");
+const { app, BrowserWindow, session, ipcMain, net, dialog } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const { findMacBrowser } = require("./mac-browser");
+const { stopChild } = require("./child-process");
 
 const YTM_URL = "https://music.youtube.com/";
 
@@ -173,9 +175,75 @@ function writeCredentials(dataDir, cookieHeader) {
  * In the real browser when there is one, and in a window of our own only when
  * there is not. See signInWithBrowser for why the order is that way round.
  */
+let pendingSignIn = null;
+let cancelMacSignIn = null;
+
 function signIn(dataDir, parent) {
+  if (pendingSignIn) return pendingSignIn;
   const exe = systemBrowser();
-  return exe ? signInWithBrowser(dataDir, exe) : signInEmbedded(dataDir, parent);
+  // Start synchronously so a Quit immediately after Sign in can cancel it.
+  const attempt = process.platform === "darwin"
+    ? exe ? signInWithMacBrowser(dataDir, exe, parent) : { ok: false, reason: "browser-not-found" }
+    : exe ? signInWithBrowser(dataDir, exe) : signInEmbedded(dataDir, parent);
+  pendingSignIn = Promise.resolve(attempt).finally(() => { pendingSignIn = null; });
+  return pendingSignIn;
+}
+
+async function cancelSignIn() {
+  if (!cancelMacSignIn) return;
+  cancelMacSignIn();
+  await pendingSignIn;
+}
+
+/** Chrome remains running after its last Mac window closes. Let the user
+ * explicitly finish, then stop only our temporary-profile process and wait
+ * for its cookie store to flush before reopening it headless. */
+async function signInWithMacBrowser(dataDir, exe, parent) {
+  const profile = fs.mkdtempSync(path.join(dataDir, "signin-browser-"));
+  fs.chmodSync(profile, 0o700);
+  const controller = new AbortController();
+  const stopping = new AbortController();
+  let canceled = false;
+  cancelMacSignIn = () => { canceled = true; controller.abort(); stopping.abort(); };
+  const browser = spawn(exe, [
+    `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
+    "--disable-sync", "--disable-background-mode", "--new-window", SIGNIN_URL,
+  ], { stdio: "ignore" });
+  let launchError = null;
+  browser.once("error", (err) => { launchError = err; controller.abort(); });
+  browser.once("exit", () => controller.abort());
+  try {
+    const options = {
+      type: "info", title: "Sign in to YouTube Music",
+      message: "Finish signing in in the browser, then return here.",
+      detail: "A separate browser window was opened for this app. Once YouTube Music shows your account, choose Finish sign-in. Your usual browser profile is not used.",
+      buttons: ["Finish sign-in", "Cancel"], defaultId: 0, cancelId: 1,
+      signal: controller.signal,
+    };
+    const result = await (parent && !parent.isDestroyed()
+      ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+    const exited = browser.exitCode !== null || browser.signalCode !== null;
+    if (launchError) throw launchError;
+    if (canceled || (result.response !== 0 && !exited)) return { ok: false, reason: "closed" };
+    await stopChild(browser);
+    if (canceled) return { ok: false, reason: "closed" };
+    const cookies = pickYouTubeCookies(await readSavedCookies(exe, profile, stopping.signal));
+    if (canceled) return { ok: false, reason: "closed" };
+    if (!looksSignedIn(cookies)) return { ok: false, reason: "not-signed-in" };
+    await importIntoOwnSession(cookies);
+    // Once import begins, finish the commit. A concurrent sign-out waits for
+    // this attempt before clearing the session and credential files.
+    await ytSession().cookies.flushStore();
+    writeCredentials(dataDir, toHeader(cookies));
+    return { ok: true, count: cookies.length };
+  } catch (err) {
+    console.warn("[auth] browser sign-in failed:", err.message);
+    return { ok: false, reason: "browser-sign-in-failed" };
+  } finally {
+    await stopChild(browser);
+    cancelMacSignIn = null;
+    fs.rmSync(profile, { recursive: true, force: true });
+  }
 }
 
 /*
@@ -183,6 +251,7 @@ function signIn(dataDir, parent) {
  * Edge ships with Windows, so on Windows there is essentially always one.
  */
 function systemBrowser() {
+  if (process.platform === "darwin") return findMacBrowser();
   if (process.platform !== "win32") return null;
   const pf = process.env.ProgramFiles || "C:\\Program Files";
   const pf86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
@@ -315,7 +384,7 @@ function signInWithBrowser(dataDir, exe) {
  * nothing else can open the file. Driven over --remote-debugging-pipe, which
  * is private to this process, and never pointed at any web page.
  */
-function readSavedCookies(exe, profile) {
+function readSavedCookies(exe, profile, signal) {
   return new Promise((resolve, reject) => {
     const child = spawn(
       exe,
@@ -335,15 +404,15 @@ function readSavedCookies(exe, profile) {
     let nextId = 0;
     const waiting = new Map();
     let done = false;
+    const onAbort = () => end(new Error("sign-in canceled"));
 
-    const end = (err, value) => {
+    const end = async (err, value) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      if (child.exitCode === null) {
-        send("Browser.close");
-        setTimeout(() => child.exitCode === null && child.kill(), 2000).unref?.();
-      }
+      signal?.removeEventListener("abort", onAbort);
+      // Do not remove the temporary profile while Chrome is still using it.
+      await stopChild(child);
       if (err) reject(err);
       else resolve(value);
     };
@@ -370,6 +439,8 @@ function readSavedCookies(exe, profile) {
     toBrowser.on("error", () => {});
     child.on("error", (err) => end(err));
     child.on("exit", () => end(new Error("browser exited before its cookies were read")));
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
 
     function send(method, params = {}) {
       return new Promise((res) => {
@@ -503,6 +574,7 @@ async function refreshCredentials(dataDir) {
 }
 
 async function signOut(dataDir) {
+  await cancelSignIn();
   const ses = ytSession();
   await ses.clearStorageData();
   // The core exports the session for yt-dlp beside the credentials; signing
@@ -562,4 +634,4 @@ function register(dataDirFn, getMainWindow, corePort, restartCore) {
   });
 }
 
-module.exports = { register, refreshCredentials, signIn, signOut };
+module.exports = { register, refreshCredentials, signIn, signOut, cancelSignIn };

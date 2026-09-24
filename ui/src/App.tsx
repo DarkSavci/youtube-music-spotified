@@ -109,7 +109,7 @@ export function App() {
   return (
     <PromptProvider>
     <MenuProvider>
-    <div className="app-shell" data-nowplaying={queueOpen || lyricsOpen || undefined}>
+    <div className="app-shell" data-platform={window.spotifier?.platform} data-nowplaying={queueOpen || lyricsOpen || undefined}>
       <SkipLink />
       <Announcer />
       {/* One listener for every icon-only control in the app. */}

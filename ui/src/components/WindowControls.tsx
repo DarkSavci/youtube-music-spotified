@@ -27,7 +27,7 @@ export function WindowControls() {
     return bridge.onMaximizeChange(setMaximized);
   }, [bridge]);
 
-  if (!bridge) return null;
+  if (!bridge || window.spotifier?.platform === "darwin") return null;
 
   return (
     <div className="wincontrols">

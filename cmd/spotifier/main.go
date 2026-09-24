@@ -16,12 +16,14 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"spotifier/internal/audiocache"
 	"strings"
+	"syscall"
 	"time"
 
 	"spotifier/internal/account"
@@ -205,6 +207,13 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	listener, err := net.Listen("tcp", *addr)
+	if err != nil {
+		log.Error("listen", "err", err)
+		os.Exit(1)
+	}
+	defer listener.Close()
+
 	log.Info("spotifier listening",
 		"addr", *addr,
 		"catalog", *catalogMode,
@@ -216,11 +225,11 @@ func main() {
 	}
 
 	// Shut down cleanly so the desktop shell never leaves an orphaned sidecar.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("listen", "err", err)
 			os.Exit(1)
 		}

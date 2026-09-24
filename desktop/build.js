@@ -12,7 +12,9 @@
  * --prepackaged, which skips the toolchain because nothing is re-packaged or
  * signed.
  */
-const { packager } = require("@electron/packager");
+const { targetFor, vendorDirectory, resourcesDirectory } = require("./platform");
+const target = targetFor();
+const refresh = process.argv.includes("--refresh-tools");
 const { execFileSync } = require("node:child_process");
 const crypto = require("node:crypto");
 const path = require("node:path");
@@ -37,7 +39,7 @@ const out = path.join(root, "dist-desktop");
  * packaging without it would ship the degraded app without saying so.
  */
 const YTDLP_RELEASE = "https://github.com/yt-dlp/yt-dlp/releases/latest/download";
-const vendor = path.join(__dirname, "vendor");
+const vendor = vendorDirectory(__dirname, target);
 /*
  * The unpacked Windows build, not the single-file yt-dlp.exe.
  *
@@ -48,7 +50,7 @@ const vendor = path.join(__dirname, "vendor");
  * checksum file.
  */
 const ytdlpDir = path.join(vendor, "yt-dlp");
-const ytdlpCached = path.join(ytdlpDir, "yt-dlp.exe");
+const ytdlpCached = path.join(ytdlpDir, target.ytdlp);
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 async function download(url) {
@@ -59,7 +61,9 @@ async function download(url) {
 
 async function fetchYtdlp() {
   const fresh =
-    fs.existsSync(ytdlpCached) && Date.now() - fs.statSync(ytdlpCached).mtimeMs < WEEK_MS;
+    !refresh && fs.existsSync(ytdlpCached) &&
+    (!target.mac || fs.existsSync(path.join(ytdlpDir, "_internal"))) &&
+    Date.now() - fs.statSync(ytdlpCached).mtimeMs < WEEK_MS && ytdlpVersion(ytdlpCached);
   if (fresh) {
     console.log("yt-dlp: using cached copy");
     return ytdlpDir;
@@ -68,22 +72,26 @@ async function fetchYtdlp() {
   try {
     console.log("yt-dlp: downloading the latest release...");
     const [zip, sums] = await Promise.all([
-      download(`${YTDLP_RELEASE}/yt-dlp_win.zip`),
+      download(`${YTDLP_RELEASE}/${target.ytdlpAsset}`),
       download(`${YTDLP_RELEASE}/SHA2-256SUMS`),
     ]);
-    const line = sums.toString("utf8").split(/\r?\n/).find((l) => / yt-dlp_win\.zip$/.test(l.trim()));
+    const line = sums.toString("utf8").split(/\r?\n/).find((l) => l.trim().split(/\s+/).at(-1) === target.ytdlpAsset);
     const expected = line && line.trim().split(/\s+/)[0].toLowerCase();
     const actual = crypto.createHash("sha256").update(zip).digest("hex");
     if (!expected || expected !== actual) {
       throw new Error(`checksum mismatch (expected ${expected || "none"}, got ${actual})`);
     }
     fs.mkdirSync(vendor, { recursive: true });
-    const zipPath = path.join(vendor, "yt-dlp_win.zip");
+    const zipPath = path.join(vendor, target.ytdlpAsset);
     fs.writeFileSync(zipPath, zip);
     fs.rmSync(ytdlpDir, { recursive: true, force: true });
     fs.mkdirSync(ytdlpDir, { recursive: true });
-    // Windows ships bsdtar, which reads zip archives.
-    execFileSync(windowsTar(), ["-xf", zipPath, "-C", ytdlpDir]);
+    // Both platforms ship bsdtar, which reads zip archives.
+    execFileSync(archiveTool(), ["-xf", zipPath, "-C", ytdlpDir]);
+    if (target.mac) {
+      fs.renameSync(path.join(ytdlpDir, "yt-dlp_macos"), ytdlpCached);
+      fs.chmodSync(ytdlpCached, 0o755);
+    }
     fs.rmSync(zipPath, { force: true });
     if (!ytdlpVersion(ytdlpCached)) throw new Error("the unpacked build does not run");
     // The app's own updater compares against this to know what it has.
@@ -104,7 +112,7 @@ async function fetchYtdlp() {
   }
 
   // Last resort: whatever is installed on this machine.
-  for (const candidate of ytdlpOnPath()) {
+  for (const candidate of target.mac ? [] : ytdlpOnPath()) {
     fs.mkdirSync(ytdlpDir, { recursive: true });
     fs.copyFileSync(candidate, ytdlpCached);
     /*
@@ -143,13 +151,13 @@ async function fetchYtdlp() {
  * would ship an app that plays nothing on most machines.
  */
 const DENO_RELEASE = "https://github.com/denoland/deno/releases/latest/download";
-const DENO_ASSET = "deno-x86_64-pc-windows-msvc.zip";
+const DENO_ASSET = target.denoAsset;
 const denoDir = path.join(vendor, "deno");
-const denoCached = path.join(denoDir, "deno.exe");
+const denoCached = path.join(denoDir, target.deno);
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 
 async function fetchDeno() {
-  if (fs.existsSync(denoCached) && Date.now() - fs.statSync(denoCached).mtimeMs < MONTH_MS && denoVersion(denoCached)) {
+  if (!refresh && fs.existsSync(denoCached) && Date.now() - fs.statSync(denoCached).mtimeMs < MONTH_MS && denoVersion(denoCached)) {
     console.log("deno: using cached copy");
     return denoDir;
   }
@@ -169,7 +177,8 @@ async function fetchDeno() {
     fs.writeFileSync(zipPath, zip);
     fs.rmSync(denoDir, { recursive: true, force: true });
     fs.mkdirSync(denoDir, { recursive: true });
-    execFileSync(windowsTar(), ["-xf", zipPath, "-C", denoDir]);
+    execFileSync(archiveTool(), ["-xf", zipPath, "-C", denoDir]);
+    if (target.mac) fs.chmodSync(denoCached, 0o755);
     fs.rmSync(zipPath, { force: true });
     const version = denoVersion(denoCached);
     if (!version) throw new Error("the unpacked binary does not run");
@@ -202,7 +211,8 @@ function denoVersion(bin) {
  * Windows' own tar, which reads zip archives. Named in full: a shell with Git
  * on PATH finds GNU tar first, which takes "C:" for a remote host.
  */
-function windowsTar() {
+function archiveTool() {
+  if (target.mac) return "/usr/bin/tar";
   return path.join(process.env.SystemRoot || "C:/Windows", "System32", "tar.exe");
 }
 
@@ -245,7 +255,23 @@ function ytdlpOnPath() {
   return out;
 }
 
+/** Generate an icns from the existing product icon using macOS tools. */
+function macIcon() {
+  const iconset = path.join(vendor, "icon.iconset");
+  fs.mkdirSync(iconset, { recursive: true });
+  for (const size of [16, 32, 128, 256, 512]) {
+    for (const scale of [1, 2]) {
+      const output = path.join(iconset, `icon_${size}x${size}${scale === 2 ? "@2x" : ""}.png`);
+      execFileSync("/usr/bin/sips", ["-z", String(size * scale), String(size * scale), path.join(__dirname, "branding", "icon.png"), "--out", output], { stdio: "ignore" });
+    }
+  }
+  const icon = path.join(vendor, "icon.icns");
+  execFileSync("/usr/bin/iconutil", ["-c", "icns", iconset, "-o", icon]);
+  return icon;
+}
+
 async function main() {
+  const { packager } = await import("@electron/packager");
   /*
    * Build the core here rather than trusting whatever is in bin/.
    *
@@ -256,11 +282,12 @@ async function main() {
    * in the binary under test. `go build` is already incremental; the check
    * that cannot be wrong is cheaper than the one that can.
    */
-  const core = path.join(root, "bin", "spotifier.exe");
+  const core = path.join(root, "bin", target.core);
   console.log("building core...");
   try {
     execFileSync("go", ["build", "-o", core, "./cmd/spotifier"], {
       cwd: root,
+      env: { ...process.env, GOOS: target.goos, GOARCH: target.goarch },
       stdio: "inherit",
     });
   } catch {
@@ -286,7 +313,7 @@ async function main() {
   for (const [label, script] of [["typechecking ui", "typecheck"], ["building ui", "build"]]) {
     console.log(label + "...");
     try {
-      execFileSync("npm", ["--prefix", JSON.stringify(path.join(root, "ui")), "run", script], {
+      execFileSync("npm", ["--prefix", viaShell ? JSON.stringify(path.join(root, "ui")) : path.join(root, "ui"), "run", script], {
         cwd: root,
         stdio: "inherit",
         shell: viaShell,
@@ -310,17 +337,19 @@ async function main() {
     dir: __dirname,
     out,
     overwrite: true,
-    platform: "win32",
-    arch: "x64",
+    platform: target.platform,
+    arch: target.arch,
+    appBundleId: "dev.darksavci.youtubemusicspotified",
+    ...(target.mac ? { extendInfo: { LSMinimumSystemVersion: "12.0" } } : {}),
     name: "Youtube Music Spotified",
     appVersion: require("./package.json").version,
     // Stamped into the .exe, which is what Explorer and the taskbar read.
-    icon: path.join(__dirname, "branding", "icon.ico"),
+    icon: target.mac ? macIcon() : path.join(__dirname, "branding", "icon.ico"),
     // Only what the app actually runs. node_modules ships pruned to the
     // production dependencies (electron-updater and its own), so Electron and
     // the build tools stay out.
     prune: true,
-    ignore: [/^\/build\.js$/, /^\/readme-shots\.js$/, /^\/make-thumbar-icons\.js$/, /^\/dist-desktop/, /^\/vendor/, /^\/branding\/installer\.nsh$/],
+    ignore: [/^\/build\.js$/, /^\/test(?:\/|$)/, /^\/readme-shots\.js$/, /^\/make-thumbar-icons\.js$/, /^\/dist-desktop/, /^\/vendor/, /^\/branding\/installer\.nsh$/],
     // branding/ ships: main.js loads the PNG for the window icon at runtime.
     // yt-dlp and deno sit beside the core in resources/, where main.js looks.
     extraResource: [core, ytdlp, deno],
@@ -331,19 +360,29 @@ async function main() {
   });
 
   const appDir = paths[0];
-  const resources = path.join(appDir, "resources", "app");
+  const resources = resourcesDirectory(appDir, target);
 
   // main.js resolves the bundle at ./ui/dist when packaged.
-  const uiTarget = path.join(resources, "ui", "dist");
+  const uiTarget = path.join(resources, "app", "ui", "dist");
   fs.mkdirSync(uiTarget, { recursive: true });
   fs.cpSync(path.join(root, "ui", "dist"), uiTarget, { recursive: true });
 
+  if (target.mac) {
+    // Local ad-hoc signatures need no Apple account. Sign only after the UI
+    // and every helper have reached their final location in the bundle.
+    const entitlements = path.join(__dirname, "branding", "entitlements.mac.plist");
+    for (const file of [
+      path.join(resources, target.core),
+      path.join(resources, "yt-dlp", target.ytdlp),
+      path.join(resources, "deno", target.deno),
+      path.join(appDir, "Youtube Music Spotified.app"),
+    ]) {
+      execFileSync("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", "--entitlements", entitlements, file], { stdio: "inherit" });
+    }
+  }
   console.log(`packaged: ${appDir}`);
-  console.log(`  executable : ${path.join(appDir, "Youtube Music Spotified.exe")}`);
-  console.log(`  core       : ${path.join(appDir, "resources", "spotifier.exe")}`);
-  console.log(`  yt-dlp     : ${path.join(appDir, "resources", "yt-dlp", "yt-dlp.exe")}`);
-  console.log(`  deno       : ${path.join(appDir, "resources", "deno", "deno.exe")}`);
-  console.log(`  ui bundle  : ${uiTarget}`);
+  console.log(`  resources: ${resources}`);
+  console.log(`  ui bundle: ${uiTarget}`);
 }
 
 main().catch((err) => {

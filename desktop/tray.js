@@ -59,6 +59,11 @@ const branding = (...p) => path.join(__dirname, "branding", ...p);
 function trayIcon() {
   // The .ico carries the small sizes the notification area draws at; the PNG
   // scaled down is blurry there.
+  if (process.platform === "darwin") {
+    const icon = nativeImage.createFromPath(branding("trayTemplate.png"));
+    icon.setTemplateImage(true);
+    return icon;
+  }
   return branding(process.platform === "win32" ? "icon.ico" : "icon.png");
 }
 
@@ -400,7 +405,14 @@ function create(windowGetter, source) {
  */
 function attach(win) {
   win.on("close", (e) => {
-    if (quitting || !closeToTray) return;
+    if (quitting) return;
+    if (!closeToTray) {
+      if (process.platform === "darwin") {
+        e.preventDefault();
+        app.quit();
+      }
+      return;
+    }
     e.preventDefault();
     win.hide();
   });
