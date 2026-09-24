@@ -17,7 +17,7 @@
  * data directory and read only by the local sidecar.
  */
 
-const { app, BrowserWindow, session, ipcMain, net, dialog } = require("electron");
+const { app, BrowserWindow, session, dialog } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -71,41 +71,10 @@ function browserUserAgent() {
  * A dedicated partition so a sign-out here cannot disturb anything else, and
  * so the session persists across restarts.
  */
-function ytSession() {
-  const ses = session.fromPartition(PARTITION);
+function ytSession(partition = PARTITION) {
+  const ses = session.fromPartition(partition);
   ses.setUserAgent(browserUserAgent());
   return ses;
-}
-
-/**
- * Tells the core to re-read the credentials file.
- *
- * Used when the same account's cookies are refreshed. Signing in or out
- * restarts the core instead (restartCore in main.js), because a changed
- * account has to reach parts of the core that only read it at startup.
- */
-function notifyCore(port) {
-  return new Promise((resolve) => {
-    const req = net.request({
-      method: "POST",
-      url: `http://127.0.0.1:${port}/v1/auth/reload`,
-    });
-    let body = "";
-    req.on("response", (res) => {
-      res.on("data", (c) => (body += c));
-      res.on("end", () => {
-        try {
-          resolve(JSON.parse(body));
-        } catch {
-          resolve({ signedIn: false });
-        }
-      });
-    });
-    // The core being unreachable is not a sign-in failure: the credentials are
-    // on disk and the next start will read them.
-    req.on("error", () => resolve(null));
-    req.end();
-  });
 }
 
 /** Cookies the sidecar needs. Anything else is noise we do not persist. */
@@ -162,7 +131,9 @@ function credentialsPath(dataDir) {
 function writeCredentials(dataDir, cookieHeader) {
   const target = credentialsPath(dataDir);
   const tmp = `${target}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ cookie: cookieHeader }, null, 2), {
+  let previous = {};
+  try { previous = JSON.parse(fs.readFileSync(target, "utf8")); } catch (err) { if (err.code !== "ENOENT") throw err; }
+  fs.writeFileSync(tmp, JSON.stringify({ ...previous, cookie: cookieHeader }, null, 2), {
     encoding: "utf8",
     mode: 0o600,
   });
@@ -176,35 +147,35 @@ function writeCredentials(dataDir, cookieHeader) {
  * there is not. See signInWithBrowser for why the order is that way round.
  */
 let pendingSignIn = null;
-let cancelMacSignIn = null;
+let cancelActiveSignIn = null;
 
-function signIn(dataDir, parent) {
+function signIn(dataDir, parent, partition = PARTITION) {
   if (pendingSignIn) return pendingSignIn;
   const exe = systemBrowser();
   // Start synchronously so a Quit immediately after Sign in can cancel it.
   const attempt = process.platform === "darwin"
-    ? exe ? signInWithMacBrowser(dataDir, exe, parent) : { ok: false, reason: "browser-not-found" }
-    : exe ? signInWithBrowser(dataDir, exe) : signInEmbedded(dataDir, parent);
+    ? exe ? signInWithMacBrowser(dataDir, exe, parent, partition) : { ok: false, reason: "browser-not-found" }
+    : exe ? signInWithBrowser(dataDir, exe, partition) : signInEmbedded(dataDir, parent, partition);
   pendingSignIn = Promise.resolve(attempt).finally(() => { pendingSignIn = null; });
   return pendingSignIn;
 }
 
 async function cancelSignIn() {
-  if (!cancelMacSignIn) return;
-  cancelMacSignIn();
+  if (!cancelActiveSignIn) return;
+  cancelActiveSignIn();
   await pendingSignIn;
 }
 
 /** Chrome remains running after its last Mac window closes. Let the user
  * explicitly finish, then stop only our temporary-profile process and wait
  * for its cookie store to flush before reopening it headless. */
-async function signInWithMacBrowser(dataDir, exe, parent) {
+async function signInWithMacBrowser(dataDir, exe, parent, partition) {
   const profile = fs.mkdtempSync(path.join(dataDir, "signin-browser-"));
   fs.chmodSync(profile, 0o700);
   const controller = new AbortController();
   const stopping = new AbortController();
   let canceled = false;
-  cancelMacSignIn = () => { canceled = true; controller.abort(); stopping.abort(); };
+  cancelActiveSignIn = () => { canceled = true; controller.abort(); stopping.abort(); };
   const browser = spawn(exe, [
     `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
     "--disable-sync", "--disable-background-mode", "--new-window", SIGNIN_URL,
@@ -230,10 +201,10 @@ async function signInWithMacBrowser(dataDir, exe, parent) {
     const cookies = pickYouTubeCookies(await readSavedCookies(exe, profile, stopping.signal));
     if (canceled) return { ok: false, reason: "closed" };
     if (!looksSignedIn(cookies)) return { ok: false, reason: "not-signed-in" };
-    await importIntoOwnSession(cookies);
+    await importIntoOwnSession(cookies, partition);
     // Once import begins, finish the commit. A concurrent sign-out waits for
     // this attempt before clearing the session and credential files.
-    await ytSession().cookies.flushStore();
+    await ytSession(partition).cookies.flushStore();
     writeCredentials(dataDir, toHeader(cookies));
     return { ok: true, count: cookies.length };
   } catch (err) {
@@ -241,7 +212,7 @@ async function signInWithMacBrowser(dataDir, exe, parent) {
     return { ok: false, reason: "browser-sign-in-failed" };
   } finally {
     await stopChild(browser);
-    cancelMacSignIn = null;
+    cancelActiveSignIn = null;
     fs.rmSync(profile, { recursive: true, force: true });
   }
 }
@@ -293,19 +264,22 @@ function systemBrowser() {
  * Closing the window by hand works too: the cookies are read either way, and
  * a window closed before signing in simply finds none.
  */
-function signInWithBrowser(dataDir, exe) {
+function signInWithBrowser(dataDir, exe, partition) {
   return new Promise((resolve) => {
     const profile = path.join(dataDir, "signin-browser");
     fs.rmSync(profile, { recursive: true, force: true });
 
     let settled = false;
-    const cleanup = () =>
-      setTimeout(() => fs.rmSync(profile, { recursive: true, force: true }), 500);
-    const finish = (result) => {
+    let canceled = false;
+    let reading = false;
+    const stopping = new AbortController();
+    const finish = async (result) => {
       if (settled) return;
       settled = true;
       app.removeListener("before-quit", onQuit);
-      if (watcher.exitCode === null) watcher.kill();
+      await Promise.all([stopChild(watcher), stopChild(browser)]);
+      fs.rmSync(profile, { recursive: true, force: true });
+      cancelActiveSignIn = null;
       resolve(result);
     };
 
@@ -325,9 +299,11 @@ function signInWithBrowser(dataDir, exe) {
 
     // Quitting the app mid-sign-in must not leave a browser holding a session.
     const onQuit = () => {
-      if (browser.exitCode === null) browser.kill();
-      cleanup();
+      canceled = true;
+      stopping.abort();
+      if (!reading) void finish({ ok: false, reason: "closed" });
     };
+    cancelActiveSignIn = onQuit;
     app.on("before-quit", onQuit);
 
     /*
@@ -349,28 +325,29 @@ function signInWithBrowser(dataDir, exe) {
       windowsHide: true,
     });
 
+    watcher.on("error", (err) => void finish({ ok: false, reason: err.message }));
     browser.on("error", (err) => {
-      cleanup();
-      finish({ ok: false, reason: err.message });
+      void finish({ ok: false, reason: err.message });
     });
 
     // Phase two: however the window closed, read what it saved.
     browser.on("exit", async () => {
       if (settled) return;
+      reading = true;
       try {
-        const cookies = pickYouTubeCookies(await readSavedCookies(exe, profile));
+        const cookies = pickYouTubeCookies(await readSavedCookies(exe, profile, stopping.signal));
+        if (canceled) return finish({ ok: false, reason: "closed" });
         if (!looksSignedIn(cookies)) {
           finish({ ok: false, reason: "not-signed-in" });
         } else {
-          await importIntoOwnSession(cookies);
+          await importIntoOwnSession(cookies, partition);
+          await ytSession(partition).cookies.flushStore();
           writeCredentials(dataDir, toHeader(cookies));
           finish({ ok: true, count: cookies.length });
         }
       } catch (err) {
         console.error("[auth] could not read the saved session:", err);
         finish({ ok: false, reason: String(err.message || err) });
-      } finally {
-        cleanup();
       }
     });
   });
@@ -484,8 +461,8 @@ function pickYouTubeCookies(all) {
  * that reads it — refreshing credentials at startup, signing out — works as
  * it did when sign-in happened in that partition directly.
  */
-async function importIntoOwnSession(cookies) {
-  const ses = ytSession();
+async function importIntoOwnSession(cookies, partition) {
+  const ses = ytSession(partition);
   const sameSite = { Strict: "strict", Lax: "lax", None: "no_restriction" };
   for (const c of cookies) {
     await ses.cookies.set({
@@ -510,9 +487,9 @@ async function importIntoOwnSession(cookies) {
  * in flow crosses several domains and can finish in ways that do not produce a
  * predictable final navigation.
  */
-function signInEmbedded(dataDir, parent) {
+function signInEmbedded(dataDir, parent, partition) {
   return new Promise((resolve) => {
-    const ses = ytSession();
+    const ses = ytSession(partition);
 
     const win = new BrowserWindow({
       width: 980,
@@ -529,6 +506,7 @@ function signInEmbedded(dataDir, parent) {
     const finish = (result) => {
       if (settled) return;
       settled = true;
+      cancelActiveSignIn = null;
       clearInterval(poll);
       if (!win.isDestroyed()) win.close();
       resolve(result);
@@ -539,6 +517,9 @@ function signInEmbedded(dataDir, parent) {
       try {
         const cookies = await readYouTubeCookies(ses);
         if (looksSignedIn(cookies)) {
+          if (settled) return;
+          await ses.cookies.flushStore();
+          if (settled) return;
           writeCredentials(dataDir, toHeader(cookies));
           finish({ ok: true, count: cookies.length });
         }
@@ -547,6 +528,7 @@ function signInEmbedded(dataDir, parent) {
       }
     }, 1500);
 
+    cancelActiveSignIn = () => finish({ ok: false, reason: "closed" });
     win.on("closed", () => finish({ ok: false, reason: "closed" }));
     /*
      * Already signed in at the browser level is possible — a previous
@@ -565,17 +547,17 @@ function signInEmbedded(dataDir, parent) {
  * YouTube rotates it the next read returns the current values. Called on
  * startup and whenever the sidecar reports a logged-out session.
  */
-async function refreshCredentials(dataDir) {
-  const ses = ytSession();
+async function refreshCredentials(dataDir, partition = PARTITION) {
+  const ses = ytSession(partition);
   const cookies = await readYouTubeCookies(ses);
   if (!looksSignedIn(cookies)) return { ok: false, reason: "not-signed-in" };
   writeCredentials(dataDir, toHeader(cookies));
   return { ok: true, count: cookies.length };
 }
 
-async function signOut(dataDir) {
+async function signOut(dataDir, partition = PARTITION) {
   await cancelSignIn();
-  const ses = ytSession();
+  const ses = ytSession(partition);
   await ses.clearStorageData();
   // The core exports the session for yt-dlp beside the credentials; signing
   // out has to take that copy too, or the session outlives the sign-out.
@@ -590,48 +572,4 @@ async function signOut(dataDir) {
   return { ok: true };
 }
 
-function register(dataDirFn, getMainWindow, corePort, restartCore) {
-  // A sign-in the app was killed during leaves its throwaway browser profile
-  // behind, holding a session. It is never reused, so it goes at startup.
-  fs.rmSync(path.join(dataDirFn(), "signin-browser"), { recursive: true, force: true });
-
-  // Every credential change tells the core, so the running process picks it
-  // up. A sign-in that only writes a file is a sign-in that does nothing.
-  // Signing in or out changes the account everything in the core was wired
-  // with, so it restarts rather than being told to re-read the file — see
-  // restartCore in main.js for what re-reading alone left behind.
-  ipcMain.handle("auth:sign-in", async () => {
-    const result = await signIn(dataDirFn(), getMainWindow());
-    if (result.ok) {
-      if (restartCore) {
-        await restartCore();
-        result.signedIn = true;
-      } else {
-        const core = await notifyCore(corePort);
-        result.signedIn = core?.signedIn ?? false;
-      }
-    }
-    return result;
-  });
-  ipcMain.handle("auth:refresh", async () => {
-    const result = await refreshCredentials(dataDirFn());
-    if (result.ok) await notifyCore(corePort);
-    return result;
-  });
-  ipcMain.handle("auth:sign-out", async () => {
-    const result = await signOut(dataDirFn());
-    if (restartCore) await restartCore();
-    else await notifyCore(corePort);
-    return result;
-  });
-  ipcMain.handle("auth:status", () => {
-    try {
-      const raw = fs.readFileSync(credentialsPath(dataDirFn()), "utf8");
-      return { hasCredentials: JSON.parse(raw).cookie?.length > 0 };
-    } catch {
-      return { hasCredentials: false };
-    }
-  });
-}
-
-module.exports = { register, refreshCredentials, signIn, signOut, cancelSignIn };
+module.exports = { refreshCredentials, signIn, signOut, cancelSignIn };

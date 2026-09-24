@@ -11,7 +11,7 @@ import { useCallback, useEffect, useState } from "react";
  * Reads and writes are guarded because storage can be blocked or cleared, and
  * a missing history should cost nothing more than an empty list.
  */
-const KEY = "spotifier.recentSearches";
+const KEY = "spotifier.recentSearches" + (window.spotifier?.accountScope ? `.${window.spotifier.accountScope}` : "");
 const LIMIT = 8;
 
 function read(): string[] {

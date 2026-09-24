@@ -1547,3 +1547,12 @@ li[data-state="active"] .lyrics__line {
     flex-direction: column;
   }
 }
+
+.accounts { display: grid; gap: 16px; }
+.accounts p { color: var(--text-secondary); margin: 0; line-height: 1.5; }
+.accounts__item { padding: 16px 0; border-bottom: 1px solid var(--border-subtle); }
+.accounts__heading { display: flex; gap: 16px; align-items: center; margin-bottom: 12px; }
+.accounts__heading span { color: var(--text-secondary); font-size: 12px; }
+.accounts label { display: flex; align-items: center; gap: 12px; }
+.accounts select { max-width: 360px; }
+.accounts [role="alert"] { color: #ff9b9b; }

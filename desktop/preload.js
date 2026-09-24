@@ -20,6 +20,7 @@ const CORE_ORIGIN = "http://127.0.0.1:8674";
 contextBridge.exposeInMainWorld("spotifier", {
   /** Absolute origin of the Go core, read synchronously at page load. */
   coreOrigin: CORE_ORIGIN,
+  accountScope: ipcRenderer.sendSync("auth:scope"),
 
   /**
    * Title-bar controls.
@@ -95,6 +96,11 @@ contextBridge.exposeInMainWorld("spotifier", {
    * updates our session rather than invalidating a copied snapshot.
    */
   auth: {
+    accounts: () => ipcRenderer.invoke("auth:accounts"),
+    channels: () => ipcRenderer.invoke("auth:channels"),
+    switchAccount: (id) => ipcRenderer.invoke("auth:switch-account", id),
+    selectChannel: (id) => ipcRenderer.invoke("auth:select-channel", id),
+    removeAccount: (id) => ipcRenderer.invoke("auth:remove-account", id),
     signIn: () => ipcRenderer.invoke("auth:sign-in"),
     refresh: () => ipcRenderer.invoke("auth:refresh"),
     signOut: () => ipcRenderer.invoke("auth:sign-out"),

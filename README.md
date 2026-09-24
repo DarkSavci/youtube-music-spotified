@@ -150,3 +150,11 @@ copies update to it.
 ## License
 
 [MIT](LICENSE)
+
+### Saved accounts and YouTube channels
+
+Open **Settings → Accounts and channels** to add a Google account, use a saved account, or select a YouTube channel under the active account. A Google account's personal channel and its other YouTube channels can have different libraries; choose the channel you normally use on YouTube Music. Channel discovery requires an internet connection.
+
+Each added Google login uses its own app-owned browser session. Account and channel selection survives relaunches. Switching stops playback and restarts the local service; each identity keeps its own queue, local listening history, and pending play reports. Device preferences remain shared. Existing installations retain their original session and personal-channel history without moving the database.
+
+**Remove account** signs that saved Google session out of the app while keeping the other saved accounts. Local history is retained on disk. If a saved session expires, remove it and add the account again. Delegated channel-manager roles requiring Google's additional confirmation flow are not currently listed.

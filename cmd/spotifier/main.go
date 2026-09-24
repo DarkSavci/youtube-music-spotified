@@ -46,6 +46,7 @@ func main() {
 		addr         = flag.String("addr", "127.0.0.1:8674", "listen address")
 		catalogMode  = flag.String("catalog", "auto", "catalog source: auto | innertube | fixture")
 		fixtureDir   = flag.String("fixtures", "testdata/fixtures", "fixture directory")
+		accountScope = flag.String("account-scope", "", "desktop account scope for delayed play reports")
 		credPath     = flag.String("credentials", "credentials.json", "path to credentials")
 		dbPath       = flag.String("db", "spotifier.db", "control-plane database")
 		verbose      = flag.Bool("v", false, "debug logging")
@@ -63,7 +64,7 @@ func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
 	rec := obs.NewRecorder()
-	deps := api.Deps{Recorder: rec, Log: log}
+	deps := api.Deps{AccountScope: *accountScope, Recorder: rec, Log: log}
 
 	// The Control plane is ours and needs no credentials. If it cannot open,
 	// browsing and playback still work; only the statistics surfaces and the

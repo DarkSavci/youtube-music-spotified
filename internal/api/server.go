@@ -36,7 +36,8 @@ import (
 
 // Deps are the modules a Server exposes.
 type Deps struct {
-	Catalog catalog.Catalog
+	AccountScope string
+	Catalog      catalog.Catalog
 
 	// Account holds the signed-in state and everything derived from it. It is
 	// read per request rather than captured here, because signing in happens
@@ -175,6 +176,7 @@ func (s *Server) routes() {
 
 	// Identity plane — the user's own account. These never move off the Device.
 	s.mux.HandleFunc("GET /v1/me", s.handleMe)
+	s.mux.HandleFunc("GET /v1/me/channels", s.handleChannels)
 	s.mux.HandleFunc("GET /v1/me/library", s.handleLibrary)
 	s.mux.HandleFunc("GET /v1/me/liked", s.handleLiked)
 	s.mux.HandleFunc("GET /v1/me/history", s.handleHistory)
@@ -381,6 +383,20 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.write(w, http.StatusOK, meResponse{State: string(state), Account: acct})
+}
+
+func (s *Server) handleChannels(w http.ResponseWriter, r *http.Request) {
+	client := s.account().Client
+	if client == nil {
+		s.write(w, http.StatusUnauthorized, map[string]string{"error": "Sign in first"})
+		return
+	}
+	channels, err := client.Channels(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.write(w, http.StatusOK, channels)
 }
 
 // handleAuthReload re-reads the credentials file written by the shell.

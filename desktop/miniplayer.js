@@ -219,4 +219,6 @@ function isOpen() {
   return Boolean(win && !win.isDestroyed());
 }
 
-module.exports = { FRAME, register, openHandler, adopt, isOpen };
+function close() { if (win && !win.isDestroyed()) win.close(); }
+
+module.exports = { FRAME, register, openHandler, adopt, isOpen, close };

@@ -8,20 +8,21 @@ const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
 const { createRequire } = require("node:module");
 
-function harness(t, { response = 0, cookies = [], browserFound = true, waitForCancel = false, launchFails = false } = {}) {
+function harness(t, { platform = "darwin", response = 0, cookies = [], browserFound = true, waitForCancel = false, launchFails = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spotifier-auth-test-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const children = [];
   const imported = [];
+  const partitions = [];
   let flushed = false;
   const ses = {
     setUserAgent() {}, clearStorageData: async () => {},
-    cookies: { set: async (cookie) => imported.push(cookie), flushStore: async () => { flushed = true; } },
+    cookies: { get: async () => cookies, set: async (cookie) => imported.push(cookie), flushStore: async () => { flushed = true; } },
   };
   const app = new EventEmitter();
   app.userAgentFallback = "Chrome/130.0.0";
   const electron = {
-    app, session: { fromPartition: () => ses },
+    app, session: { fromPartition: (name) => { partitions.push(name); return ses; } },
     dialog: { showMessageBox: async (options) => {
       if (waitForCancel || launchFails) {
         await new Promise((resolve) => options.signal.addEventListener("abort", resolve, { once: true }));
@@ -57,15 +58,16 @@ function harness(t, { response = 0, cookies = [], browserFound = true, waitForCa
   const nativeRequire = createRequire(filename);
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(filename, "utf8"), {
-    module, process: { platform: "darwin" }, Buffer, AbortController,
+    module, process: { platform, env: {} }, Buffer, AbortController,
     setTimeout, clearTimeout, setInterval, clearInterval,
     console: { warn() {}, error() {} },
     require: (name) => name === "electron" ? electron
+      : name === "node:fs" ? { ...fs, existsSync: file => platform === "win32" && String(file).endsWith("chrome.exe") ? browserFound : fs.existsSync(file) }
       : name === "node:child_process" ? { spawn }
       : name === "./mac-browser" ? { findMacBrowser: () => browserFound ? "/test/Chrome" : null }
       : nativeRequire(name),
   }, { filename });
-  return { auth: module.exports, dir, children, imported, flushed: () => flushed };
+  return { auth: module.exports, dir, children, imported, partitions, flushed: () => flushed };
 }
 
 const signedInCookies = [
@@ -121,4 +123,36 @@ test("finishing before authentication does not write credentials", async (t) => 
   assert.equal((await h.auth.signIn(h.dir)).reason, "not-signed-in");
   assert.equal(h.imported.length, 0);
   assert.deepEqual(fs.readdirSync(h.dir), []);
+});
+
+
+test("refresh preserves channel delegation and uses only the requested account partition", async t => {
+ const h = harness(t, { cookies: signedInCookies });
+ fs.writeFileSync(path.join(h.dir, "credentials.json"), JSON.stringify({ cookie:"old", onBehalfOfUser:"123", extra:{"x-goog-authuser":"0"} }));
+ await h.auth.refreshCredentials(h.dir, "persist:ytmusic-test-account");
+ const saved=JSON.parse(fs.readFileSync(path.join(h.dir,"credentials.json")));
+ assert.equal(saved.onBehalfOfUser,"123");
+ assert.equal(saved.extra["x-goog-authuser"],"0");
+ assert.ok(h.partitions.every(p=>p==="persist:ytmusic-test-account"));
+});
+
+test("Windows cancellation stops both browser and watcher before returning", async t => {
+ const h = harness(t, { platform:"win32", cookies:signedInCookies });
+ const attempt=h.auth.signIn(h.dir,null,"persist:ytmusic-second");
+ await h.auth.cancelSignIn();
+ assert.equal((await attempt).reason,"closed");
+ assert.equal(h.children.length,2);
+ assert.ok(h.children.every(c=>c.signalCode));
+ assert.deepEqual(fs.readdirSync(h.dir),[]);
+});
+
+test("Windows capture imports into the new account partition and waits for cleanup", async t => {
+ const h = harness(t, { platform:"win32", cookies:signedInCookies });
+ const attempt=h.auth.signIn(h.dir,null,"persist:ytmusic-second");
+ h.children[0].kill("SIGTERM");
+ assert.equal((await attempt).ok,true);
+ assert.equal(h.children.length,3);
+ assert.ok(h.children.every(c=>c.signalCode));
+ assert.ok(h.partitions.every(p=>p==="persist:ytmusic-second"));
+ assert.deepEqual(fs.readdirSync(h.dir),["credentials.json"]);
 });

@@ -18,6 +18,9 @@ type Credentials struct {
 	// Cookie is the raw Cookie header value from a signed-in session.
 	Cookie string `json:"cookie"`
 
+	// Channel delegation is independent of the Google account cookie jar.
+	OnBehalfOfUser string `json:"onBehalfOfUser,omitempty"`
+
 	// Extra carries any additional headers captured alongside the cookie,
 	// such as x-goog-authuser for brand accounts. Keys are lower-cased.
 	Extra map[string]string `json:"extra,omitempty"`

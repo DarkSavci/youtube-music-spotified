@@ -137,7 +137,7 @@ export function TopBar({
           onClick={(e) =>
             menu.open(e, [
               {
-                label: "Settings",
+                label: "Accounts and channels",
                 onSelect: () => navigate("/settings"),
               },
               {
