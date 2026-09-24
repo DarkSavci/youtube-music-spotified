@@ -13,4 +13,4 @@ Listen Together guests can watch the currently selected video, but changing to a
 - Go tests cover explicit counterpart parsing, video format selection, relay ranges/cache separation, and atomic session switching.
 - Desktop tests cover format selection and one muted picture following the audio timeline.
 - `electron desktop/test/video-smoke.js` checks actual video decoding, seeking and transfer between documents. Optional `VIDEO_SMOKE_ORIGIN` and `VIDEO_SMOKE_ID` exercise a running local core with a real video.
-- On macOS arm64, real 1080p MP4 decoding and the main/expanded video views were verified. Manual mini-player and end-to-end counterpart switching checks remain before taking the PR out of draft.
+- On macOS arm64, real 1080p MP4 decoding, main/expanded/mini-player views, play/pause, and end-to-end Song/Video switching at the preserved paused position were verified.
