@@ -283,7 +283,9 @@ function startCore() {
  */
 let restartingCore = false;
 
-async function restartCore(beforeStart) {
+async function restartCore(beforeStart, { preserveRoute = false } = {}) {
+  const previousHash = mainWindow && !mainWindow.isDestroyed() ? new URL(mainWindow.webContents.getURL() || "about:blank").hash.slice(1) : "";
+  const route = preserveRoute ? (previousHash.startsWith("/") ? previousHash : "/") : "/settings";
   miniplayer.close();
   if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL("about:blank");
   const old = core;
@@ -306,8 +308,8 @@ async function restartCore(beforeStart) {
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
     const source = uiSource();
-    if (source.url) await mainWindow.loadURL(source.url + "#/settings");
-    else await mainWindow.loadFile(path.join(source.dir, "index.html"), { hash: "/settings" });
+    if (source.url) await mainWindow.loadURL(source.url + "#" + route);
+    else await mainWindow.loadFile(path.join(source.dir, "index.html"), { hash: route });
   }
 }
 

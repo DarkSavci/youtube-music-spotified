@@ -67,7 +67,7 @@ function register(getMainWindow, port, restartCore) {
     const target = store.get(id);
     if (!target) throw new Error("Saved account not found");
     if (target.id === store.state.active) return { ok: true };
-    await restartCore(async () => { store.activate(id); await refresh(); prepareCredentials(); });
+    await restartCore(async () => { store.activate(id); await refresh(); prepareCredentials(); }, { preserveRoute: true });
     return { ok: true };
   }));
   ipcMain.handle("auth:select-channel", exclusive(async (id) => {
@@ -75,7 +75,7 @@ function register(getMainWindow, port, restartCore) {
     // Only identities obtained from this Google session may be selected.
     await refreshChannels();
     if (!store.get().channels.some(c => c.id === id)) throw new Error("Channel not found");
-    await restartCore(async () => { store.selectChannel(id); prepareCredentials(); });
+    await restartCore(async () => { store.selectChannel(id); prepareCredentials(); }, { preserveRoute: true });
     return { ok: true };
   }));
   const remove = async (id) => {
