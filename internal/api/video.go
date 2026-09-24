@@ -57,7 +57,8 @@ func (s *Server) videoLyrics(ctx context.Context, track domain.Track, timed bool
 		difference := track.DurationMs - song.DurationMs
 		// Similar-length versions can share timings. Longer edits keep words
 		// without seeking or highlighting against a different timeline.
-		if track.DurationMs <= 0 || song.DurationMs <= 0 || difference < -3000 || difference > 3000 {
+		tolerance := max(int64(3000), min(int64(10000), song.DurationMs/20))
+		if track.DurationMs <= 0 || song.DurationMs <= 0 || difference < -tolerance || difference > tolerance {
 			got.Synced, got.Lines = false, nil
 		}
 		return got, nil

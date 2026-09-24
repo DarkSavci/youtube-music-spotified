@@ -66,11 +66,14 @@ func (c versionCatalog) TrackVersions(context.Context, string) ([]domain.Track, 
 	return c.items, nil
 }
 
-type songLyrics struct{}
+type songLyrics struct{ videoPlain bool }
 
 func (songLyrics) Name() string { return "test" }
-func (songLyrics) Lyrics(_ context.Context, t domain.Track) (domain.Lyrics, error) {
+func (p songLyrics) Lyrics(_ context.Context, t domain.Track) (domain.Lyrics, error) {
 	if t.ID != "song1234567" {
+		if p.videoPlain {
+			return domain.Lyrics{Source: "video", Plain: "Video words"}, nil
+		}
 		return domain.Lyrics{}, lyrics.ErrNotFound
 	}
 	return domain.Lyrics{Source: "test", Synced: true, Lines: []domain.LyricLine{{AtMs: 1000, Text: "Test line"}}}, nil
@@ -110,5 +113,21 @@ func TestVideoLyricsCounterpartTiming(t *testing.T) {
 				t.Fatal("different edit has seekable lyrics")
 			}
 		})
+	}
+}
+
+func TestVideoPlainLyricsPreferSongTimings(t *testing.T) {
+	srv := api.New(api.Deps{Catalog: versionCatalog{items: []domain.Track{
+		{ID: "clip1234567", IsVideo: true, DurationMs: 196000, Playable: true},
+		{ID: "song1234567", DurationMs: 190000, Playable: true},
+	}}, Lyrics: &lyrics.Service{Primary: songLyrics{videoPlain: true}}})
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, httptest.NewRequest("GET", "/v1/tracks/clip1234567/lyrics?durationMs=196000&timed=1", nil))
+	var got domain.Lyrics
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || !got.Synced || got.Source != "test" {
+		t.Fatalf("did not prefer song timing: %d %+v", w.Code, got)
 	}
 }

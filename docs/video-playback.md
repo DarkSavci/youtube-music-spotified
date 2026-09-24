@@ -17,4 +17,4 @@ Listen Together guests can watch the currently selected video, but changing to a
 
 The mini-player selects one view at a time: video, queue, or lyrics. Switching its view does not change the playback version or hide video in the main window. The main window continues to support video alongside lyrics.
 
-If a video has no lyrics, the app tries its explicitly linked song version. Synced lyrics are retained when both durations are known and differ by at most three seconds; otherwise the fallback is plain text.
+If a video has no lyrics, or only plain lyrics when timed lyrics are enabled, the app tries its explicitly linked song version. Song timings are preferred for similar durations: up to 5% difference, with a tolerance of at least three and at most ten seconds. Larger differences use plain text; existing video lyrics remain available if no better counterpart is found.

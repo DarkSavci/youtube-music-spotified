@@ -515,8 +515,8 @@ func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request) {
 	preferTimed := q.Get("timed") == "1"
 
 	got, err := s.deps.Lyrics.Lyrics(r.Context(), track, preferTimed)
-	if errors.Is(err, lyrics.ErrNotFound) {
-		if fallback, fallbackErr := s.videoLyrics(r.Context(), track, preferTimed); fallbackErr == nil {
+	if errors.Is(err, lyrics.ErrNotFound) || (err == nil && preferTimed && !got.Synced) {
+		if fallback, fallbackErr := s.videoLyrics(r.Context(), track, preferTimed); fallbackErr == nil && (err != nil || fallback.Synced) {
 			got, err = fallback, nil
 		}
 	}
