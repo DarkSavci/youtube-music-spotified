@@ -1,5 +1,5 @@
 import { EndTime } from "./EndTime";
-import { VideoSurface, VideoNotice } from "./VideoPlayer";
+import { VideoSurface, VideoNotice, useVideoControl } from "./VideoPlayer";
 import { useVideo, setVideoEnabled } from "../lib/video";
 import { useContext, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -371,12 +371,12 @@ function ThinProgress() {
 }
 
 function Extras({ panel, onPanel }: PanelProps) {
-  const busy = useVideo(s => s.busy);
+  const { blocked, reason } = useVideoControl();
   return (
     <div className="mini__extras">
-      <button className="iconbtn" aria-label="Music video" title="Music video"
+      <button className="iconbtn" aria-label="Music video" title={panel === "video" ? "Hide music video" : reason}
         aria-pressed={panel === "video"} data-active={panel === "video" || undefined}
-        disabled={busy} onClick={() => onPanel("video")}>
+        aria-disabled={panel !== "video" && blocked} onClick={() => { if (panel === "video" || !blocked) onPanel("video"); }}>
         <IconVideo size={18} />
       </button>
       <VideoNotice />

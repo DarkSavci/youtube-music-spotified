@@ -1624,3 +1624,5 @@ li[data-state="active"] .lyrics__line {
 .video-surface__picture:empty::after { content: "Video is open in another player"; color: var(--text-secondary); position: absolute; inset: 0; display: grid; place-items: center; }
 
 .video-surface__expand { position: absolute; bottom: 12px; right: 12px; background: #000a; z-index: 2; }
+
+.video-switch .chip[aria-disabled="true"], .mini__extras .iconbtn[aria-disabled="true"] { opacity: .38; cursor: not-allowed; background: transparent; color: var(--text-secondary); }

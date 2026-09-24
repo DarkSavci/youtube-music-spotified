@@ -45,3 +45,19 @@ test('unavailable counterpart is explicit and a room guest cannot change version
  const h=setup();h.respond([]);await h.setVideoEnabled(true);assert.equal(h.useVideo.getState().enabled,false);assert.match(h.useVideo.getState().error,/No matching/);assert.equal(h.switches.length,0);
  const guest=setup();guest.player.followingRoom=true;await guest.setVideoEnabled(true);assert.equal(guest.switches.length,0);assert.match(guest.useVideo.getState().error,/host/);
 });
+
+test('availability is checked without switching playback and cached per track',async()=>{
+ const h=setup();h.respond([h.song]);await h.checkVideoAvailability();
+ assert.equal(h.useVideo.getState().availability,'unavailable');assert.equal(h.switches.length,0);
+ h.player.track=h.clip;await h.checkVideoAvailability();
+ assert.equal(h.useVideo.getState().availability,'available');assert.equal(h.switches.length,0);
+ h.player.track=h.song;await h.checkVideoAvailability();
+ assert.equal(h.useVideo.getState().availability,'unavailable');
+});
+test('late availability response cannot overwrite the next track',async()=>{
+ const h=setup();let finish;h.respond(new Promise(resolve=>{finish=resolve;}));
+ const checking=h.checkVideoAvailability();h.player.track=h.clip;
+ await h.checkVideoAvailability();finish([h.song]);await checking;
+ assert.equal(h.useVideo.getState().availabilityID,h.clip.id);
+ assert.equal(h.useVideo.getState().availability,'available');
+});

@@ -4,9 +4,43 @@ import { usePlayer, currentPosition } from "./player";
 import { switchTrackVariant } from "./playback";
 import type { Track } from "./types";
 
-export const useVideo = create(() => ({ enabled: false, busy: false, loading: false, error: null as string | null, revision: 0 }));
+export const useVideo = create(() => ({ enabled: false, busy: false, loading: false, error: null as string | null, revision: 0, availabilityID: "", availability: "checking" as "checking" | "available" | "unavailable" | "error" }));
 const versions = new Map<string, Track[]>();
 let request = 0;
+
+const pendingVersions = new Map<string, Promise<Track[]>>();
+async function loadVersions(track: Track): Promise<Track[]> {
+  const cached = versions.get(track.id);
+  if (cached) return cached;
+  const pending = pendingVersions.get(track.id);
+  if (pending) return pending;
+  const task = (async () => {
+    const response = await fetch(apiUrl(`/v1/tracks/${encodeURIComponent(track.id)}/versions`));
+    if (!response.ok) throw new Error("Could not check for a music video. Please try again.");
+    const pair = await response.json() as Track[];
+    if (versions.size > 100) versions.clear();
+    for (const version of pair) versions.set(version.id, pair);
+    versions.set(track.id, pair);
+    return pair;
+  })();
+  pendingVersions.set(track.id, task);
+  try { return await task; } finally { pendingVersions.delete(track.id); }
+}
+
+export async function checkVideoAvailability() {
+  const track = usePlayer.getState().track;
+  if (!track) return;
+  useVideo.setState({ availabilityID: track.id, availability: track.isVideo ? "available" : "checking" });
+  if (track.isVideo) return;
+  try {
+    const pair = await loadVersions(track);
+    if (usePlayer.getState().track?.id === track.id) useVideo.setState({
+      availabilityID: track.id, availability: pair.some(t => t.isVideo && t.playable) ? "available" : "unavailable",
+    });
+  } catch {
+    if (usePlayer.getState().track?.id === track.id) useVideo.setState({ availabilityID: track.id, availability: "error" });
+  }
+}
 
 export async function setVideoEnabled(enabled: boolean) {
   const track = usePlayer.getState().track;
@@ -16,16 +50,11 @@ export async function setVideoEnabled(enabled: boolean) {
   // Hiding pictures always works, including while following a room.
   if (!enabled) useVideo.setState({ enabled: false });
   try {
-    let pair = versions.get(track.id);
-    if (!pair) {
-      const response = await fetch(apiUrl(`/v1/tracks/${encodeURIComponent(track.id)}/versions`));
-      if (!response.ok && enabled && !track.isVideo) throw new Error("Could not check for a music video. Please try again.");
-      pair = response.ok ? await response.json() as Track[] : [track];
-      if (versions.size > 100) versions.clear();
-      for (const version of pair) versions.set(version.id, pair);
-      versions.set(track.id, pair);
-    }
+    let pair: Track[];
+    try { pair = await loadVersions(track); }
+    catch (error) { if (track.isVideo || !enabled) pair = [track]; else throw error; }
     if (generation !== request || usePlayer.getState().track?.id !== track.id) return;
+    useVideo.setState({ availabilityID: track.id, availability: track.isVideo || pair.some(t => t.isVideo && t.playable) ? "available" : "unavailable" });
     const alternative = pair?.find(t => t.playable && t.isVideo === enabled);
     if (enabled && !track.isVideo && !alternative) throw new Error("No matching music video is available for this song.");
     if (alternative && alternative.id !== track.id) {

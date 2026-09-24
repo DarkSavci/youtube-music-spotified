@@ -1,6 +1,6 @@
 import { VideoSurface, VideoNotice } from "./components/VideoPlayer";
 import { usePlayer } from "./lib/player";
-import { useVideo, setVideoEnabled } from "./lib/video";
+import { useVideo, setVideoEnabled, checkVideoAvailability } from "./lib/video";
 import { useEffect, useRef, useState } from "react";
 import { PageBoundary } from "./components/PageBoundary";
 import { Toast } from "./components/Toast";
@@ -56,6 +56,7 @@ export function App() {
   const videoEnabled = useVideo(s => s.enabled);
   const videoTrackID = usePlayer(s => s.track?.id);
   useEffect(() => {
+    void checkVideoAvailability();
     if (useVideo.getState().enabled && videoTrackID) void setVideoEnabled(true);
     if (!videoTrackID) useVideo.setState({ enabled: false, error: null });
   }, [videoTrackID]);
