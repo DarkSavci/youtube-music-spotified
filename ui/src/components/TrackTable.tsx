@@ -1,7 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlbumLink, ArtistLinks } from "./EntityLinks";
 import { warmOnHover } from "../lib/warm";
-import { useMemo, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Track } from "../lib/types";
 import { artworkAtLeast, formatDuration } from "../lib/types";
 import { usePlayer } from "../lib/player";
@@ -16,6 +16,7 @@ const ROW_HEIGHT = 56;
 
 interface Props {
   tracks: Track[];
+  onPlayTrack?: (index: number) => void;
   /** Where these tracks came from, shown as the queue's origin. */
   origin?: string;
   /** Album pages number their rows and omit the album column. */
@@ -46,6 +47,7 @@ interface Props {
  */
 export function TrackTable({
   tracks: allTracks,
+  onPlayTrack,
   origin = "",
   variant = "playlist",
   playlistId,
@@ -54,6 +56,7 @@ export function TrackTable({
   keepVideos = false,
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
   const currentId = usePlayer((s) => s.track?.id);
   const playing = usePlayer((s) => s.state === "playing");
   const menu = useMenu();
@@ -74,9 +77,22 @@ export function TrackTable({
     [keepVideos, filterTracks, allTracks],
   );
 
+  useLayoutEffect(() => {
+    const list = parentRef.current;
+    const scroll = list?.closest<HTMLElement>(".main__scroll");
+    if (!list || !scroll) return;
+    const measure = () => setScrollMargin(list.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroll);
+    if (scroll.firstElementChild) observer.observe(scroll.firstElementChild);
+    return () => observer.disconnect();
+  }, [tracks.length === 0]);
+
   const virtualizer = useVirtualizer({
     count: tracks.length,
-    getScrollElement: () => parentRef.current,
+    getScrollElement: () => parentRef.current?.closest<HTMLElement>(".main__scroll") ?? null,
+    scrollMargin,
     estimateSize: () => ROW_HEIGHT,
     overscan: 8,
   });
@@ -119,7 +135,7 @@ export function TrackTable({
         <span role="columnheader" aria-label="Actions" />
       </div>
 
-      <div ref={parentRef} style={{ maxHeight: "60vh", overflow: "auto" }} className="scroll">
+      <div ref={parentRef}>
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualizer.getVirtualItems().map((row) => {
             const track = tracks[row.index];
@@ -133,7 +149,7 @@ export function TrackTable({
                   top: 0,
                   left: 0,
                   width: "100%",
-                  transform: `translateY(${row.start}px)`,
+                  transform: `translateY(${row.start - scrollMargin}px)`,
                 }}
               >
                 <TrackRow
@@ -146,7 +162,7 @@ export function TrackTable({
                   showAlbum={showAlbum}
                   showListened={showListened}
                   onPlay={() =>
-                    playMode === "radio"
+                    onPlayTrack ? onPlayTrack(row.index) : playMode === "radio"
                       ? transport.playRadio(track)
                       : transport.play(tracks, row.index, origin)
                   }

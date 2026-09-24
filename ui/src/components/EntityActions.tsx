@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+import { toast } from "../lib/toast";
 import { useNavigate } from "react-router-dom";
 import { useMenu, type MenuItem } from "./ContextMenu";
 import { usePrompt } from "./Prompt";
@@ -22,12 +24,17 @@ export function EntityActions({
   id,
   title,
   tracks,
+  loadTracks,
 }: {
   kind: "album" | "playlist" | "artist" | "podcast";
   id: string;
   title: string;
   tracks: Track[];
+  loadTracks?: () => Promise<Track[]>;
 }) {
+  const generation = useRef(0);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => { setLoading(false); return () => { generation.current++; }; }, [id]);
   const menu = useMenu();
   const prompt = usePrompt();
   const navigate = useNavigate();
@@ -36,13 +43,26 @@ export function EntityActions({
   const createPlaylist = useCreatePlaylist();
   const deletePlaylist = useDeletePlaylist();
 
+  const withTracks = async (action: (all: Track[]) => void) => {
+    if (!loadTracks) { action(tracks); return; }
+    const current = ++generation.current;
+    setLoading(true);
+    try {
+      const all = await loadTracks();
+      if (current === generation.current) action(all);
+    } catch {
+      if (current === generation.current) toast("Could not load the complete playlist. Please try again.");
+    } finally {
+      if (current === generation.current) setLoading(false);
+    }
+  };
+
   const build = (): MenuItem[] => {
     const out: MenuItem[] = [];
-    const ids = tracks.map((t) => t.id);
 
     if (tracks.length > 0) {
-      out.push({ label: "Add to queue", onSelect: () => transport.enqueue(tracks) });
-      out.push({ label: "Play next", onSelect: () => transport.playNext(tracks) });
+      out.push({ label: "Add to queue", onSelect: () => void withTracks((all) => transport.enqueue(all)) });
+      out.push({ label: "Play next", onSelect: () => void withTracks((all) => transport.playNext(all)) });
       out.push({
         label: "Add all to a new playlist…",
         separated: true,
@@ -53,7 +73,7 @@ export function EntityActions({
               label: "Name",
               initial: title,
             });
-            if (name) createPlaylist.mutate({ title: name, tracks });
+            if (name) void withTracks((all) => createPlaylist.mutate({ title: name, tracks: all }));
           })();
         },
       });
@@ -61,7 +81,7 @@ export function EntityActions({
         if (pl.id === id) continue;
         out.push({
           label: `Add all to ${pl.title}`,
-          onSelect: () => addTo.mutate({ playlistId: pl.id, trackIds: ids }),
+          onSelect: () => void withTracks((all) => addTo.mutate({ playlistId: pl.id, trackIds: all.map((t) => t.id) })),
         });
       }
     }
@@ -98,6 +118,8 @@ export function EntityActions({
     <button
       className="iconbtn entityactions__more"
       aria-label={`More options for ${title}`}
+      disabled={loading}
+      aria-busy={loading}
       onClick={(e) => menu.open(e, build())}
     >
       <IconMore size={22} />

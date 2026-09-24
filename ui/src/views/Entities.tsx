@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArtistLinks } from "../components/EntityLinks";
 import { warmFirst } from "../lib/warm";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, browsePath } from "../lib/api";
 import { EntityHeader } from "../components/EntityHeader";
@@ -13,6 +13,7 @@ import { IconPlay } from "../components/Icon";
 import { transport } from "../lib/playback";
 import { formatDuration } from "../lib/types";
 import type { Album, ShelfItem, Track } from "../lib/types";
+import { toast } from "../lib/toast";
 import { apiUrl } from "../lib/base";
 import { useFollowArtist } from "../lib/playlists";
 import { EntityActions } from "../components/EntityActions";
@@ -67,7 +68,7 @@ export function AlbumView() {
           </>
         }
       />
-      <div className="entityactions">
+      <div className="entityactions entityactions--sticky">
         <button
           className="playbtn playbtn--accent playbtn--lg"
           aria-label={`Play ${data.title}`}
@@ -76,6 +77,7 @@ export function AlbumView() {
         >
           <IconPlay size={24} />
         </button>
+        <strong className="entityactions__title">{data.title}</strong>
         <EntityActions kind="album" id={data.id} title={data.title} tracks={tracks} />
       </div>
       {tracks.length > 0 ? (
@@ -91,18 +93,58 @@ export function AlbumView() {
 
 export function PlaylistView() {
   const { id = "" } = useParams();
-  const { data, isPending, error, refetch } = useQuery({
-    queryKey: ["playlist", id],
-    queryFn: ({ signal }) => api.playlist(id, signal),
+  const qc = useQueryClient();
+  const moreRef = useRef<HTMLDivElement>(null);
+  const request = useRef(0);
+  const [preparing, setPreparing] = useState(false);
+  const { data: pages, isPending, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError } = useInfiniteQuery({
+    queryKey: ["playlist", id, "pages"],
+    initialPageParam: "",
+    queryFn: ({ signal, pageParam }) => api.playlistPage(id, pageParam, signal),
+    getNextPageParam: (last, all) => last.next && !all.slice(0, -1).some((p) => p.next === last.next) ? last.next : undefined,
   });
-  // Above the early returns: a hook has to run on every render.
+  const data = pages?.pages[0]?.playlist;
+  const hasUnloadedTracks = Boolean(pages?.pages.at(-1)?.next);
+  const tracks = pages?.pages.flatMap((page) => page.playlist.tracks ?? []) ?? [];
   useWarmFirstTrack(data?.tracks);
+  useEffect(() => { setPreparing(false); return () => { request.current++; }; }, [id]);
+  useEffect(() => {
+    const sentinel = moreRef.current;
+    if (!sentinel || !hasNextPage || isFetchingNextPage || isFetchNextPageError) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry?.isIntersecting) void fetchNextPage();
+    }, { root: sentinel.closest(".main__scroll"), rootMargin: "0px 0px 600px 0px" });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage, tracks.length]);
+
+  // Browsing is incremental. Actions promising the whole playlist explicitly
+  // fetch it, never silently queue or copy only the visible prefix.
+  const completeTracks = async () => {
+    if (!hasUnloadedTracks) return tracks;
+    const full = await qc.fetchQuery({ queryKey: ["playlist", id, "complete"], queryFn: ({ signal }) => api.playlist(id, signal), staleTime: 60_000 });
+    return full.tracks ?? [];
+  };
+  const play = async (index: number) => {
+    const generation = ++request.current;
+    setPreparing(true);
+    try {
+      const full = await completeTracks();
+      if (generation !== request.current) return;
+      const selected = tracks[index];
+      const at = selected?.playlistItemId
+        ? full.findIndex((track) => track.playlistItemId === selected.playlistItemId)
+        : full[index]?.id === selected?.id ? index : full.findIndex((track) => track.id === selected?.id);
+      if (at < 0) { toast("This song is no longer in the playlist. Please refresh the page."); return; }
+      transport.play(full, at, data?.title ?? "");
+    } catch { if (generation === request.current) toast("Could not load the complete playlist. Please try again."); }
+    finally { if (generation === request.current) setPreparing(false); }
+  };
 
   if (isPending) return <TrackListSkeleton />;
-  if (error) return <PageError error={error} onRetry={() => void refetch()} />;
+  if (!data && error) return <PageError error={error} onRetry={() => void refetch()} />;
   if (!data) return <PageState title="Playlist not found" />;
 
-  const tracks = data.tracks ?? [];
   return (
     <>
       <EntityHeader
@@ -115,30 +157,42 @@ export function PlaylistView() {
             {/* Owner is shown only when upstream supplies it, rather than
                 printing an empty byline. */}
             {data.owner ? <strong>{data.owner}</strong> : null}
-            <span>{`${data.owner ? "· " : ""}${data.trackCount} songs`}</span>
+            <span>{`${data.owner ? "· " : ""}${Math.max(data.trackCount, tracks.length)}${hasUnloadedTracks && data.trackCount <= tracks.length ? "+" : ""} songs`}</span>
             {data.durationMs ? <span>{`· ${formatDuration(data.durationMs)}`}</span> : null}
           </>
         }
       />
-      <div className="entityactions">
+      <div className="entityactions entityactions--sticky">
         <button
           className="playbtn playbtn--accent playbtn--lg"
           aria-label={`Play ${data.title}`}
-          disabled={tracks.length === 0}
-          onClick={() => transport.play(tracks, 0, data.title)}
+          disabled={tracks.length === 0 || preparing}
+          aria-busy={preparing}
+          onClick={() => void play(0)}
         >
           <IconPlay size={24} />
         </button>
-        <EntityActions kind="playlist" id={data.id} title={data.title} tracks={tracks} />
+        <strong className="entityactions__title">{data.title}</strong>
+        <EntityActions kind="playlist" id={data.id} title={data.title} tracks={tracks} loadTracks={completeTracks} />
       </div>
       {tracks.length > 0 ? (
-        <TrackTable tracks={tracks} origin={data.title} playlistId={data.id} keepVideos />
+        <TrackTable tracks={tracks} origin={data.title} playlistId={data.id} keepVideos onPlayTrack={(index) => void play(index)} />
       ) : (
         <PageState
           title="This playlist is empty"
           body="Find something to add to it."
         />
       )}
+      {hasUnloadedTracks && !hasNextPage ? <p role="status">
+        More songs could not be loaded. <button className="btn" onClick={() => void refetch()}>Reload playlist</button>
+      </p> : null}
+      {preparing ? <p role="status">Preparing the full playlist…</p> : null}
+      {hasNextPage ? <div ref={moreRef} className="playlist-more">
+        <button className="btn" disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+          {isFetchingNextPage ? "Loading more songs…" : isFetchNextPageError ? "Could not load more songs — retry" : "Load more songs"}
+        </button>
+        <span role="status">{tracks.length} songs loaded</span>
+      </div> : null}
     </>
   );
 }

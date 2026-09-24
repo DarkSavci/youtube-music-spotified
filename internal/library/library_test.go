@@ -181,3 +181,48 @@ func TestLibraryAgainstFixtures(t *testing.T) {
 		t.Error("no items merged from fixtures")
 	}
 }
+
+type summaryIdentity struct {
+	*stubIdentity
+	summaries int
+}
+
+func (s *summaryIdentity) LikedSongs(context.Context) (domain.Playlist, error) {
+	panic("sidebar downloaded all liked tracks")
+}
+func (s *summaryIdentity) LikedSongsSummary(context.Context) (domain.Playlist, error) {
+	s.summaries++
+	return s.liked, nil
+}
+
+func TestSidebarDoesNotDownloadLikedTracks(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		id := &summaryIdentity{stubIdentity: newStub()}
+		if existing {
+			id.playlists = append(id.playlists, item("LM", "Liked Music", domain.LibPlaylist))
+		}
+		items, err := library.New(id, nil).List(context.Background(), library.FilterAll, library.SortAlphabetical)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count := 0
+		for _, it := range items {
+			if it.ID == "LM" {
+				count++
+				if !it.Pinned {
+					t.Fatal("liked music is not pinned")
+				}
+			}
+		}
+		if count != 1 {
+			t.Fatalf("liked music appears %d times", count)
+		}
+		want := 1
+		if existing {
+			want = 0
+		}
+		if id.summaries != want {
+			t.Fatalf("summary calls = %d, want %d", id.summaries, want)
+		}
+	}
+}

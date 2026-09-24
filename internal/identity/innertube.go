@@ -284,3 +284,22 @@ func LibraryItemsFrom(doc renderers.Node, hint domain.LibraryItemKind, pc render
 	}
 	return out
 }
+
+// LikedSongsSummary reads metadata without downloading the playlist tail.
+func (i *InnerTube) LikedSongsSummary(ctx context.Context) (domain.Playlist, error) {
+	doc, err := i.browse(ctx, SurfaceLikedSongs)
+	if err != nil {
+		return domain.Playlist{}, err
+	}
+	pl, ok := renderers.ParsePlaylist(doc, SurfaceLikedSongs, i.ctxFor("liked"))
+	if !ok {
+		return domain.Playlist{}, fmt.Errorf("identity: liked songs did not parse")
+	}
+	pl.ID = "LM"
+	if pl.Title == "" {
+		pl.Title = "Liked Music"
+	}
+	pl.Tracks = nil
+	pl.DurationMs = 0
+	return pl, nil
+}

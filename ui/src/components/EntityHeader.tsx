@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { Artwork } from "../lib/types";
 import { artworkAtLeast } from "../lib/types";
 import { useArtColor } from "../lib/artcolor";
@@ -29,6 +29,7 @@ interface Props {
  * A caller may still pass `dominantColor` to override what is extracted.
  */
 export function EntityHeader({ kind, title, artwork, dominantColor, meta, round }: Props) {
+  const headerRef = useRef<HTMLElement>(null);
   const extracted = useArtColor(artworkAtLeast(artwork ?? [], 300));
   const color = dominantColor || extracted;
 
@@ -40,8 +41,19 @@ export function EntityHeader({ kind, title, artwork, dominantColor, meta, round 
     };
   }, [color]);
 
+  useEffect(() => {
+    const header = headerRef.current;
+    const scroll = header?.closest<HTMLElement>(".main__scroll");
+    if (!header || !scroll) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      scroll.dataset.entityScrolled = String(!entry?.isIntersecting);
+    }, { root: scroll });
+    observer.observe(header);
+    return () => { observer.disconnect(); delete scroll.dataset.entityScrolled; };
+  }, []);
+
   return (
-    <header className="entityheader">
+    <header ref={headerRef} className="entityheader">
       {artwork && artwork.length > 0 ? (
         <img
           className={`entityheader__art ${round ? "entityheader__art--round" : ""}`}
