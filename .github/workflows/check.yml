@@ -44,5 +44,7 @@ jobs:
       - run: npm ci --prefix desktop
       - run: go test ./...
       - run: npm test --prefix desktop
+      - run: npx --no-install electron test/audio-smoke.js
+        working-directory: desktop
       - run: npm run package --prefix desktop
       - run: node desktop/test/package-smoke.js

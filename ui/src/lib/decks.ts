@@ -58,6 +58,8 @@ export class Mixer {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
+  /** Measure the track before user volume/EQ so quiet listening is not boosted. */
+  private levelAnalyser: AnalyserNode | null = null;
   /**
    * Holds peaks under full scale once volume boost takes the level past
    * 100%, where they would otherwise clip. Idle (ratio 1) below that.
@@ -106,6 +108,10 @@ export class Mixer {
     try {
       this.ctx = new AudioContext();
       this.master = this.ctx.createGain();
+      this.master.gain.value = this.baseVolume * this.levelGain;
+      this.levelAnalyser = this.ctx.createAnalyser();
+      this.levelAnalyser.fftSize = 2048;
+      this.levelAnalyser.connect(this.master);
       this.analyser = this.ctx.createAnalyser();
       this.analyser.fftSize = 2048;
 
@@ -203,7 +209,7 @@ export class Mixer {
       el.volume = 1;
       const norm = this.ctx.createGain();
       const gain = this.ctx.createGain();
-      source.connect(norm).connect(gain).connect(this.master);
+      source.connect(norm).connect(gain).connect(this.levelAnalyser!);
       this.norms.set(el, norm);
       this.gains.set(el, gain);
       // A correction that arrived before the graph existed applies now.
@@ -369,9 +375,9 @@ export class Mixer {
   }
 
   private measure() {
-    if (!this.analyser || !this.ctx || !this.master) return;
-    const buf = new Float32Array(this.analyser.fftSize);
-    this.analyser.getFloatTimeDomainData(buf);
+    if (!this.levelAnalyser || !this.ctx || !this.master) return;
+    const buf = new Float32Array(this.levelAnalyser.fftSize);
+    this.levelAnalyser.getFloatTimeDomainData(buf);
 
     let sum = 0;
     for (let i = 0; i < buf.length; i += 1) sum += buf[i]! * buf[i]!;
