@@ -307,14 +307,23 @@ func (c *Client) CallAs(ctx context.Context, endpoint string, body map[string]an
 		// and the response is served without timings.
 		delete(client, "visitorData")
 	}
-	payload["context"] = map[string]any{"client": client}
+	requestContext := map[string]any{"client": client}
+	if c.creds != nil && c.creds.OnBehalfOfUser != "" {
+		requestContext["user"] = map[string]any{"onBehalfOfUser": c.creds.OnBehalfOfUser}
+	}
+	payload["context"] = requestContext
+	requestOrigin := Origin
+	web := as == nil || as.Name == "WEB"
+	if as != nil && as.Name == "WEB" {
+		requestOrigin = "https://www.youtube.com"
+	}
 
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 
-	url := Origin + "/youtubei/v1/" + endpoint + "?alt=json"
+	url := requestOrigin + "/youtubei/v1/" + endpoint + "?alt=json"
 	// The key belongs to the web client. Sending it with a mobile context is
 	// the contradiction upstream rejects with "invalid argument".
 	if cfg.APIKey != "" && as == nil {
@@ -337,8 +346,8 @@ func (c *Client) CallAs(ctx context.Context, endpoint string, body map[string]an
 			req.Header.Set("User-Agent", c.userAgent)
 		}
 	}
-	req.Header.Set("Origin", Origin)
-	req.Header.Set("Referer", Origin+"/")
+	req.Header.Set("Origin", requestOrigin)
+	req.Header.Set("Referer", requestOrigin+"/")
 	req.Header.Set("Accept-Language", c.language)
 	req.Header.Set("Cookie", c.creds.cookie())
 	/*
@@ -349,13 +358,13 @@ func (c *Client) CallAs(ctx context.Context, endpoint string, body map[string]an
 	 * contradiction upstream answers with HTTP 400. Cookies are enough: they
 	 * authenticate the account, which is all the mobile lyrics call needs.
 	 */
-	if as == nil {
+	if web {
 		if cfg.VisitorData != "" {
 			req.Header.Set("X-Goog-Visitor-Id", cfg.VisitorData)
 		}
-		if auth := c.creds.authorization(Origin); auth != "" {
+		if auth := c.creds.authorization(requestOrigin); auth != "" {
 			req.Header.Set("Authorization", auth)
-			req.Header.Set("X-Origin", Origin)
+			req.Header.Set("X-Origin", requestOrigin)
 		}
 		if c.creds != nil {
 			for k, v := range c.creds.Extra {

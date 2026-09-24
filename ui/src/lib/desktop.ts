@@ -22,7 +22,13 @@ export interface AuthResult {
   reason?: string;
 }
 
+export interface SavedAccounts {
+ activeId: string | null;
+ accounts: { id: string; name: string; avatarUrl?: string; channel: string; channels: { id: string; name: string; handle?: string; avatarUrl?: string }[] }[];
+}
+
 interface DesktopBridge {
+  accountScope?: string;
   platform?: string;
   corePort(): Promise<number>;
   dataDir(): Promise<string>;
@@ -33,6 +39,11 @@ interface DesktopBridge {
   onMediaKey(handler: (action: string) => void): () => void;
   onCoreStatus(handler: (status: { running: boolean; code?: number }) => void): () => void;
   auth: {
+    accounts?(): Promise<SavedAccounts>;
+    channels?(): Promise<SavedAccounts>;
+    switchAccount?(id: string): Promise<AuthResult>;
+    selectChannel?(id: string): Promise<AuthResult>;
+    removeAccount?(id: string): Promise<AuthResult>;
     signIn(): Promise<AuthResult>;
     refresh(): Promise<AuthResult>;
     signOut(): Promise<AuthResult>;

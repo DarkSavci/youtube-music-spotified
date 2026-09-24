@@ -1288,3 +1288,32 @@
 /* Native Mac traffic lights sit above the sidebar, outside the content grid. */
 .app-shell[data-platform="darwin"] { padding-top: 38px; }
 .app-shell[data-platform="darwin"]::before { height: 30px; }
+
+.account-menu {
+  position: fixed;
+  z-index: 1000;
+  width: min(320px, calc(100vw - 16px));
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--text-subdued, #444);
+  border-radius: 12px;
+  background: var(--surface-elevated, #282828);
+  color: var(--text-primary);
+  box-shadow: 0 12px 36px #0008;
+  outline: none;
+}
+.account-menu__heading, .account-menu__hint { padding: 10px; font-size: var(--text-sm); color: var(--text-secondary); }
+.account-menu__list { max-height: 300px; overflow-y: auto; }
+.account-menu button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px; border-radius: 6px; text-align: left; }
+.account-menu button:hover, .account-menu button:focus-visible { background: var(--surface-control); outline: none; }
+.account-menu button:disabled { opacity: .5; cursor: wait; }
+.account-menu__avatar { display: grid; place-items: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; background: var(--surface-control); }
+.account-menu__identity { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.account-menu__identity strong, .account-menu__identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-menu__identity strong { font-size: var(--text-sm); font-weight: 500; }
+.account-menu__identity small { color: var(--text-secondary); }
+.account-menu__actions { border-top: 1px solid var(--surface-control); margin-top: 8px; padding-top: 8px; }
+.account-menu__error { padding: 10px; color: #ffb4ab; font-size: var(--text-sm); }
+
+.account-menu__avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+.account-menu__current { display: flex; align-items: center; gap: 12px; }

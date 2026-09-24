@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { WindowControls } from "./WindowControls";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { desktop } from "../lib/desktop";
 import { signInLabel, useSignIn } from "../lib/signin";
 import { IconChevronLeft, IconChevronRight, IconSearch, IconSettings } from "./Icon";
-import { useMenu } from "./ContextMenu";
-import { usePrompt } from "./Prompt";
+import { AccountMenu } from "./AccountMenu";
 
 /**
  * The header fades in a background once the panel beneath it scrolls, so the
@@ -24,8 +22,6 @@ export function TopBar({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const menu = useMenu();
-  const prompt = usePrompt();
   const [scrolled, setScrolled] = useState(false);
   const [params] = useSearchParams();
 
@@ -71,7 +67,6 @@ export function TopBar({
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate]);
 
-  const queryClient = useQueryClient();
   const { signingIn, signIn } = useSignIn();
 
   const { data: me } = useQuery({
@@ -130,41 +125,7 @@ export function TopBar({
       </button>
 
       {me?.state === "signed_in" && me.account ? (
-        <button
-          className="topbar__account"
-          aria-label={`Account: ${me.account.name}`}
-          title={me.account.handle ?? ""}
-          onClick={(e) =>
-            menu.open(e, [
-              {
-                label: "Settings",
-                onSelect: () => navigate("/settings"),
-              },
-              {
-                label: "Sign out",
-                separated: true,
-                onSelect: () => {
-                  void (async () => {
-                    const sure = await prompt.confirm({
-                      title: "Sign out?",
-                      body: "Youtube Music Spotified will forget this account until you sign in again. Your listening history stays on this machine.",
-                      confirmLabel: "Sign out",
-                      danger: true,
-                    });
-                    if (!sure) return;
-                    await desktop.signOut();
-                    await queryClient.invalidateQueries();
-                  })();
-                },
-              },
-            ])
-          }
-        >
-          {me.account.avatarUrl ? (
-            <img className="topbar__avatar" src={me.account.avatarUrl} alt="" />
-          ) : null}
-          <span className="truncate">{me.account.name}</span>
-        </button>
+        <AccountMenu account={me.account} />
       ) : me?.state === "logged_out" ? (
         <button className="chip" onClick={() => void signIn()} disabled={signingIn}>
           {signInLabel(signingIn)}

@@ -1,7 +1,7 @@
 import { apiUrl } from "../lib/base";
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { signInLabel, useSignIn } from "../lib/signin";
+import { Accounts } from "../components/Accounts";
 import { useSettings, applyDocumentSettings, type Settings as Prefs } from "../lib/settings";
 import { SHORTCUTS, describeKeys } from "../lib/shortcuts";
 import { engineCapabilities, engineName, transport } from "../lib/playback";
@@ -22,8 +22,6 @@ import { Equaliser } from "../components/Equaliser";
 export function SettingsView() {
   const prefs = useSettings();
   const caps = engineCapabilities();
-  const [signedOut, setSignedOut] = useState(false);
-  const { signingIn, signIn } = useSignIn();
 
   useEffect(() => {
     applyDocumentSettings(prefs);
@@ -195,35 +193,8 @@ export function SettingsView() {
         />
       </Section>
 
-      <Section title="Account">
-        <Row
-          label="YouTube Music session"
-          hint={
-            desktop.available
-              ? "Sign-in opens your browser on a separate, temporary profile, and the session is moved into this app."
-              : "Sign-in requires the desktop app."
-          }
-        >
-          <div className="settings__inline">
-            <button
-              className="chip"
-              disabled={!desktop.available || signingIn}
-              onClick={() => void signIn()}
-            >
-              {signInLabel(signingIn)}
-            </button>
-            <button
-              className="chip"
-              disabled={!desktop.available || signedOut}
-              onClick={async () => {
-                await desktop.signOut();
-                setSignedOut(true);
-              }}
-            >
-              {signedOut ? "Signed out" : "Sign out"}
-            </button>
-          </div>
-        </Row>
+      <Section title="Accounts and channels">
+        <Accounts />
       </Section>
 
       <Section title="Keyboard shortcuts">

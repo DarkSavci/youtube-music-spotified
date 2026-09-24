@@ -32,7 +32,8 @@ export interface PlayEvent {
   Artwork?: string;
 }
 
-const STORAGE_KEY = "spotifier.playlog.pending";
+const accountScope = window.spotifier?.accountScope;
+const STORAGE_KEY = "spotifier.playlog.pending" + (accountScope && accountScope !== "legacy:personal" ? `.${accountScope}` : "");
 const FLUSH_INTERVAL_MS = 15_000;
 const MAX_BATCH = 100;
 
@@ -109,7 +110,7 @@ export async function flush(): Promise<void> {
   const batch = pending.slice(0, MAX_BATCH);
 
   try {
-    const res = await fetch(apiUrl("/v1/me/plays"), {
+    const res = await fetch(apiUrl("/v1/me/plays" + (accountScope ? `?account_scope=${encodeURIComponent(accountScope)}` : "")), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ plays: batch }),
@@ -142,7 +143,7 @@ export function installFlushHooks() {
       const blob = new Blob([JSON.stringify({ plays: pending.slice(0, MAX_BATCH) })], {
         type: "application/json",
       });
-      if (navigator.sendBeacon(apiUrl("/v1/me/plays"), blob)) {
+      if (navigator.sendBeacon(apiUrl("/v1/me/plays" + (accountScope ? `?account_scope=${encodeURIComponent(accountScope)}` : "")), blob)) {
         pending = pending.slice(MAX_BATCH);
         savePending();
       }

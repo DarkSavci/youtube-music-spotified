@@ -17,6 +17,7 @@ const path = require("node:path");
 const net = require("node:net");
 const fs = require("node:fs");
 const auth = require("./auth");
+const accounts = require("./accounts");
 const tray = require("./tray");
 const miniplayer = require("./miniplayer");
 const updater = require("./updater");
@@ -235,8 +236,9 @@ function startCore() {
 
   const args = [
     "-addr", `${CORE_HOST}:${CORE_PORT}`,
-    "-credentials", path.join(dataDir(), "credentials.json"),
-    "-db", path.join(dataDir(), "spotifier.db"),
+    "-credentials", path.join(accounts.activeDirectory(), "credentials.json"),
+    "-db", accounts.activeDatabase(),
+    "-account-scope", accounts.scope(),
   ];
   const ytdlp = ytdlpPath();
   if (ytdlp) args.push("-ytdlp", ytdlp);
@@ -281,7 +283,11 @@ function startCore() {
  */
 let restartingCore = false;
 
-async function restartCore() {
+async function restartCore(beforeStart, { preserveRoute = false } = {}) {
+  const previousHash = mainWindow && !mainWindow.isDestroyed() ? new URL(mainWindow.webContents.getURL() || "about:blank").hash.slice(1) : "";
+  const route = preserveRoute ? (previousHash.startsWith("/") ? previousHash : "/") : "/settings";
+  miniplayer.close();
+  if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL("about:blank");
   const old = core;
   if (old && old.exitCode === null) {
     restartingCore = true;
@@ -292,6 +298,7 @@ async function restartCore() {
   if (shuttingDown) return;
   try {
     if (await probe(CORE_PORT, 400)) throw new Error(`Port ${CORE_PORT} is already in use. Stop the other Spotifier core or development server, then reopen the app.`);
+    if (beforeStart) await beforeStart();
     core = startCore();
     await core.ready;
   } catch (err) {
@@ -299,7 +306,11 @@ async function restartCore() {
     dialog.showErrorBox("Could not restart the music service", err.message);
     throw err;
   }
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const source = uiSource();
+    if (source.url) await mainWindow.loadURL(source.url + "#" + route);
+    else await mainWindow.loadFile(path.join(source.dir, "index.html"), { hash: route });
+  }
 }
 
 /** Single connection probe, used to detect a running dev server. */
@@ -328,6 +339,7 @@ let shutdownComplete = false;
 function shutdown() {
   if (shutdownPromise) return shutdownPromise;
   shuttingDown = true;
+  accounts.beginShutdown();
   shutdownPromise = Promise.all([stopChild(core, 6000), auth.cancelSignIn()]);
   return shutdownPromise;
 }
@@ -479,14 +491,15 @@ if (!app.requestSingleInstanceLock()) {
       app.quit();
       return;
     }
-    auth.register(dataDir, () => mainWindow, CORE_PORT, restartCore);
+    accounts.initialize(dataDir());
+    accounts.register(() => mainWindow, CORE_PORT, restartCore);
     miniplayer.register(dataDir());
 
     // Re-read the owned session before launching the core. This is what makes
     // YouTube's cookie rotation a non-issue: the session is ours, so the
     // current values are always available to copy forward.
     try {
-      const refreshed = await auth.refreshCredentials(dataDir());
+      const refreshed = await accounts.refresh();
       if (refreshed.ok) console.log(`[auth] refreshed ${refreshed.count} cookies from owned session`);
     } catch (err) {
       console.warn("[auth] refresh failed:", err.message);

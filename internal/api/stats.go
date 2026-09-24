@@ -49,6 +49,10 @@ func limitFrom(r *http.Request, def int) int {
 // it, so a client that retries after a dropped connection cannot double-count
 // a listen — which would quietly corrupt every statistic downstream.
 func (s *Server) handleRecordPlays(w http.ResponseWriter, r *http.Request) {
+	if s.deps.AccountScope != "" && r.URL.Query().Get("account_scope") != s.deps.AccountScope {
+		s.write(w, http.StatusConflict, map[string]string{"error": "account changed"})
+		return
+	}
 	if !s.requireControl(w) {
 		return
 	}
