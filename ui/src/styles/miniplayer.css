@@ -175,6 +175,14 @@ button.mini__title:hover {
   align-items: center;
   gap: var(--space-1);
 }
+.mini__extras .video-switch {
+  gap: 2px;
+}
+.mini__extras .video-switch .chip {
+  padding: 3px 6px;
+  font-size: 10px;
+  line-height: 16px;
+}
 .mini__volume {
   margin-left: auto;
   gap: var(--space-1);
