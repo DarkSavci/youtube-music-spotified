@@ -2,11 +2,15 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"spotifier/internal/api"
+	"spotifier/internal/catalog"
 	"spotifier/internal/domain"
+	"spotifier/internal/lyrics"
 	"spotifier/internal/resolver"
 	"testing"
 	"time"
@@ -50,5 +54,61 @@ func TestVideoRelayRangesAndSeparateCache(t *testing.T) {
 	}
 	if resolver.calls != 1 {
 		t.Fatalf("re-resolved each range: %d", resolver.calls)
+	}
+}
+
+type versionCatalog struct {
+	catalog.Catalog
+	items []domain.Track
+}
+
+func (c versionCatalog) TrackVersions(context.Context, string) ([]domain.Track, error) {
+	return c.items, nil
+}
+
+type songLyrics struct{}
+
+func (songLyrics) Name() string { return "test" }
+func (songLyrics) Lyrics(_ context.Context, t domain.Track) (domain.Lyrics, error) {
+	if t.ID != "song1234567" {
+		return domain.Lyrics{}, lyrics.ErrNotFound
+	}
+	return domain.Lyrics{Source: "test", Synced: true, Lines: []domain.LyricLine{{AtMs: 1000, Text: "Test line"}}}, nil
+}
+func TestVideoLyricsCounterpartTiming(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		duration int64
+		video    bool
+		status   int
+		synced   bool
+	}{
+		{"similar", 122000, true, 200, true}, {"long edit", 145000, true, 200, false},
+		{"unknown length", 0, true, 200, false}, {"unrelated song", 120000, false, 404, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := api.New(api.Deps{Catalog: versionCatalog{items: []domain.Track{
+				{ID: "clip1234567", IsVideo: tc.video, DurationMs: tc.duration, Playable: true},
+				{ID: "song1234567", DurationMs: 120000, Playable: true},
+			}}, Lyrics: &lyrics.Service{Primary: songLyrics{}}})
+			w := httptest.NewRecorder()
+			srv.ServeHTTP(w, httptest.NewRequest("GET", fmt.Sprintf("/v1/tracks/clip1234567/lyrics?durationMs=%d&timed=1", tc.duration), nil))
+			if w.Code != tc.status {
+				t.Fatalf("status %d", w.Code)
+			}
+			if w.Code != 200 {
+				return
+			}
+			var got domain.Lyrics
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Plain != "Test line" || got.TrackID != "clip1234567" || got.Synced != tc.synced {
+				t.Fatalf("bad fallback: %+v", got)
+			}
+			if !tc.synced && len(got.Lines) > 0 {
+				t.Fatal("different edit has seekable lyrics")
+			}
+		})
 	}
 }

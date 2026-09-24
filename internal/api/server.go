@@ -516,6 +516,11 @@ func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request) {
 
 	got, err := s.deps.Lyrics.Lyrics(r.Context(), track, preferTimed)
 	if errors.Is(err, lyrics.ErrNotFound) {
+		if fallback, fallbackErr := s.videoLyrics(r.Context(), track, preferTimed); fallbackErr == nil {
+			got, err = fallback, nil
+		}
+	}
+	if errors.Is(err, lyrics.ErrNotFound) {
 		s.write(w, http.StatusNotFound, apiError{Error: "no lyrics for this track"})
 		return
 	}

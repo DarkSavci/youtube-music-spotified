@@ -6,13 +6,64 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"spotifier/internal/domain"
+	"spotifier/internal/lyrics"
 	"spotifier/internal/resolver"
 )
 
 var videoIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
+
+// A video's decorated title and different duration may not match lyrics
+// providers. Only use an explicitly linked song, never a search guess.
+func (s *Server) videoLyrics(ctx context.Context, track domain.Track, timed bool) (domain.Lyrics, error) {
+	provider, ok := s.deps.Catalog.(interface {
+		TrackVersions(context.Context, string) ([]domain.Track, error)
+	})
+	if !ok {
+		return domain.Lyrics{}, lyrics.ErrNotFound
+	}
+	versions, err := provider.TrackVersions(ctx, track.ID)
+	if err != nil {
+		return domain.Lyrics{}, err
+	}
+	video := false
+	for _, version := range versions {
+		if version.ID == track.ID && version.IsVideo {
+			video = true
+		}
+	}
+	if !video {
+		return domain.Lyrics{}, lyrics.ErrNotFound
+	}
+	for _, song := range versions {
+		if song.IsVideo || song.ID == track.ID || !song.Playable {
+			continue
+		}
+		got, err := s.deps.Lyrics.Lyrics(ctx, song, timed)
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(got.Plain) == "" {
+			lines := make([]string, 0, len(got.Lines))
+			for _, line := range got.Lines {
+				lines = append(lines, line.Text)
+			}
+			got.Plain = strings.Join(lines, "\n")
+		}
+		got.TrackID = track.ID
+		difference := track.DurationMs - song.DurationMs
+		// Similar-length versions can share timings. Longer edits keep words
+		// without seeking or highlighting against a different timeline.
+		if track.DurationMs <= 0 || song.DurationMs <= 0 || difference < -3000 || difference > 3000 {
+			got.Synced, got.Lines = false, nil
+		}
+		return got, nil
+	}
+	return domain.Lyrics{}, lyrics.ErrNotFound
+}
 
 func (s *Server) handleTrackVersions(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

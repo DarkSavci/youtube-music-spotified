@@ -308,14 +308,16 @@ button.mini__title:hover {
   min-height: 0;
   overflow-y: auto;
 }
-.mini__tall[data-panel="art"] .mini__panel {
+.mini__tall[data-panel="art"] .mini__panel,
+.mini__tall[data-panel="video"] .mini__panel {
   display: grid;
   place-items: center;
   padding: var(--space-2) var(--space-5);
   overflow: hidden;
   container-type: size;
 }
-.mini__tall[data-panel="art"] .mini__cover {
+.mini__tall[data-panel="art"] .mini__cover,
+.mini__tall[data-panel="video"] .mini__cover {
   width: min(100cqw, 100cqh);
   height: min(100cqw, 100cqh);
   border-radius: var(--radius-md);
