@@ -41,13 +41,22 @@ function register(getMainWindow, port, restartCore) {
     return response.json();
   };
   const refreshChannels = async () => {
-    const [channels, me] = await Promise.all([fromCore("/v1/me/channels"), fromCore("/v1/me")]);
-    store.setChannels(channels, store.get()?.name === "Saved account" || store.get()?.name === "New account" ? me.account?.name : undefined);
+    // Profile names must survive even if channel discovery fails.
+    const me = await fromCore("/v1/me");
+    store.setName(me.account?.name);
+    const channels = await fromCore("/v1/me/channels");
+    store.setChannels(channels);
     return store.publicState();
   };
   ipcMain.on("auth:scope", (event) => { event.returnValue = scope(); });
   ipcMain.handle("auth:accounts", () => store.publicState());
-  ipcMain.handle("auth:channels", exclusive(refreshChannels));
+  // Settings and the header can request the same channel list together.
+  let channelsRequest;
+  const loadChannels = exclusive(refreshChannels);
+  ipcMain.handle("auth:channels", () => {
+    if (!channelsRequest) channelsRequest = loadChannels().finally(() => { channelsRequest = null; });
+    return channelsRequest;
+  });
   ipcMain.handle("auth:sign-in", exclusive(async () => {
     const account = store.create();
     const dir = store.directory(account);

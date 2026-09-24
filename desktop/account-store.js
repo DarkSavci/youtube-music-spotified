@@ -58,6 +58,13 @@ class AccountStore {
   }
   add(account) { this.state.accounts.push(account); this.state.active = account.id; this.save(); }
   activate(id) { this.get(id); this.state.active = id; this.save(); }
+  setName(name) {
+    const account = this.get();
+    if (account && name && ["Saved account", "New account"].includes(account.name)) {
+      account.name = name;
+      this.save();
+    }
+  }
   setChannels(channels, name) {
     const account = this.get();
     if (!account) throw new Error("Sign in first");

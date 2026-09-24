@@ -55,11 +55,16 @@ func parseChannels(raw json.RawMessage) ([]Channel, error) {
 	}
 	channels := []Channel{}
 	seen := map[string]bool{}
+	channelLessAccount := false
 	var walk func(any)
 	walk = func(v any) {
 		switch node := v.(type) {
 		case map[string]any:
 			if item, ok := node["accountItemRenderer"].(map[string]any); ok {
+				// A signed-in Google identity can legitimately have no YouTube channel.
+				if item["hasChannel"] == false && item["isDisabled"] != true && runsText(item["accountName"]) != "" {
+					channelLessAccount = true
+				}
 				// Delegated manager roles that need a confirmation flow are not a
 				// direct channel selection and must not become the personal channel.
 				endpoint, _ := item["serviceEndpoint"].(map[string]any)
@@ -96,7 +101,7 @@ func parseChannels(raw json.RawMessage) ([]Channel, error) {
 		}
 	}
 	walk(doc)
-	if len(channels) == 0 {
+	if len(channels) == 0 && !channelLessAccount {
 		return nil, fmt.Errorf("no selectable YouTube channels returned; the session may need signing in again")
 	}
 	return channels, nil

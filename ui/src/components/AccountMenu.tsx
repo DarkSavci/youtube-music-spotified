@@ -95,7 +95,7 @@ export function AccountMenu({ account }: { account: { name: string; handle?: str
           disabled={busy || signingIn || !auth?.selectChannel} onClick={() => channel.id === active.channel ? close() : void run(() => auth!.selectChannel!(channel.id))}>
           <span className="account-menu__avatar" aria-hidden="true">{channel.name.slice(0, 1)}</span>
           <span className="account-menu__identity"><strong>{channel.name}</strong><small>{channel.handle || active.name}</small></span>
-          {channel.id === active.channel && <span aria-hidden="true">✓</span>}
+          {channel.id === active.channel && <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>}
         </button>)}
         {!active?.channels.length && <div className="account-menu__hint">{account.name}{!saved && auth?.accounts && !error ? " · Loading…" : ""}</div>}
         {saved?.accounts.filter((item) => item.id !== saved.activeId).map((item) => <button key={item.id} role="menuitem"

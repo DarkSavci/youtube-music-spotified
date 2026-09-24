@@ -61,3 +61,10 @@ func TestDelegatedIdentityAndWebAccountRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAccountWithoutYouTubeChannel(t *testing.T) {
+	got, err := parseChannels(json.RawMessage(`{"contents":[{"accountItemRenderer":{"accountName":{"simpleText":"Harris"},"hasChannel":false}}]}`))
+	if err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("expected an empty channel list, got %v, %v", got, err)
+	}
+}
