@@ -1,0 +1,117 @@
+import { create } from "zustand";
+import { apiUrl } from "./base";
+import { usePlayer, currentPosition } from "./player";
+import { switchTrackVariant } from "./playback";
+import type { Track } from "./types";
+
+export const useVideo = create(() => ({ enabled: false, busy: false, loading: false, error: null as string | null, revision: 0 }));
+const versions = new Map<string, Track[]>();
+let request = 0;
+
+export async function setVideoEnabled(enabled: boolean) {
+  const track = usePlayer.getState().track;
+  if (!track) return;
+  const generation = ++request;
+  useVideo.setState({ busy: true, error: null });
+  // Hiding pictures always works, including while following a room.
+  if (!enabled) useVideo.setState({ enabled: false });
+  try {
+    let pair = versions.get(track.id);
+    if (!pair) {
+      const response = await fetch(apiUrl(`/v1/tracks/${encodeURIComponent(track.id)}/versions`));
+      if (!response.ok && enabled && !track.isVideo) throw new Error("Could not check for a music video. Please try again.");
+      pair = response.ok ? await response.json() as Track[] : [track];
+      if (versions.size > 100) versions.clear();
+      for (const version of pair) versions.set(version.id, pair);
+      versions.set(track.id, pair);
+    }
+    if (generation !== request || usePlayer.getState().track?.id !== track.id) return;
+    const alternative = pair?.find(t => t.playable && t.isVideo === enabled);
+    if (enabled && !track.isVideo && !alternative) throw new Error("No matching music video is available for this song.");
+    if (alternative && alternative.id !== track.id) {
+      if (usePlayer.getState().followingRoom) throw new Error("The host chooses the song or video version. You can watch the current video when the host selects it.");
+      if (!await switchTrackVariant(alternative, track.id)) throw new Error("Could not switch versions. Please try again.");
+    }
+    if (generation === request) useVideo.setState({ enabled, error: null, revision: useVideo.getState().revision + 1 });
+  } catch (error) {
+    if (generation === request) useVideo.setState({ enabled: false, error: error instanceof Error ? error.message : "Video unavailable." });
+  } finally {
+    if (generation === request) useVideo.setState({ busy: false });
+  }
+}
+
+/** One muted picture element shared by main, fullscreen and mini-player views.
+ * The existing audio engine remains the only sound source and timeline owner.
+ * Moving the view never sends a play/seek command back to the music session. */
+const hosts = new Map<HTMLElement, number>();
+let picture: HTMLVideoElement | null = null;
+let timer: ReturnType<typeof setInterval> | undefined;
+let currentKey = "";
+let attemptingPlay = false;
+
+function tick() {
+  if (!picture) return;
+  const state = usePlayer.getState();
+  const options = useVideo.getState();
+  const key = options.enabled && state.track ? `${state.track.id}:${options.revision}` : "";
+  if (key !== currentKey) {
+    currentKey = key;
+    picture.pause();
+    picture.removeAttribute("src");
+    picture.load();
+    useVideo.setState({ loading: Boolean(key), error: null });
+    if (key && state.track) picture.src = apiUrl(`/v1/video-stream/${encodeURIComponent(state.track.id)}`);
+  }
+  if (!key || picture.readyState < 1 || picture.error) return;
+  const position = currentPosition(state) / 1000;
+  const target = Number.isFinite(picture.duration) ? Math.min(position, Math.max(0, picture.duration - 0.05)) : position;
+  if (Math.abs(picture.currentTime - target) > 0.35) picture.currentTime = target;
+  const playing = state.state === "playing";
+  if (!playing) { picture.pause(); return; }
+  if (picture.paused && !attemptingPlay && !picture.ended) {
+    attemptingPlay = true;
+    void picture.play().catch(() => {
+      // A move between windows or a new source can interrupt play normally.
+    }).finally(() => { attemptingPlay = false; });
+  }
+}
+
+function place() {
+  const host = [...hosts].sort((a,b) => b[1]-a[1])[0]?.[0];
+  if (!host) {
+    // React cleans up the old view before attaching the new one. Keep the
+    // element through that commit so fullscreen does not restart its stream.
+    queueMicrotask(() => {
+      if (hosts.size) return;
+      clearInterval(timer); timer = undefined;
+      picture?.pause(); picture?.removeAttribute("src"); picture?.load(); picture?.remove();
+      picture = null; currentKey = "";
+    });
+    return;
+  }
+  if (!picture) {
+    picture = document.createElement("video");
+    picture.muted = true;
+    picture.defaultMuted = true;
+    picture.playsInline = true;
+    picture.controls = false;
+    picture.preload = "auto";
+    picture.setAttribute("aria-label", "Music video");
+    const element = picture;
+    const update = (patch: Partial<ReturnType<typeof useVideo.getState>>) => { if (picture === element) useVideo.setState(patch); };
+    picture.addEventListener("loadedmetadata", tick);
+    picture.addEventListener("playing", () => update({ loading: false }));
+    picture.addEventListener("loadeddata", () => update({ loading: false }));
+    picture.addEventListener("waiting", () => update({ loading: true }));
+    picture.addEventListener("error", () => update({ loading: false, error: "The video could not be loaded. You can keep listening or retry." }));
+    timer = setInterval(tick, 100);
+  }
+  if (picture.parentElement !== host) host.appendChild(picture);
+  tick();
+}
+
+export function attachVideo(host: HTMLElement, priority: number) {
+  hosts.set(host, priority); place();
+  return () => { hosts.delete(host); place(); };
+}
+export function retryVideo() { useVideo.setState({ error: null, revision: useVideo.getState().revision + 1 }); }

@@ -1,3 +1,4 @@
+import { VideoSwitch } from "./VideoPlayer";
 import { useEffect, useRef, useState } from "react";
 import { AlbumLink, ArtistLinks } from "./EntityLinks";
 import { share } from "../lib/share";
@@ -208,6 +209,7 @@ export function NowPlayingBar({
         >
           <IconQueue size={18} />
         </button>
+        <VideoSwitch />
         <VolumeControl />
         {/* Where Spotify puts it: after the volume, at the far right. */}
         {miniSupported() ? (

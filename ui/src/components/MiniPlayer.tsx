@@ -1,3 +1,5 @@
+import { VideoSurface, VideoSwitch, VideoNotice } from "./VideoPlayer";
+import { useVideo } from "../lib/video";
 import { useContext, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -222,8 +224,10 @@ function Head({ children }: { children?: ReactNode }) {
 }
 
 function Cover({ size, className }: { size: number; className: string }) {
+  const video = useVideo(s => s.enabled);
   const track = usePlayer((s) => s.track);
   const src = artworkAtLeast(track?.artwork ?? [], size);
+  if (video && size > 120) return <VideoSurface priority={20} className={className} />;
   if (!src) return <div className={`${className} mini__cover--none`} />;
   return <img className={className} src={src} alt="" draggable={false} />;
 }
@@ -365,6 +369,7 @@ function ThinProgress() {
 function Extras({ panel, onPanel }: PanelProps) {
   return (
     <div className="mini__extras">
+      <VideoSwitch /><VideoNotice />
       <button
         className="iconbtn"
         aria-label="Queue"

@@ -242,3 +242,11 @@ func (c *InnerTube) PlaylistPage(ctx context.Context, id, token string) (domain.
 	}
 	return domain.PlaylistPage{Playlist: pl, Next: next}, nil
 }
+
+func (c *InnerTube) TrackVersions(ctx context.Context, id string) ([]domain.Track, error) {
+	doc, err := c.call(ctx, "next", map[string]any{"videoId": id})
+	if err != nil {
+		return nil, err
+	}
+	return renderers.ParseTrackVersions(doc, id), nil
+}

@@ -58,6 +58,7 @@ export interface Projection {
 }
 
 export type Command =
+  | { Kind: "switch_variant"; ExpectedID: string; Tracks: Track[] }
   | { Kind: "follow_room"; Tracks: Track[]; PositionMs: number; Playing: boolean }
   | { Kind: "leave_room" }
   | { Kind: "play"; Tracks: Track[]; StartIndex: number; Origin: string }

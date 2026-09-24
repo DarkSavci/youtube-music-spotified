@@ -1,3 +1,6 @@
+import { VideoSurface, VideoNotice } from "./components/VideoPlayer";
+import { usePlayer } from "./lib/player";
+import { useVideo, setVideoEnabled } from "./lib/video";
 import { useEffect, useRef, useState } from "react";
 import { PageBoundary } from "./components/PageBoundary";
 import { Toast } from "./components/Toast";
@@ -50,6 +53,12 @@ import { leaveTogether } from "./lib/together";
  * does and the bar is always reachable.
  */
 export function App() {
+  const videoEnabled = useVideo(s => s.enabled);
+  const videoTrackID = usePlayer(s => s.track?.id);
+  useEffect(() => {
+    if (useVideo.getState().enabled && videoTrackID) void setVideoEnabled(true);
+    if (!videoTrackID) useVideo.setState({ enabled: false, error: null });
+  }, [videoTrackID]);
   const location = useLocation();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [queueOpen, setQueueOpen] = useState(false);
@@ -141,6 +150,8 @@ export function App() {
 
       <main className="main panel">
         <TopBar scrollRef={scrollRef} />
+        <VideoNotice />
+        {videoEnabled && !fullScreen ? <VideoSurface className="main-video" onExpand={() => setFullScreen(true)} /> : null}
         <div className="main__scroll scroll" ref={scrollRef}>
           <div className="main__content" id="main-content" tabIndex={-1}>
             <PageBoundary key={location.pathname}>

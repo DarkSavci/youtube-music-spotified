@@ -88,6 +88,7 @@ func (y *Ytdlp) Available() bool {
 
 // ytdlpFormat is the subset of yt-dlp's JSON this adapter reads.
 type ytdlpFormat struct {
+	Height    int     `json:"height"`
 	URL       string  `json:"url"`
 	Ext       string  `json:"ext"`
 	ACodec    string  `json:"acodec"`
@@ -131,6 +132,10 @@ func (y *Ytdlp) Resolve(ctx context.Context, videoID string) (domain.Stream, Qua
 }
 
 func (y *Ytdlp) resolveWith(ctx context.Context, videoID string, extra []string, base string) (domain.Stream, Quality, error) {
+	return y.resolveMedia(ctx, videoID, extra, base, false)
+}
+
+func (y *Ytdlp) resolveMedia(ctx context.Context, videoID string, extra []string, base string, video bool) (domain.Stream, Quality, error) {
 	args := []string{
 		"--dump-single-json",
 		"--no-warnings",
@@ -138,6 +143,9 @@ func (y *Ytdlp) resolveWith(ctx context.Context, videoID string, extra []string,
 		// Progressive audio only: the relay forwards byte ranges and has no
 		// segment fetcher, so a DASH manifest would be unplayable here.
 		"-f", "bestaudio[protocol^=http][acodec!=none][vcodec=none]/bestaudio",
+	}
+	if video {
+		args[len(args)-1] = "bestvideo[protocol^=http][height<=1080]/best[protocol^=http][height<=1080]"
 	}
 	if y.CookiePath != "" {
 		if _, err := os.Stat(y.CookiePath); err == nil {
@@ -166,10 +174,19 @@ func (y *Ytdlp) resolveWith(ctx context.Context, videoID string, extra []string,
 	}
 
 	best := bestYtdlpAudio(info.Formats)
+	mimeKind := "audio"
+	if video {
+		best = bestYtdlpVideo(info.Formats)
+		mimeKind = "video"
+	}
 	if best == nil {
 		return domain.Stream{}, Quality{}, ErrNoAudio
 	}
 
+	mimeType := fmt.Sprintf("audio/%s; codecs=%q", best.Ext, best.ACodec)
+	if mimeKind == "video" {
+		mimeType = "video/" + best.Ext
+	}
 	bitrate := int(best.ABR * 1000)
 	if bitrate == 0 {
 		bitrate = int(best.TBR * 1000)
@@ -180,7 +197,7 @@ func (y *Ytdlp) resolveWith(ctx context.Context, videoID string, extra []string,
 			Kind:       domain.StreamURL,
 			VideoID:    videoID,
 			URL:        best.URL,
-			MimeType:   fmt.Sprintf("audio/%s; codecs=%q", best.Ext, best.ACodec),
+			MimeType:   mimeType,
 			Bitrate:    bitrate,
 			SizeBytes:  best.Filesize,
 			DurationMs: int64(info.Duration * 1000),
@@ -235,4 +252,32 @@ func codecName(acodec string) string {
 	default:
 		return acodec
 	}
+}
+
+// ResolveVideo supplies a progressive picture stream. The UI mutes it and
+// retains the native audio engine as the single playback clock and sound source.
+func (y *Ytdlp) ResolveVideo(ctx context.Context, id string) (domain.Stream, error) {
+	if y.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, y.Timeout)
+		defer cancel()
+	}
+	st, _, err := y.resolveMedia(ctx, id, musicClientArgs, "https://music.youtube.com/watch?v=", true)
+	if err != nil && ctx.Err() == nil && !errors.Is(err, ErrRateLimited) {
+		st, _, err = y.resolveMedia(ctx, id, nil, "https://www.youtube.com/watch?v=", true)
+	}
+	return st, err
+}
+func bestYtdlpVideo(formats []ytdlpFormat) *ytdlpFormat {
+	var best *ytdlpFormat
+	for i := range formats {
+		f := &formats[i]
+		if f.URL == "" || f.VCodec == "" || f.VCodec == "none" || f.Height <= 0 || f.Height > 1080 || !strings.HasPrefix(f.Protocol, "http") || (f.Ext != "mp4" && f.Ext != "webm") {
+			continue
+		}
+		if best == nil || f.Height > best.Height || (f.Height == best.Height && f.TBR > best.TBR) {
+			best = f
+		}
+	}
+	return best
 }

@@ -713,3 +713,11 @@ export function installAudioDebug() {
   (window as unknown as { __audio?: () => unknown }).__audio = () =>
     engine instanceof NativeEngine ? engine.debugLevel() : null;
 }
+
+/** Change an explicitly paired edit without replacing the listener's queue. */
+export async function switchTrackVariant(track: Track, expectedID: string): Promise<boolean> {
+  if (roomControlsLocked()) return false;
+  if (usePlayer.getState().track?.id !== expectedID) return false;
+  if (serverAuthoritative && session) return session.command({ Kind: "switch_variant", ExpectedID: expectedID, Tracks: [track] });
+  return false;
+}

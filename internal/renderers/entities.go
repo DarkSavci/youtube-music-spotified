@@ -533,3 +533,31 @@ func ParsePlaylistContinuation(doc Node) ([]domain.Track, string) {
 	}
 	return listTracks(items), continuationItemToken(items)
 }
+
+// ParseTrackVersions returns only an explicit YouTube song/video pair that
+// contains the requested id. Unrelated recommendations are never matches.
+func ParseTrackVersions(doc Node, id string) []domain.Track {
+	for _, wrapper := range FindAll(doc, "playlistPanelVideoWrapperRenderer") {
+		var tracks []domain.Track
+		contains := false
+		for _, node := range FindAll(wrapper, NodeQueueItem) {
+			if tr, ok := ParseQueueTrack(node); ok {
+				tr.IsVideo = isVideoTrack(node)
+				tracks = append(tracks, tr)
+				if tr.ID == id {
+					contains = true
+				}
+			}
+		}
+		if contains {
+			return tracks
+		}
+	}
+	for _, node := range FindAll(doc, NodeQueueItem) {
+		if tr, ok := ParseQueueTrack(node); ok && tr.ID == id {
+			tr.IsVideo = isVideoTrack(node)
+			return []domain.Track{tr}
+		}
+	}
+	return nil
+}

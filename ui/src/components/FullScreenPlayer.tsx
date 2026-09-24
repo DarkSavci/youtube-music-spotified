@@ -1,3 +1,5 @@
+import { VideoSurface, VideoSwitch, VideoNotice } from "./VideoPlayer";
+import { useVideo } from "../lib/video";
 import { useEffect, useRef, useState } from "react";
 import { AlbumLink, ArtistLinks } from "./EntityLinks";
 import { usePlayer } from "../lib/player";
@@ -22,6 +24,7 @@ import { artworkAtLeast, formatDuration } from "../lib/types";
  * makes the blur the subject and the cover a stamp on top of it.
  */
 export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
+  const video = useVideo(s => s.enabled);
   const { track, state, repeat, shuffle, origin } = usePlayer();
   const position = usePlaybackPosition();
   const [scrubbing, setScrubbing] = useState<number | null>(null);
@@ -48,12 +51,13 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fsp" role="dialog" aria-modal="true" aria-label="Now playing">
-      <img className="fsp__bleed" src={art} alt="" aria-hidden="true" />
+      {video ? <VideoSurface priority={10} className="fsp__video" /> : <img className="fsp__bleed" src={art} alt="" aria-hidden="true" />}
       {/* A gradient only at the bottom, where the controls are: the artwork
           stays untouched everywhere the eye actually looks. */}
       <div className="fsp__scrim" aria-hidden="true" />
 
       <div className="fsp__context">
+        <VideoSwitch /><VideoNotice />
         <span className="fsp__contextlabel">
           {origin ? "Playing from" : "Playing"}
         </span>

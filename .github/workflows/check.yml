@@ -54,4 +54,6 @@ jobs:
         working-directory: desktop
       - run: npx --no-install electron test/route-smoke.js
         working-directory: desktop
+      - run: npx --no-install electron test/video-smoke.js
+        working-directory: desktop
       - run: node desktop/test/package-smoke.js

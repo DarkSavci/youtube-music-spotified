@@ -99,6 +99,8 @@ type Server struct {
 	deps Deps
 	mux  *http.ServeMux
 
+	videoMu  sync.Mutex
+	videos   map[string]resolvedEntry
 	streams  *streamCache
 	prefetch *prefetcher
 	autoplay *autoplay
@@ -125,6 +127,7 @@ func New(d Deps) *Server {
 		deps:     d,
 		mux:      http.NewServeMux(),
 		streams:  newStreamCache(),
+		videos:   make(map[string]resolvedEntry),
 		prefetch: newPrefetcher(),
 		autoplay: newAutoplay(),
 		// No total deadline — a three-hour mix is one transfer — but a
@@ -167,6 +170,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/albums/{id}", s.handleAlbum)
 	s.mux.HandleFunc("GET /v1/artists/{id}", s.handleArtist)
 	s.mux.HandleFunc("GET /v1/playlists/{id}", s.handlePlaylist)
+	s.mux.HandleFunc("GET /v1/video-stream/{id}", s.handleVideoStream)
+	s.mux.HandleFunc("GET /v1/tracks/{id}/versions", s.handleTrackVersions)
 	s.mux.HandleFunc("GET /v1/radio/{id}", s.handleRadio)
 	s.mux.HandleFunc("POST /v1/session/radio", s.handleStartRadio)
 	s.mux.HandleFunc("GET /v1/podcasts/{id}", s.handlePodcast)

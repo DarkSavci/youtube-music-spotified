@@ -155,6 +155,8 @@ func (c *Core) Apply(cmd Command) (Reject, []LogEntry) {
 			c.bump()
 		}
 		return RejectNone, nil
+	case CmdVariant:
+		return c.switchVariant(cmd)
 	case CmdPlay:
 		return c.play(cmd)
 	case CmdToggle:
@@ -812,5 +814,43 @@ func (c *Core) followRoom(cmd Command) (Reject, []LogEntry) {
 		c.state.State = domain.StatePlaying
 	}
 	c.bump()
+	return RejectNone, logs
+}
+
+// switchVariant replaces only the current queue slot and cuts to the matching
+// song/video edit. Other queue entries, repeat, shuffle and volume survive.
+func (c *Core) switchVariant(cmd Command) (Reject, []LogEntry) {
+	current := c.state.Queue.Current()
+	if current == nil {
+		return RejectEmptyQueue, nil
+	}
+	if len(cmd.Tracks) != 1 || cmd.ExpectedID != current.ID || cmd.Tracks[0].ID == "" || !cmd.Tracks[0].Playable {
+		return RejectOutOfRange, nil
+	}
+	track := cmd.Tracks[0]
+	pos := c.positionNow()
+	if track.DurationMs > 0 && pos >= track.DurationMs {
+		pos = track.DurationMs - 1
+	}
+	if pos < 0 {
+		pos = 0
+	}
+	paused := c.state.State == domain.StatePaused
+	oldID := current.ID
+	logs := c.closeOutCurrent(false)
+	c.state.Queue.Items[c.state.Queue.Index] = track
+	for i := range c.unshuffled {
+		if c.unshuffled[i].ID == oldID {
+			c.unshuffled[i] = track
+			break
+		}
+	}
+	c.userChange = true
+	c.consecutiveFaults = 0
+	c.state.Degraded = nil
+	c.startTrack(c.state.Queue.Index, pos)
+	if paused {
+		c.state.State = domain.StatePaused
+	}
 	return RejectNone, logs
 }
