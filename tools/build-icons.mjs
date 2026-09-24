@@ -37,6 +37,7 @@ const SIMPLE = [
   ["IconVolume", "volume_up-fill"],
   ["IconVolumeMute", "volume_off-fill"],
   ["IconQueue", "queue_music"],
+  ["IconVideo", "smart_display"],
   ["IconDevices", "devices"],
   ["IconMore", "more_horiz"],
   ["IconGrid", "grid_view"],

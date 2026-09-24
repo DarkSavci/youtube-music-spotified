@@ -1,12 +1,22 @@
 import { useEffect, useRef } from "react";
 import { attachVideo, retryVideo, setVideoEnabled, useVideo } from "../lib/video";
-import { IconExpand } from "./Icon";
+import { IconExpand, IconVideo } from "./Icon";
 import { usePlayer } from "../lib/player";
 
-export function VideoSwitch() {
+export function VideoSwitch({ iconOnly = false }: { iconOnly?: boolean }) {
   const { enabled, busy } = useVideo();
   const track = usePlayer(s => s.track);
   if (!track) return null;
+  if (iconOnly) return <button
+    className="iconbtn"
+    aria-label="Music video"
+    title={busy ? "Switching playback format…" : enabled ? "Switch to song" : "Watch music video"}
+    aria-pressed={enabled}
+    aria-busy={busy}
+    data-active={enabled || undefined}
+    disabled={busy}
+    onClick={() => void setVideoEnabled(!enabled)}
+  ><IconVideo size={18} /></button>;
   return <div className="video-switch" role="group" aria-label="Playback format">
     <button className="chip" aria-pressed={!enabled} disabled={busy} onClick={() => void setVideoEnabled(false)}>Song</button>
     <button className="chip" aria-pressed={enabled} disabled={busy} onClick={() => void setVideoEnabled(true)}>{busy ? "Switching…" : "Video"}</button>

@@ -369,7 +369,7 @@ function ThinProgress() {
 function Extras({ panel, onPanel }: PanelProps) {
   return (
     <div className="mini__extras">
-      <VideoSwitch /><VideoNotice />
+      <VideoSwitch iconOnly /><VideoNotice />
       <button
         className="iconbtn"
         aria-label="Queue"
