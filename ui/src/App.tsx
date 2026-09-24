@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { PageBoundary } from "./components/PageBoundary";
 import { Toast } from "./components/Toast";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { Tooltips } from "./components/Tooltip";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useLocation } from "react-router-dom";
 import { LibrarySidebar } from "./components/LibrarySidebar";
 import { NowPlayingBar } from "./components/NowPlayingBar";
 import { TopBar } from "./components/TopBar";
@@ -49,6 +50,7 @@ import { leaveTogether } from "./lib/together";
  * does and the bar is always reachable.
  */
 export function App() {
+  const location = useLocation();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [queueOpen, setQueueOpen] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
@@ -141,6 +143,7 @@ export function App() {
         <TopBar scrollRef={scrollRef} />
         <div className="main__scroll scroll" ref={scrollRef}>
           <div className="main__content" id="main-content" tabIndex={-1}>
+            <PageBoundary key={location.pathname}>
             <Suspense fallback={<TrackListSkeleton />}>
             <Routes>
               <Route path="/together" element={<Together />} />
@@ -161,6 +164,7 @@ export function App() {
               />
             </Routes>
             </Suspense>
+            </PageBoundary>
           </div>
         </div>
       </main>
