@@ -2,6 +2,22 @@
 
 Every release of Youtube Music Spotified, newest first.
 
+## 0.1.8 — 2026-09-24
+
+### New
+
+- Show profile photos in the account switcher
+- Add anchored account menu with quick channel switching
+- Add saved Google accounts and YouTube channel switching
+- Add native macOS source builds and desktop integration
+
+### Fixed
+
+- Handle saved accounts without YouTube channels
+- Measure normalization before user volume attenuation
+- Require owned music service readiness before loading the app
+
+
 ## 0.1.7 — 2026-09-23
 
 ### Fixed
