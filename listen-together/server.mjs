@@ -6,7 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { cleanSnapshot, positionAt } from './protocol.mjs';
 
 /** In-memory, metadata-only prototype. Put behind TLS for remote use. */
-export function createRoomServer({ maxRooms = 100, maxMembers = 8, lifetimeMs = 6 * 3600000, maxConnectionsPerIP = 16, maxRoomsPerIP = 4, emptyRoomMs = 30 * 60000, heartbeatMs = 30000, trustProxy = false, allowedOrigins = [] } = {}) {
+export function createRoomServer({ maxRooms = 100, maxMembers = 8, lifetimeMs = 6 * 3600000, maxClients = 200, maxConnectionsPerIP = 8, maxRoomsPerIP = 4, emptyRoomMs = 30 * 60000, heartbeatMs = 30000, trustProxy = false, allowedOrigins = [] } = {}) {
   const rooms = new Map();
   const connections = new Map();
   // Per-IP limits key IPv6 clients by /64, since one host usually holds a
@@ -20,10 +20,16 @@ export function createRoomServer({ maxRooms = 100, maxMembers = 8, lifetimeMs = 
     const groups = [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right];
     return `${groups.slice(0, 4).map(g => parseInt(g || '0', 16).toString(16)).join(':')}::/64`;
   };
+  let warnedNoForwardedFor = false;
   const clientIP = req => {
     const address = req.socket.remoteAddress || 'unknown';
     const proxy = trustProxy && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address);
-    return limitKey(proxy && typeof req.headers['x-forwarded-for'] === 'string' ? req.headers['x-forwarded-for'].split(',').at(-1).trim() : address);
+    const forwarded = req.headers['x-forwarded-for'];
+    if (proxy && typeof forwarded !== 'string' && !warnedNoForwardedFor) {
+      warnedNoForwardedFor = true;
+      console.warn('TRUST_PROXY is set but the proxy sent no X-Forwarded-For; all clients share its per-IP limits.');
+    }
+    return limitKey(proxy && typeof forwarded === 'string' ? forwarded.split(',').at(-1).trim() : address);
   };
   const originAllowed = req => {
     const origin = req.headers.origin;
@@ -47,7 +53,7 @@ export function createRoomServer({ maxRooms = 100, maxMembers = 8, lifetimeMs = 
     ws.ip = clientIP(req);
     connections.set(ws.ip, (connections.get(ws.ip) || 0) + 1);
     ws.on('close', () => { const count = (connections.get(ws.ip) || 1) - 1; if (count) connections.set(ws.ip, count); else connections.delete(ws.ip); });
-    if (wss.clients.size > 200) { ws.close(1013, 'Server full'); return; }
+    if (wss.clients.size > maxClients) { ws.close(1013, 'Server full'); return; }
     ws.lastPong = Date.now();
     ws.created = Date.now();
     ws.count = 0;
@@ -109,7 +115,13 @@ export function createRoomServer({ maxRooms = 100, maxMembers = 8, lifetimeMs = 
   } };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const server = createRoomServer({ trustProxy: process.env.TRUST_PROXY === "1", allowedOrigins: (process.env.ALLOWED_ORIGINS || "").split(",").filter(Boolean) });
+  const number = (name, fallback) => { const value = Number(process.env[name]); return Number.isFinite(value) && value > 0 ? value : fallback; };
+  const server = createRoomServer({
+    trustProxy: process.env.TRUST_PROXY === "1",
+    allowedOrigins: (process.env.ALLOWED_ORIGINS || "").split(",").filter(Boolean),
+    maxClients: number("MAX_CLIENTS", 200),
+    maxConnectionsPerIP: number("MAX_CONNECTIONS_PER_IP", 8),
+  });
   server.http.listen(Number(process.env.PORT || 8765), process.env.HOST || '127.0.0.1', () => console.log('Listen Together server listening', server.http.address()));
   process.on('SIGTERM', () => { void server.close(); });
   process.on('SIGINT', () => { void server.close(); });

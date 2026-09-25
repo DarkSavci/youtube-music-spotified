@@ -73,7 +73,8 @@ app.whenReady().then(async()=>{
  assert.equal(await read(`document.querySelectorAll('.ctxmenu').length`),1);
  await read(`document.querySelector('.ctxmenu [aria-haspopup="menu"]').click()`);
  await waitFor(`document.querySelectorAll('.ctxmenu').length===2`);
- assert.equal(await read(`document.querySelectorAll('.ctxmenu')[1].querySelectorAll('[role=menuitem]').length`),21);
+ // The fixture library's 20 playlists plus "New playlist…".
+ assert.equal(await read(`document.querySelectorAll('.ctxmenu')[1].querySelectorAll('[role=menuitem]').length`),20+1);
  assert.ok(await read(`Array.from(document.querySelectorAll('.ctxmenu')).every(e=>{const r=e.getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight})`));
  await read(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
  assert.equal(await read(`document.querySelectorAll('.ctxmenu').length`),1);

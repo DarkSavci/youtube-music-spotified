@@ -166,9 +166,11 @@ export function PlaylistView() {
         <button
           className="playbtn playbtn--accent playbtn--lg"
           aria-label={`Play ${data.title}`}
-          disabled={tracks.length === 0 || preparing}
+          disabled={tracks.length === 0}
+          // Stays focusable while preparing, so focus is not lost mid-load.
+          aria-disabled={preparing}
           aria-busy={preparing}
-          onClick={() => void play(0)}
+          onClick={() => { if (!preparing) void play(0); }}
         >
           <IconPlay size={24} />
         </button>

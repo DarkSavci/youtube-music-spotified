@@ -118,9 +118,11 @@ export function EntityActions({
     <button
       className="iconbtn entityactions__more"
       aria-label={`More options for ${title}`}
-      disabled={loading}
+      // aria-disabled, not disabled: a disabled button drops keyboard focus
+      // to the page when the menu hands it back while loading.
+      aria-disabled={loading}
       aria-busy={loading}
-      onClick={(e) => menu.open(e, build())}
+      onClick={(e) => { if (!loading) menu.open(e, build()); }}
     >
       <IconMore size={22} />
     </button>

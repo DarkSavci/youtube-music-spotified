@@ -6,6 +6,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../../ui/dist');
+// The test hides the Listen Together route's lazy chunk. Say so plainly if a
+// build change renames or inlines it, rather than failing on a timeout later.
+assert.ok(fs.readdirSync(path.join(root, 'assets')).some(f => /^Together-[^/]+\.js$/.test(f)), 'ui/dist has no Together-*.js chunk; update route-smoke.js for the new lazy route layout');
 let missing = true;
 const server = http.createServer((req,res) => {
  const url = new URL(req.url,'http://localhost');

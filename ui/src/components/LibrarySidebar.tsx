@@ -148,6 +148,9 @@ export function LibrarySidebar({ expanded, onExpand, onNavigate }: { expanded: b
 
   useEffect(() => {
     document.documentElement.style.setProperty("--sidebar-width", `${width}px`);
+    // The collapsed rail hides the search field; a filter left behind would
+    // hide items with no visible way to clear it.
+    if (width <= 170) setSearch("");
   }, [width]);
 
   const query = search.trim().toLocaleLowerCase();
