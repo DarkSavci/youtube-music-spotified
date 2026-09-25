@@ -54,6 +54,13 @@ interface PlayerState {
   volume: number;
   muted: boolean;
   anchor: PositionAnchor;
+  /**
+   * The playback speed in effect: the chosen one, or 1× in a Listen Together
+   * room. It is the anchor's rate while playing, so everything that
+   * interpolates position — the scrubber, synced lyrics, the video — moves at
+   * the speed the audio does.
+   */
+  speed: number;
   capabilities: Capabilities;
   /** Audio quality of the current stream, when known. */
   quality: string;
@@ -116,6 +123,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   volume: 0.5,
   muted: false,
   anchor: { positionMs: 0, atMs: 0, rate: 0 },
+  speed: 1,
   capabilities: idleCapabilities,
   quality: "",
   notice: null,
@@ -131,7 +139,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       track,
       origin,
       state: "playing",
-      anchor: { positionMs: 0, atMs: performance.now(), rate: 1 },
+      anchor: { positionMs: 0, atMs: performance.now(), rate: get().speed },
     });
   },
 
@@ -144,7 +152,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
         anchor: { positionMs: currentPosition(get()), atMs: performance.now(), rate: 0 },
       });
     } else if (state === "paused") {
-      set({ state: "playing", anchor: { ...anchor, atMs: performance.now(), rate: 1 } });
+      set({ state: "playing", anchor: { ...anchor, atMs: performance.now(), rate: get().speed } });
     }
   },
 
@@ -176,7 +184,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
   seek: (ms) =>
     set((s) => ({
-      anchor: { positionMs: Math.max(0, ms), atMs: performance.now(), rate: s.state === "playing" ? 1 : 0 },
+      anchor: { positionMs: Math.max(0, ms), atMs: performance.now(), rate: s.state === "playing" ? s.speed : 0 },
     })),
 
   setVolume: (v) => set({ volume: Math.min(2, Math.max(0, v)), muted: false }),

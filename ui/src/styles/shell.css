@@ -1464,3 +1464,18 @@ button:is(:hover, :focus-visible) .share-icon__copy,
 [role="menuitem"]:is(:hover, :focus-visible) .share-icon__copy { visibility: visible; }
 
 .topbar__history, .topbar__history:hover:not(:disabled) { width: 36px; height: 40px; background: transparent; }
+
+/* Playback speed: the number is the state, so it is the label. */
+.speedbtn {
+  width: auto;
+  min-width: 32px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill, 999px);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.speedbtn[aria-disabled="true"] { opacity: 0.5; }
+/* Holds the check mark's place on unchecked speeds. It is a span, so it needs
+   the menu's label rule undone, as the share icon does. */
+.ctxmenu__item > .speedbtn__blank { display: inline-block; width: 18px; height: 18px; flex: none; }

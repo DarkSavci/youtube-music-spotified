@@ -10,7 +10,8 @@ import { EmbeddedEngine } from "./embedded";
 import { maxVolume, useSettings } from "./settings";
 import { SessionClient, type Projection } from "./sessionclient";
 import type { Track } from "./types";
-import { usePlayer } from "./player";
+import { currentPosition, usePlayer } from "./player";
+import { effectiveSpeed, SPEEDS } from "./speed";
 import { recordPlay } from "./playlog";
 import { toast } from "./toast";
 
@@ -47,6 +48,7 @@ let deviceSettings: {
 
 /** Pushes the remembered settings into whatever engine is current. */
 function applyDeviceSettings() {
+  applySpeed();
   if (!deviceSettings || !(engine instanceof NativeEngine)) return;
   engine.setNormalization(deviceSettings.normalization, deviceSettings.normalizationLevel);
   engine.setEq(deviceSettings.eq);
@@ -242,7 +244,7 @@ function onEngineEvent(e: EngineEvent) {
       // one-per-second correction is enough to stay accurate without
       // re-rendering at frame rate.
       usePlayer.setState((s) => ({
-        anchor: { positionMs: e.positionMs, atMs: performance.now(), rate: 1 },
+        anchor: { positionMs: e.positionMs, atMs: performance.now(), rate: s.speed },
         track:
           s.track && e.durationMs > 0 && !s.track.durationMs
             ? { ...s.track, durationMs: e.durationMs }
@@ -322,7 +324,7 @@ function applyProjection(p: Projection) {
     anchor: {
       positionMs: p.state.positionMs,
       atMs: performance.now(),
-      rate: p.state.state === "playing" ? 1 : 0,
+      rate: p.state.state === "playing" ? usePlayer.getState().speed : 0,
     },
   });
 
@@ -620,6 +622,32 @@ export function stopPlayback() {
 /** Which engine is producing sound, for the diagnostics panel. */
 export function engineName(): string | null {
   return engine?.name ?? null;
+}
+
+/**
+ * Plays at the speed in effect: the chosen one, or 1× in a Listen Together
+ * room (see speed.ts). A speed the engine cannot play falls back to 1× rather
+ * than being ignored while the control claims otherwise.
+ *
+ * Speed is this device's, like volume: the core keeps track time, and the
+ * engine reports positions in track time, so nothing upstream changes. The
+ * anchor is re-taken at the new rate so interpolation does not jump.
+ */
+export function applySpeed() {
+  const wanted = effectiveSpeed();
+  const rate = !engine || engine.speeds().includes(wanted) ? wanted : 1;
+  engine?.setSpeed(rate);
+  const s = usePlayer.getState();
+  if (s.speed === rate) return;
+  usePlayer.setState({
+    speed: rate,
+    anchor: { positionMs: currentPosition(s), atMs: performance.now(), rate: s.state === "playing" ? rate : 0 },
+  });
+}
+
+/** The speeds the current engine can play. */
+export function availableSpeeds(): readonly number[] {
+  return engine?.speeds() ?? SPEEDS;
 }
 
 export function engineCapabilities() {

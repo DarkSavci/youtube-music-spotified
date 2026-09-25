@@ -14,6 +14,7 @@ import {
 import { miniSupported, toggleMini, useMini } from "../lib/miniplayer";
 import { useLikedIds, useToggleLike } from "../lib/liked";
 import { VolumeControl } from "./VolumeControl";
+import { SpeedControl } from "./SpeedControl";
 import { useMenu } from "./ContextMenu";
 import { useTrackMenu } from "../lib/trackmenu";
 
@@ -219,6 +220,7 @@ export function NowPlayingBar({
         >
           <IconQueue size={18} />
         </button>
+        <SpeedControl />
         <VideoSwitch />
         <VolumeControl />
         {/* Where Spotify puts it: after the volume, at the far right. */}

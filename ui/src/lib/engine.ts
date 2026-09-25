@@ -2,6 +2,7 @@ import type { Capabilities } from "./player";
 import { apiUrl } from "./base";
 import { Mixer, perceptualGain } from "./decks";
 import { audibleEdges, type Edges } from "./silence";
+import { SPEEDS } from "./speed";
 
 /**
  * The playback engine seam.
@@ -58,6 +59,10 @@ export interface Engine {
   apply(target: Target): void;
   /** Interpolation-free truth, for the rare caller that needs it exactly. */
   positionMs(): number;
+  /** The playback speeds this engine can play; see lib/speed.ts. */
+  speeds(): readonly number[];
+  /** Plays at this multiple of normal speed, pitch preserved. */
+  setSpeed(rate: number): void;
   destroy(): void;
 }
 
@@ -188,12 +193,30 @@ export class NativeEngine implements Engine {
   /** Where each track's sound starts and ends, for timing crossfades. */
   private edges = new Map<string, Edges>();
 
+  /** Playback speed, applied to both decks so a crossfade starts in step. */
+  private speed = 1;
+
   constructor(emit: (e: EngineEvent) => void) {
     this.emit = emit;
     this.decks = [new Audio(), new Audio()];
     for (const el of this.decks) {
       el.preload = "auto";
+      el.preservesPitch = true;
       this.wire(el);
+    }
+  }
+
+  speeds(): readonly number[] {
+    return SPEEDS;
+  }
+
+  setSpeed(rate: number) {
+    this.speed = rate;
+    // defaultPlaybackRate as well: loading a new source resets an element's
+    // rate to its default, which would drop back to 1× on every track.
+    for (const el of this.decks) {
+      el.defaultPlaybackRate = rate;
+      el.playbackRate = rate;
     }
   }
 
@@ -714,7 +737,10 @@ export class NativeEngine implements Engine {
     const sound =
       measured && Math.abs(measured.durationS - playing.duration) <= 2 ? measured : undefined;
     const end = sound ? Math.min(sound.endS, playing.duration) : playing.duration;
-    const remaining = (end - playing.currentTime) * 1000;
+    // In real time, not track time: at 2× a second of track passes in half a
+    // second, and a fade timed on the track would still be running when the
+    // music ran out.
+    const remaining = ((end - playing.currentTime) * 1000) / this.speed;
     if (!Number.isFinite(remaining) || remaining > ms) return;
 
     // Fade over what is actually left, so a short last track is not cut off

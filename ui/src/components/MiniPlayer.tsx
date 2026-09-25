@@ -18,6 +18,7 @@ import { QueueList } from "./QueuePanel";
 import { LyricsBody } from "./Lyrics";
 import { Slider } from "./Slider";
 import { VolumeControl } from "./VolumeControl";
+import { SpeedControl } from "./SpeedControl";
 import {
   IconClose, IconHeart, IconLyrics, IconOpenApp, IconPause, IconPin, IconPlay,
   IconQueue, IconRepeat, IconShuffle, IconSkipNext, IconSkipPrev, IconVideo,
@@ -376,6 +377,7 @@ function Extras({ panel, onPanel }: PanelProps) {
   const { blocked, reason } = useVideoControl();
   return (
     <div className="mini__extras">
+      <SpeedControl titled />
       {/* The mini player has no custom tooltip layer, so title is its only tooltip. */}
       <button className="iconbtn" aria-label={panel === "video" ? "Hide music video" : reason} title={panel === "video" ? "Hide music video" : reason}
         aria-pressed={panel === "video"} data-active={panel === "video" || undefined}
