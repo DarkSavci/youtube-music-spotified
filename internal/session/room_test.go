@@ -104,3 +104,32 @@ func TestRepeatedRoomSongInvalidatesOldEngineEvents(t *testing.T) {
 		t.Fatal("previous occurrence stopped the new room entry")
 	}
 }
+
+func TestLeavingKeepsTheCurrentOwnerAndMovesVersionForward(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 3)
+	c.state.OwnerDeviceID = "desk"
+	c.Apply(Command{Kind: CmdFollow, Tracks: tracks(2), Playing: true})
+	// Another device took over while the room played, e.g. this one left.
+	c.state.OwnerDeviceID = "phone"
+	during := c.State().Version
+	c.Apply(Command{Kind: CmdLeaveRoom})
+	if c.State().OwnerDeviceID != "phone" {
+		t.Fatalf("leaving restored a departed owner: %q", c.State().OwnerDeviceID)
+	}
+	if c.State().Version <= during {
+		t.Fatalf("version went back from %d to %d", during, c.State().Version)
+	}
+}
+
+func TestFollowingAnEmptyRoomAgainChangesNothing(t *testing.T) {
+	c, _ := newCore(t)
+	c.Apply(Command{Kind: CmdFollow})
+	epoch, version := c.State().Epoch, c.State().Version
+	for i := 0; i < 3; i++ {
+		c.Apply(Command{Kind: CmdFollow})
+	}
+	if c.State().Epoch != epoch || c.State().Version != version {
+		t.Fatalf("empty room resync moved epoch %d->%d, version %d->%d", epoch, c.State().Epoch, version, c.State().Version)
+	}
+}

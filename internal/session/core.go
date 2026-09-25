@@ -156,9 +156,16 @@ func (c *Core) Apply(cmd Command) (Reject, []LogEntry) {
 			c.roomEntry = ""
 			if c.beforeRoom != nil {
 				volume, epoch := c.state.Volume, c.state.Epoch
+				version, owner := c.state.Version, c.state.OwnerDeviceID
 				c.state = *c.beforeRoom
 				c.state.Volume = volume
 				c.state.Epoch = epoch + 1
+				// Only the personal session comes back. Which device makes
+				// the sound, and how far the state has advanced, belong to
+				// now: another device may have taken over during the room,
+				// and a projection must never go back in Version.
+				c.state.Version = version
+				c.state.OwnerDeviceID = owner
 				c.unshuffled = c.beforeRoomUnshuffled
 				c.beforeRoom = nil
 				c.beforeRoomUnshuffled = nil
@@ -823,6 +830,11 @@ func (c *Core) followRoom(cmd Command) (Reject, []LogEntry) {
 	}
 	c.following = true
 	if len(cmd.Tracks) == 0 {
+		// Already following an empty room: nothing to stop or restart, so
+		// no new epoch or projection either.
+		if wasFollowing && len(c.state.Queue.Items) == 0 && c.state.State == domain.StateIdle {
+			return RejectNone, nil
+		}
 		logs = c.closeOutCurrent(false)
 		c.state.Queue = domain.Queue{}
 		c.state.State = domain.StateIdle
