@@ -75,6 +75,8 @@ interface DesktopBridge {
     toggleMaximize(): void;
     close(): void;
     isMaximized(): Promise<boolean>;
+    /** Windows: caption buttons drawn straight over fullscreen content. */
+    setImmersiveTitleBar?(on: boolean): void;
     showMain?(): void;
     /** Returns an unsubscribe function. */
     onMaximizeChange(fn: (maximized: boolean) => void): () => void;

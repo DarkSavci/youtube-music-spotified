@@ -48,6 +48,13 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
+  // Windows draws its caption buttons over the page; while fullscreen they sit
+  // straight on the artwork or video instead of on a dark box.
+  useEffect(() => {
+    window.spotifier?.window?.setImmersiveTitleBar?.(true);
+    return () => window.spotifier?.window?.setImmersiveTitleBar?.(false);
+  }, []);
+
   useEffect(() => {
     setHidden(false);
     if (state !== "playing" || videoError || notice || !rootRef.current) return;
