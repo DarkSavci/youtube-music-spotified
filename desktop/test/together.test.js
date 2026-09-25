@@ -314,3 +314,28 @@ test("a seek-bar drag sends only where it settles", async (t) => {
     [["seek", 60000]],
   );
 });
+test("play next with nothing queued after the current song is an append guests may make", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  const r = room(1, { mode: "contributions" });
+  r.queue = r.queue.slice(0, 1);
+  c.onState(r);
+  await h.flush();
+  h.route("enqueueNext", { tracks: [h.player.getState().track] });
+  assert.equal(c.commands.length, 1);
+  assert.equal(c.commands[0].kind, "enqueue");
+  assert.equal(c.commands[0].before, undefined);
+});
+test("a settled seek stays pinned to the song it was dragged on", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  c.onState(room());
+  await h.flush();
+  h.route("seek", { positionMs: 60000 });
+  c.onState(room(2, { current: "entry2" }));
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(c.commands.length, 1);
+  assert.equal(c.commands[0].current, "entry1");
+});

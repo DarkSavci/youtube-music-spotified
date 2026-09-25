@@ -175,11 +175,14 @@ class DiscordPresence {
         }
         buffer = buffer.subarray(8 + length);
         if (op === 3) socket.write(frame(4, payload));
-        // Discord refuses the handshake itself, e.g. "Invalid Client ID".
-        // Retrying the same ID cannot succeed, so say so instead of waiting.
+        // 4000 is Discord refusing the application ID itself. Retrying the
+        // same ID cannot succeed, so say so instead of waiting. Other closes,
+        // such as rate limiting, retry as before.
         if (op === 2) {
-          this.rejected = this.clientId;
-          this.status = "error";
+          if (payload.code === 4000) {
+            this.rejected = this.clientId;
+            this.status = "error";
+          }
           socket.destroy();
           return;
         }

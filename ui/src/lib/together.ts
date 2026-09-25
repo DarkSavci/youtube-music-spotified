@@ -202,8 +202,11 @@ function denied(room: RoomState, kind: string, data: Record<string, unknown>) {
     return "Only the leader can change room settings.";
   if (roomCanControl()) return null;
   if (kind === "enqueue" && room.mode === "contributions") return null;
+  // With nothing after the current song, "next" is an ordinary append.
   if (kind === "enqueueNext" && room.mode === "contributions")
-    return "Only playback controllers may insert ahead of others.";
+    return room.queue[room.queue.findIndex((e) => e.id === room.current) + 1]
+      ? "Only playback controllers may insert ahead of others."
+      : null;
   if (kind === "remove" && room.mode === "contributions") {
     const entry = room.queue[Number(data.at)];
     return entry?.addedBy.id === member && entry.id !== room.current
@@ -216,11 +219,13 @@ function denied(room: RoomState, kind: string, data: Record<string, unknown>) {
 }
 // Dragging the seek bar fires every step; only where it settles is sent, so
 // a scrub neither trips the relay's message limit nor races its own revisions.
+// The song is pinned when the drag settles: if it changes in the meantime,
+// the relay refuses the seek instead of applying it to the next song.
 let seekTimer: ReturnType<typeof setTimeout> | undefined;
-function routeSeek(positionMs: unknown) {
+function routeSeek(positionMs: unknown, current: string | null) {
   clearTimeout(seekTimer);
   seekTimer = setTimeout(
-    () => void roomCommand({ kind: "seek", positionMs }),
+    () => void roomCommand({ kind: "seek", positionMs, current }),
     150,
   );
 }
@@ -241,7 +246,7 @@ function route(kind: string, data: Record<string, unknown> = {}) {
     return true;
   }
   if (kind === "seek") {
-    routeSeek(data.positionMs);
+    routeSeek(data.positionMs, room.current);
     return true;
   }
   let command: Record<string, unknown> = { kind, ...data };

@@ -152,3 +152,13 @@ test("a refused application ID reports an error and stops retrying until it chan
   assert.equal(presence.status, "connecting");
   presence.stop();
 });
+test("a rate-limit close retries instead of blaming the application ID", () => {
+  const socket = new Socket();
+  const presence = new DiscordPresence({ connect: () => socket, paths: ["pipe"] });
+  presence.update(sample);
+  socket.emit("connect");
+  socket.emit("data", frame(2, { code: 4002, message: "Rate limited" }));
+  assert.equal(presence.status, "waiting-for-discord");
+  assert.ok(presence.retry);
+  presence.stop();
+});
