@@ -309,6 +309,10 @@ function applyProjection(p: Projection) {
   // projection and a null list here took the whole page down. Cheap to hold.
   const items = p.state.queue.items ?? [];
   const track = items[p.state.queue.index] ?? null;
+  // Speed is per device. While another device is the one playing, this
+  // window is a remote for it: its speed is not ours to know, so interpolate
+  // at 1× and let the core's projections correct it.
+  const remote = (p.devices ?? []).some((d) => d.owner && d.id !== session?.deviceID);
   usePlayer.setState({
     followingRoom: Boolean(p.followingRoom),
     state: p.state.state,
@@ -324,7 +328,7 @@ function applyProjection(p: Projection) {
     anchor: {
       positionMs: p.state.positionMs,
       atMs: performance.now(),
-      rate: p.state.state === "playing" ? usePlayer.getState().speed : 0,
+      rate: p.state.state !== "playing" ? 0 : remote ? 1 : usePlayer.getState().speed,
     },
   });
 
