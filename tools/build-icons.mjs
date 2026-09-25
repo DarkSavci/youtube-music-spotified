@@ -24,6 +24,9 @@ const SRC = "ui/node_modules/@material-symbols/svg-400/rounded";
 const SIMPLE = [
   ["IconSearch", "search"],
   ["IconPlus", "add"],
+  // The taskbar's Liked Music button, as Spotify draws it: add, then added.
+  ["IconAddCircle", "add_circle"],
+  ["IconCheckCircle", "check_circle-fill"],
   ["IconChevronLeft", "chevron_left"],
   ["IconChevronRight", "chevron_right"],
   ["IconChevronDown", "keyboard_arrow_down"],

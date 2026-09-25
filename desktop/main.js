@@ -221,6 +221,14 @@ const DATA_DIR_NAME = "Spotifier";
 // has then. Setting the path later left a stray folder behind on every launch.
 app.setPath("userData", path.join(app.getPath("appData"), DATA_DIR_NAME));
 
+// The taskbar identity has to be settled before the first window exists.
+// Changed later, Windows regroups the window under a new taskbar button, and
+// the thumbnail buttons already attached to the old one are lost. The
+// installer stamps its shortcut with the same id, which toasts also need.
+if (app.isPackaged && process.platform === "win32") {
+  app.setAppUserModelId("dev.darksavci.youtubemusicspotified");
+}
+
 // The log opens next, before anything below has a chance to say something.
 logs.init(dataDir());
 
