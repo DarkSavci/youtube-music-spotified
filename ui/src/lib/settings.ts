@@ -21,9 +21,6 @@ export type ThemeChoice = "dark" | "system";
 export type { NormalizationLevel } from "./engine";
 
 export interface Settings {
-  discordEnabled: boolean;
-  discordApplicationId: string;
-  discordShareRoom: boolean;
   /** Milliseconds of overlap between tracks. Zero disables crossfade. */
   crossfadeMs: number;
   gapless: boolean;
@@ -154,9 +151,6 @@ Left off deliberately:
                   the sound is not a neutral starting point
 */
 export const DEFAULT_SETTINGS: Settings = {
-  discordEnabled: false,
-  discordApplicationId: "",
-  discordShareRoom: false,
   crossfadeMs: 6000,
   gapless: true,
   normalization: true,

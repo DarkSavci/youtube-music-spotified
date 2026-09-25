@@ -4,7 +4,6 @@ import {
   roomCommand,
   useRoomPreferences,
 } from "../lib/together";
-import { useSettings } from "../lib/settings";
 import { RoomAvatar } from "./RoomAvatar";
 import { IconClose, IconSettings } from "./Icon";
 
@@ -20,10 +19,6 @@ export function RoomListeners({
   const followVideo = useRoomPreferences((s) => s.followVideo),
     notifications = useRoomPreferences((s) => s.notifications),
     update = useRoomPreferences((s) => s.update);
-  const discordEnabled = useSettings((s) => s.discordEnabled),
-    discordShareRoom = useSettings((s) => s.discordShareRoom),
-    setSetting = useSettings((s) => s.set);
-  const discordAvailable = !!window.spotifier?.discordPresence;
   return (
     <aside className="room-panel room-listeners">
       {owner && room.pending.length > 0 && (
@@ -122,22 +117,6 @@ export function RoomListeners({
           })}
         </small>
         <h4>Your experience</h4>
-        {discordAvailable && (
-          <label className="room-check">
-            <input
-              type="checkbox"
-              checked={discordShareRoom}
-              disabled={!discordEnabled}
-              onChange={(e) => setSetting("discordShareRoom", e.target.checked)}
-            />
-            Include room name in Discord activity
-          </label>
-        )}
-        {discordAvailable && !discordEnabled && (
-          <small>
-            Enable Discord activity in Settings to share your room name.
-          </small>
-        )}
         <label className="room-check">
           <input
             type="checkbox"

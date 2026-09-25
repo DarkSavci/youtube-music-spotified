@@ -24,14 +24,6 @@ const tray = require("./tray");
 const miniplayer = require("./miniplayer");
 const updater = require("./updater");
 const { LoginItem } = require("./loginitem");
-const { DiscordPresence } = require("./discord-presence");
-const discordPresence = new DiscordPresence({
-  // stop() also runs at shutdown, when the window may already be gone.
-  onStatus: (status) => {
-    if (mainWindow && !mainWindow.isDestroyed())
-      mainWindow.webContents.send("discord:status", status);
-  },
-});
 const logs = require("./logs");
 const { vendorDirectory } = require("./platform");
 const { stopChild } = require("./child-process");
@@ -379,7 +371,6 @@ function probe(port, timeoutMs) {
 let shutdownPromise = null;
 let shutdownComplete = false;
 function shutdown() {
-  discordPresence.stop();
   if (shutdownPromise) return shutdownPromise;
   shuttingDown = true;
   accounts.beginShutdown();
@@ -459,8 +450,6 @@ function createWindow() {
   }
 
   // Avoid a white flash before the dark UI paints.
-  mainWindow.webContents.on("render-process-gone", () => discordPresence.stop());
-  mainWindow.webContents.on("did-start-loading", () => discordPresence.stop());
   mainWindow.once("ready-to-show", () => {
     if (startHidden) {
       startHidden = false;
@@ -704,10 +693,3 @@ ipcMain.handle("logs:export", (_e, page) =>
 ipcMain.on("logs:open-folder", () => logs.openFolder());
 // From the mini player and the tray: bring the full window back.
 ipcMain.on("window:show-main", () => tray.showWindow());
-
-// Only the main player window may publish presence, never tray/mini-player pages.
-ipcMain.handle("discord:presence", (event, value) => {
-  if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return "unavailable";
-  discordPresence.update(value);
-  return discordPresence.status;
-});

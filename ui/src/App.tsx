@@ -1,4 +1,3 @@
-import { installDiscordPresence } from "./lib/discord";
 import { VideoSurface, VideoNotice } from "./components/VideoPlayer";
 import { usePlayer } from "./lib/player";
 import { useVideo, checkVideoAvailability } from "./lib/video";
@@ -104,9 +103,6 @@ export function App() {
     });
     installAudioDebug();
   }, [crossfadeMs, gapless, normalization, normalizationLevel, resumeOnLaunch, reportToYouTube, cacheMaxMB, autoplay, eq]);
-
-  // Opt-in Discord activity follows the player from here, for the app's life.
-  useEffect(() => installDiscordPresence(), []);
 
   // Speed changes when chosen, and when a Listen Together room pins it to 1×.
   const playbackSpeed = useSettings((s) => s.playbackSpeed);
