@@ -30,7 +30,9 @@ const server = http.createServer((req,res) => {
    else { first++; body={playlist:{id:'fixture',title:'Fixture playlist',artwork:[],trackCount:120,tracks:Array.from({length:100},(_,i)=>track(i+1))},next:'page2'}; }
   } else if (url.pathname === '/v1/me/liked') body={tracks:[]};
   else if (url.pathname === '/v1/me/library') body=Array.from({length:20},(_,i)=>({id:'list'+i,kind:'playlist',title:'Saved playlist '+i,subtitle:'Fixture owner',artwork:[]}));
-  else if (url.pathname === '/v1/me') body={state:'logged_out'};
+  else if (url.pathname === '/v1/me') body={state:'signed_in',account:{name:'A long account display name'}};
+  else if (url.pathname === '/v1/home') body={shelves:[{title:'Fixture shelf',items:[{track:track(1)}]}]};
+  else if (url.pathname === '/v1/me/mixes') body=[{id:'repeat',title:'On Repeat',description:'Your recent listening',tracks:[track(1)]}];
   else { res.statusCode=404; body={error:'fixture endpoint unavailable'}; }
   res.end(JSON.stringify(body)); return;
  }
@@ -101,6 +103,15 @@ app.whenReady().then(async()=>{
  await read(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
  assert.equal(await read(`document.querySelectorAll('.ctxmenu').length`),0);
  assert.equal(await read(`document.activeElement.getAttribute('aria-label')`),'Search music');
+ await read(`window.location.hash='/'`);
+ await waitFor(`document.querySelector('.mixcard')`);
+ for (const width of [1600, 1150, 1034, 900]) {
+  win.setSize(width, 900);
+  await read(`document.querySelector('.app-shell').setAttribute('data-native-titlebar', 'true')`);
+  await read(`new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))`);
+  assert.ok(await read(`(() => { const search=document.querySelector('.topbar__search-group').getBoundingClientRect(); const gift=document.querySelector('.whats-new-button').getBoundingClientRect(); return search.right <= gift.left && search.width > 100; })()`), `search and gift do not overlap at ${width}px`);
+  assert.ok(await read(`document.querySelector('.mixcard').getBoundingClientRect().width <= 221`), `single mix is bounded at ${width}px`);
+ }
  console.log('NAVIGATION PASS: time preference survives reload, search focuses, library filters/expands, playlist submenu includes all entries and flips at edges');
  win.destroy();server.close();app.exit(0);
 }).catch(err=>{console.error(err);server.close();app.exit(1);});

@@ -122,7 +122,7 @@ export function TopBar({
       </div>
       </div>
 
-      <div className="topbar__spacer" />
+      <div className="topbar__actions">
       <WhatsNew />
       <button className="iconbtn" aria-label={roomStatus === "connected" ? "Listen Together — connected" : "Listen Together"} onClick={() => navigate("/together")} data-room-active={roomStatus === "connected" || undefined}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 14v-3a9 9 0 0 1 18 0v3M3 13h3v8H3zM18 13h3v8h-3z" /></svg>
@@ -145,6 +145,7 @@ export function TopBar({
       ) : null}
 
       <WindowControls />
+      </div>
     </header>
   );
 }
