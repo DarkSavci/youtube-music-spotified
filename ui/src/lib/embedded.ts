@@ -1,6 +1,6 @@
 import type { Capabilities } from "./player";
 import type { Engine, EngineEvent, Target } from "./engine";
-import { SPEEDS } from "./speed";
+import { MAX_SPEED, MIN_SPEED, type SpeedSupport } from "./speed";
 
 /**
  * Embedded engine: plays through YouTube's own player.
@@ -102,8 +102,8 @@ export class EmbeddedEngine implements Engine {
   private pendingTarget: Target | null = null;
   /** The speed asked for; applied once the player exists, and on every track. */
   private speed = 1;
-  /** What YouTube offers for the loaded video; all of ours until it says. */
-  private available: readonly number[] = SPEEDS;
+  /** What YouTube offers for the loaded video; its usual list until it says. */
+  private available: readonly number[] = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
   constructor(emit: (e: EngineEvent) => void) {
     this.emit = emit;
@@ -253,7 +253,7 @@ export class EmbeddedEngine implements Engine {
     return Math.round((this.player?.getCurrentTime() ?? 0) * 1000);
   }
 
-  speeds(): readonly number[] {
+  speeds(): SpeedSupport {
     return this.available;
   }
 
@@ -266,7 +266,7 @@ export class EmbeddedEngine implements Engine {
     if (!this.player || !this.ready) return;
     try {
       const offered = this.player.getAvailablePlaybackRates();
-      if (offered?.length) this.available = SPEEDS.filter((r) => offered.includes(r));
+      if (offered?.length) this.available = offered.filter((r) => r >= MIN_SPEED && r <= MAX_SPEED);
       if (this.player.getPlaybackRate() !== this.speed) this.player.setPlaybackRate(this.speed);
     } catch {
       /* the player is between videos; the next PLAYING state applies it */

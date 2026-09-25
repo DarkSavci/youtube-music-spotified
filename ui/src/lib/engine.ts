@@ -2,7 +2,7 @@ import type { Capabilities } from "./player";
 import { apiUrl } from "./base";
 import { Mixer, perceptualGain } from "./decks";
 import { audibleEdges, type Edges } from "./silence";
-import { SPEEDS } from "./speed";
+import type { SpeedSupport } from "./speed";
 
 /**
  * The playback engine seam.
@@ -60,7 +60,7 @@ export interface Engine {
   /** Interpolation-free truth, for the rare caller that needs it exactly. */
   positionMs(): number;
   /** The playback speeds this engine can play; see lib/speed.ts. */
-  speeds(): readonly number[];
+  speeds(): SpeedSupport;
   /** Plays at this multiple of normal speed, pitch preserved. */
   setSpeed(rate: number): void;
   destroy(): void;
@@ -206,8 +206,9 @@ export class NativeEngine implements Engine {
     }
   }
 
-  speeds(): readonly number[] {
-    return SPEEDS;
+  speeds(): SpeedSupport {
+    // A media element plays any rate in our range, pitch preserved.
+    return "any";
   }
 
   setSpeed(rate: number) {

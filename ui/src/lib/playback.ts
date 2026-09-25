@@ -11,7 +11,7 @@ import { maxVolume, useSettings } from "./settings";
 import { SessionClient, type Projection } from "./sessionclient";
 import type { Track } from "./types";
 import { currentPosition, usePlayer } from "./player";
-import { effectiveSpeed, SPEEDS } from "./speed";
+import { effectiveSpeed, playableSpeed, type SpeedSupport } from "./speed";
 import { recordPlay } from "./playlog";
 import { toast } from "./toast";
 
@@ -630,16 +630,15 @@ export function engineName(): string | null {
 
 /**
  * Plays at the speed in effect: the chosen one, or 1× in a Listen Together
- * room (see speed.ts). A speed the engine cannot play falls back to 1× rather
- * than being ignored while the control claims otherwise.
+ * room (see speed.ts). An engine with a fixed list of speeds plays the
+ * nearest one, and the control shows that rather than what was asked.
  *
  * Speed is this device's, like volume: the core keeps track time, and the
  * engine reports positions in track time, so nothing upstream changes. The
  * anchor is re-taken at the new rate so interpolation does not jump.
  */
 export function applySpeed() {
-  const wanted = effectiveSpeed();
-  const rate = !engine || engine.speeds().includes(wanted) ? wanted : 1;
+  const rate = playableSpeed(effectiveSpeed(), engine?.speeds() ?? "any");
   engine?.setSpeed(rate);
   const s = usePlayer.getState();
   if (s.speed === rate) return;
@@ -650,8 +649,8 @@ export function applySpeed() {
 }
 
 /** The speeds the current engine can play. */
-export function availableSpeeds(): readonly number[] {
-  return engine?.speeds() ?? SPEEDS;
+export function availableSpeeds(): SpeedSupport {
+  return engine?.speeds() ?? "any";
 }
 
 export function engineCapabilities() {
