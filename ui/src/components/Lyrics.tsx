@@ -50,6 +50,7 @@ function useLyrics() {
       });
       if (track?.album?.name) q.set("album", track.album.name);
       if (timed) q.set("timed", "1");
+      if (track?.isVideo) q.set("video", "1");
       const res = await fetch(
         apiUrl(`/v1/tracks/${encodeURIComponent(track!.id)}/lyrics?${q}`),
         { signal },

@@ -125,9 +125,8 @@ func TestStalledDownloadResumes(t *testing.T) {
 
 // A track that leaves the queue stops downloading.
 func TestLeavingTheQueueStopsTheDownload(t *testing.T) {
-	old := stallTimeout
-	stallTimeout = time.Minute
-	defer func() { stallTimeout = old }()
+	// The default stall timeout already exceeds this test's deadline. Do not
+	// restore a global timeout while the replacement prefetch is still running.
 
 	u := &wholeUpstream{data: audioFile(4 * streamWindow), stallAfter: 1024}
 	s, _ := newWholeServer(t, u, &switchable{})

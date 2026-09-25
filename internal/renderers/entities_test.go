@@ -130,6 +130,30 @@ func TestAppendPlaylistPages(t *testing.T) {
 	}
 }
 
+func TestAppendPlaylistPagesLegacyEmptyPageAndCycle(t *testing.T) {
+	doc := loadFixture(t, "playlist")
+	pl, _ := ParsePlaylist(doc, "VLtest", ParseContext{})
+	first := len(pl.Tracks)
+	shelf := FindAll(doc, "musicPlaylistShelfRenderer")[0]
+	row := shelf.List("contents")[0]
+	continuation := func(token string) []any {
+		return []any{map[string]any{"nextContinuationData": map[string]any{"continuation": token}}}
+	}
+	shelf["contents"] = append(shelf.List("contents"), map[string]any{"continuationItemRenderer": map[string]any{"continuationEndpoint": map[string]any{"continuationCommand": map[string]any{"token": "empty"}}}})
+	calls := 0
+	err := AppendPlaylistPages(&pl, doc, func(token string) (Node, error) {
+		calls++
+		contents := []any{}
+		if token == "last" {
+			contents = append(contents, row)
+		}
+		return Node{"continuationContents": map[string]any{"musicPlaylistShelfContinuation": map[string]any{"contents": contents, "continuations": continuation("last")}}}, nil
+	})
+	if err == nil || calls != 2 || len(pl.Tracks) != first+1 {
+		t.Fatalf("expected empty-page traversal followed by cycle rejection: calls=%d tracks=%d err=%v", calls, len(pl.Tracks), err)
+	}
+}
+
 func TestParseWatchQueueFixture(t *testing.T) {
 	doc := loadFixture(t, "next")
 	tracks, lyricsID := ParseWatchQueue(doc)

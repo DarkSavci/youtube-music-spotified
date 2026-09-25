@@ -43,7 +43,7 @@ export class RoomClient {
           this.seq = msg.seq;
           this.onSnapshot({ ...cleanSnapshot(msg), at: msg.at, seq: msg.seq });
         } else if (msg.type === 'members') {
-          if (Number.isInteger(msg.count) && msg.count > 0 && msg.count <= 8) this.onStatus({ members: msg.count });
+          if (Number.isInteger(msg.count) && msg.count > 0 && msg.count <= 200) this.onStatus({ members: msg.count });
         } else if (msg.type === 'ended' || msg.type === 'error') {
           this.stop(String(msg.reason || msg.message || 'The room ended.').slice(0, 300));
         }

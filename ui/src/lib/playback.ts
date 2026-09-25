@@ -356,7 +356,8 @@ export function startPlayback() {
     .then((ok) => {
       serverAuthoritative = ok;
       // A room invitation never survives a window reload or account switch.
-      if (ok) void session?.command({ Kind: "leave_room" });
+      // Only the playback owner may clear its stale room after a reload.
+      if (ok && usePlayer.getState().followingRoom && usePlayer.getState().devices.some(d => d.id === session?.deviceID && d.owner)) void session?.command({ Kind: "leave_room" });
       if (!ok) {
         console.debug("[playback] session core unreachable; driving playback locally");
         session = null;

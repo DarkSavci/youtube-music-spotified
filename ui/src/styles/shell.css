@@ -1386,3 +1386,15 @@ body:has(.account-menu, .whats-new-dialog[open]) .app-shell::before {
 }
 
 .sidebar__title .sidebar__toggle { display: grid; }
+
+.sidebar__search:focus-within { outline: 2px solid var(--text-primary); outline-offset: -2px; }
+.sidebar__search input:focus, .sidebar__search input:focus-visible { outline: none; box-shadow: none; }
+.topbar__search-group { display: flex; align-items: center; gap: 12px; position: absolute; left: 50%; transform: translateX(-50%); width: min(40vw, 560px); }
+.topbar__search-group .searchfield { width: auto; flex: 1; }
+.searchfield { -webkit-app-region: no-drag; cursor: text; }
+.searchfield__browse { border-left: 1px solid var(--border-subtle); border-radius: 0; padding-left: 8px; width: 40px; }
+@media (max-width: 1100px) {
+  .topbar__search-group { position: static; transform: none; width: auto; flex: 1; min-width: 180px; }
+  .topbar__spacer { display: none; }
+  .topbar__account { max-width: 130px; }
+}

@@ -67,7 +67,7 @@ func (s *Server) RunAutoplay(ctx context.Context) {
 	}
 	updates, cancel := s.deps.Session.Subscribe()
 	defer cancel()
-	s.topUp(ctx, s.deps.Session.Projection().State.Queue)
+	s.topUp(ctx, s.deps.Session.Projection())
 	for {
 		select {
 		case <-ctx.Done():
@@ -76,14 +76,15 @@ func (s *Server) RunAutoplay(ctx context.Context) {
 			if !ok {
 				return
 			}
-			s.topUp(ctx, p.State.Queue)
+			s.topUp(ctx, p)
 		}
 	}
 }
 
 // topUp fetches more of the queue's radio when it is running low.
-func (s *Server) topUp(ctx context.Context, q domain.Queue) {
-	if s.deps.Session.Projection().FollowingRoom || len(q.Items) == 0 || len(q.Items)-1-q.Index >= autoplayLow {
+func (s *Server) topUp(ctx context.Context, p session.Projection) {
+	q := p.State.Queue
+	if p.FollowingRoom || len(q.Items) == 0 || len(q.Items)-1-q.Index >= autoplayLow {
 		return
 	}
 	a := s.autoplay

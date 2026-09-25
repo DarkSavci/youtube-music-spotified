@@ -4,7 +4,9 @@ import { IconExpand, IconVideo } from "./Icon";
 import { usePlayer } from "../lib/player";
 
 export function useVideoControl() {
-  const { availabilityID, availability, busy } = useVideo();
+  const availabilityID = useVideo(s => s.availabilityID);
+  const availability = useVideo(s => s.availability);
+  const busy = useVideo(s => s.busy);
   const track = usePlayer(s => s.track);
   const following = usePlayer(s => s.followingRoom);
   const status = track?.isVideo ? "available" : availabilityID === track?.id ? availability : "checking";
@@ -19,7 +21,8 @@ export function useVideoControl() {
 }
 
 export function VideoSwitch({ iconOnly = false }: { iconOnly?: boolean }) {
-  const { enabled, busy } = useVideo();
+  const enabled = useVideo(s => s.enabled);
+  const busy = useVideo(s => s.busy);
   const { blocked, reason } = useVideoControl();
   const track = usePlayer(s => s.track);
   if (!track) return null;
@@ -41,7 +44,9 @@ export function VideoSwitch({ iconOnly = false }: { iconOnly?: boolean }) {
 
 export function VideoSurface({ priority = 0, className = "", onExpand }: { priority?: number; className?: string; onExpand?: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  const { enabled, loading, error } = useVideo();
+  const enabled = useVideo(s => s.enabled);
+  const loading = useVideo(s => s.loading);
+  const error = useVideo(s => s.error);
   useEffect(() => {
     if (!enabled || !ref.current) return;
     return attachVideo(ref.current, priority);
@@ -56,6 +61,7 @@ export function VideoSurface({ priority = 0, className = "", onExpand }: { prior
 }
 
 export function VideoNotice() {
-  const { enabled, error } = useVideo();
+  const enabled = useVideo(s => s.enabled);
+  const error = useVideo(s => s.error);
   return !enabled && error ? <p className="video-notice" role="alert">{error}</p> : null;
 }

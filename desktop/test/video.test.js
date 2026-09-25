@@ -61,3 +61,13 @@ test('late availability response cannot overwrite the next track',async()=>{
  assert.equal(h.useVideo.getState().availabilityID,h.clip.id);
  assert.equal(h.useVideo.getState().availability,'available');
 });
+
+test('slow seeks and buffering are not repeatedly restarted',async()=>{
+ const h=setup();await h.setVideoEnabled(true);const detach=h.attachVideo(h.host(),0);
+ const el=h.videoElements[0];el.seeking=true;el.currentTime=12;h.player.position=22000;h.tick();assert.equal(el.currentTime,12);
+ el.seeking=false;el.listeners.waiting();h.tick();assert.equal(el.currentTime,12);
+ el.listeners.canplay();h.tick();assert.equal(el.currentTime,22);
+ h.player.state='playing';h.player.position=22400;h.tick();assert.equal(el.currentTime,22);assert.equal(el.playbackRate,1.05);
+ h.player.track=h.song;h.tick();assert.equal(el.src,'','next song must not resolve a static art-track video');
+ detach();await Promise.resolve();
+});

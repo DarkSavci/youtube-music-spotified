@@ -30,6 +30,7 @@ interface MenuState {
   x: number;
   y: number;
   items: MenuItem[];
+  returnFocus: HTMLElement | null;
 }
 
 interface MenuApi {
@@ -49,13 +50,15 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
     if (items.length === 0) return;
     e.preventDefault();
     e.stopPropagation();
-    setState({ x: e.clientX, y: e.clientY, items });
+    setState({ x: e.clientX, y: e.clientY, items, returnFocus: e.currentTarget.ownerDocument.activeElement as HTMLElement | null });
   }, []);
+
+  const close = () => { state?.returnFocus?.focus({ preventScroll: true }); setState(null); };
 
   return (
     <Ctx.Provider value={{ open }}>
       {children}
-      {state ? <Menu state={state} onClose={() => setState(null)} /> : null}
+      {state ? <Menu state={state} onClose={close} /> : null}
     </Ctx.Provider>
   );
 }
@@ -89,14 +92,21 @@ function Menu({ state, onClose }: { state: MenuState; onClose: () => void }) {
   return <div ref={ref}><MenuPanel items={state.items} x={state.x} y={state.y} onClose={onClose} /></div>;
 }
 
-function MenuPanel({ items, x, y, onClose, onBack, anchor }: {
-  items: MenuItem[]; x: number; y: number; onClose: () => void; onBack?: () => void; anchor?: DOMRect;
+function MenuPanel({ items, x, y, onClose, onBack, anchor, label = "Actions", onHover }: {
+  items: MenuItem[]; x: number; y: number; onClose: () => void; onBack?: () => void; anchor?: DOMRect; label?: string; onHover?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const [active, setActive] = useState(0);
   const [sub, setSub] = useState<{ index: number; rect: DOMRect } | null>(null);
   const [pos, setPos] = useState({ x, y });
+  const hoverTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(hoverTimer.current), []);
+  const closeSub = (focusIndex: number) => {
+    const focused = ref.current?.ownerDocument.activeElement;
+    if (focused && ref.current?.querySelector(":scope > .ctxmenu")?.contains(focused)) buttons.current[focusIndex]?.focus({ preventScroll: true });
+    setSub(null);
+  };
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -116,7 +126,7 @@ function MenuPanel({ items, x, y, onClose, onBack, anchor }: {
     if (item.children) openSub(i);
     else { item.onSelect?.(); onClose(); }
   };
-  return <div ref={ref} className="ctxmenu" role="menu" style={{ left: pos.x, top: pos.y }} onContextMenu={e => e.preventDefault()}
+  return <div ref={ref} className="ctxmenu" role="menu" aria-label={label} onMouseEnter={() => { clearTimeout(hoverTimer.current); onHover?.(); }} style={{ left: pos.x, top: pos.y }} onContextMenu={e => e.preventDefault()}
     onKeyDown={e => {
       e.stopPropagation();
       if (e.key === "Escape" || e.key === "ArrowLeft") { e.preventDefault(); (onBack ?? onClose)(); }
@@ -131,16 +141,20 @@ function MenuPanel({ items, x, y, onClose, onBack, anchor }: {
         }
       }
     }}>
-    <div className="ctxmenu__scroll" onScroll={() => setSub(null)}>
+    <div className="ctxmenu__scroll" onScroll={() => closeSub(active)}>
       {items.map((item, i) => <button key={`${item.label}:${i}`} ref={el => { buttons.current[i] = el; }} role="menuitem" className="ctxmenu__item"
         aria-haspopup={item.children ? "menu" : undefined} aria-expanded={item.children ? sub?.index === i : undefined}
         data-separated={item.separated || undefined} data-active={active === i || undefined} disabled={item.disabled}
-        onFocus={() => setActive(i)} onMouseEnter={() => { setActive(i); if (item.children) openSub(i); else setSub(null); }} onClick={() => choose(i)}>
+        onFocus={() => setActive(i)} onMouseEnter={() => {
+          clearTimeout(hoverTimer.current);
+          if (sub && sub.index !== i) hoverTimer.current = setTimeout(() => { closeSub(i); setActive(i); if (item.children) openSub(i); }, 220);
+          else { setActive(i); if (item.children) openSub(i); }
+        }} onClick={() => choose(i)}>
         {itemIcon(item)}<span>{item.label}</span>{item.children ? <IconChevronRight size={16} /> : null}
       </button>)}
     </div>
     {sub && items[sub.index]?.children ? <MenuPanel key={sub.index} items={items[sub.index]!.children!}
-      x={sub.rect.right} y={sub.rect.top} anchor={sub.rect} onClose={onClose}
+      onHover={() => clearTimeout(hoverTimer.current)} label={items[sub.index]!.label} x={sub.rect.right} y={sub.rect.top} anchor={sub.rect} onClose={onClose}
       onBack={() => { const i = sub.index; setSub(null); buttons.current[i]?.focus(); }} /> : null}
   </div>;
 }

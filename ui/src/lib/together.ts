@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { RoomClient, type RoomStatus } from "../../../listen-together/client.mjs";
 import { positionAt, type Snapshot } from "../../../listen-together/protocol.mjs";
 import { currentPosition, usePlayer } from "./player";
-import { isServerAuthoritative, leaveRoomPlayback, syncRoomPlayback } from "./playback";
+import { transport, isServerAuthoritative, leaveRoomPlayback, syncRoomPlayback } from "./playback";
 
 export const useTogether = create<RoomStatus>(() => ({ status: "disconnected", role: null, members: 0, invitation: "", error: null }));
 let client: RoomClient | null = null;
@@ -68,8 +68,8 @@ export async function connectTogether(options: { server?: string; invitation?: s
         });
       } else if (status.status === "connected" && status.role === "guest") {
         // Pause existing playback while waiting for the first host snapshot.
-        latest = { track: null, playing: false, positionMs: 0, at: next.serverNow(), seq: 0 };
-        void applyLatest(true);
+        const current = usePlayer.getState();
+        if (["playing", "loading", "stalled"].includes(current.state)) transport.toggle();
       }
     },
     onSnapshot: snapshot => {

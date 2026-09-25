@@ -50,6 +50,8 @@ const SIMPLE = [
   ["IconExplicit", "explicit-fill"],
   ["IconEqualizerStatic", "bar_chart-fill"],
   ["IconExpand", "open_in_full"],
+  ["IconCollapse", "close_fullscreen"],
+  ["IconBrowse", "inventory_2"],
   ["IconSettings", "settings-fill"],
   ["IconShare", "share"],
   ["IconMiniPlayer", "picture_in_picture_alt"],

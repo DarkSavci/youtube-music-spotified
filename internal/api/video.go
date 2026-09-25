@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -67,6 +68,9 @@ func (s *Server) videoLyrics(ctx context.Context, track domain.Track, timed bool
 }
 
 func (s *Server) handleTrackVersions(w http.ResponseWriter, r *http.Request) {
+	if !allowVideoRequest(w, r) {
+		return
+	}
 	id := r.PathValue("id")
 	if !videoIDPattern.MatchString(id) {
 		http.Error(w, "invalid video id", http.StatusBadRequest)
@@ -89,33 +93,74 @@ func (s *Server) handleTrackVersions(w http.ResponseWriter, r *http.Request) {
 
 // Picture resolutions have their own bounded cache: they must never replace
 // audio URLs or populate the offline audio cache under the same video id.
+type videoFlight struct {
+	done   chan struct{}
+	stream domain.Stream
+	err    error
+}
+
 func (s *Server) resolveVideo(ctx context.Context, id string, refresh bool) (domain.Stream, error) {
 	s.videoMu.Lock()
-	defer s.videoMu.Unlock()
 	if entry, ok := s.videos[id]; ok && !refresh && entry.usable(time.Now()) {
+		s.videoMu.Unlock()
 		return entry.stream, nil
 	}
+	if flight := s.videoFlights[id]; flight != nil {
+		s.videoMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return domain.Stream{}, ctx.Err()
+		case <-flight.done:
+			return flight.stream, flight.err
+		}
+	}
+	if s.videoFlights == nil {
+		s.videoFlights = map[string]*videoFlight{}
+	}
+	flight := &videoFlight{done: make(chan struct{})}
+	s.videoFlights[id] = flight
+	s.videoMu.Unlock()
 	provider, ok := s.deps.Resolver.(interface {
 		ResolveVideo(context.Context, string) (domain.Stream, error)
 	})
 	if !ok {
-		return domain.Stream{}, errors.New("video playback is unavailable with this resolver")
+		flight.err = errors.New("video playback is unavailable with this resolver")
+	} else {
+		flight.stream, flight.err = provider.ResolveVideo(ctx, id)
 	}
-	st, err := provider.ResolveVideo(ctx, id)
-	if err != nil {
-		return domain.Stream{}, err
-	}
-	if len(s.videos) >= 32 {
-		for key := range s.videos {
-			delete(s.videos, key)
-			break
+	s.videoMu.Lock()
+	if flight.err == nil {
+		if len(s.videos) >= 32 {
+			for key := range s.videos {
+				delete(s.videos, key)
+				break
+			}
 		}
+		s.videos[id] = resolvedEntry{stream: flight.stream, at: time.Now()}
 	}
-	s.videos[id] = resolvedEntry{stream: st, at: time.Now()}
-	return st, nil
+	delete(s.videoFlights, id)
+	close(flight.done)
+	s.videoMu.Unlock()
+	return flight.stream, flight.err
+}
+
+// Browser pages outside the app must not be able to start local video jobs.
+func allowVideoRequest(w http.ResponseWriter, r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "null" || (origin == "" && r.Header.Get("Sec-Fetch-Site") != "cross-site") {
+		return true
+	}
+	if u, err := url.Parse(origin); err == nil && (u.Scheme == "http" || u.Scheme == "https") && (u.Host == r.Host || u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1") {
+		return true
+	}
+	http.Error(w, "origin not allowed", http.StatusForbidden)
+	return false
 }
 
 func (s *Server) handleVideoStream(w http.ResponseWriter, r *http.Request) {
+	if !allowVideoRequest(w, r) {
+		return
+	}
 	id := r.PathValue("id")
 	if !videoIDPattern.MatchString(id) {
 		http.Error(w, "invalid video id", http.StatusBadRequest)

@@ -238,6 +238,9 @@ func (c *InnerTube) PlaylistPage(ctx context.Context, id, token string) (domain.
 	}
 	next := renderers.PlaylistNext(doc)
 	if next != "" {
+		if pl.TrackCount == len(pl.Tracks) {
+			pl.TrackCount = 0
+		}
 		pl.DurationMs = 0
 	}
 	return domain.PlaylistPage{Playlist: pl, Next: next}, nil

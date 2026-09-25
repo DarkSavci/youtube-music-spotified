@@ -64,3 +64,13 @@ test('the shared app client synchronizes two independent participants and stops 
  const snapshot=await received;assert.equal(snapshot.track.id,state.track.id);assert.equal(snapshot.playing,true);
  host.stop();guest.stop();assert.equal(host.socket,null);assert.equal(guest.socket,null);
 });
+
+test('per-IP room and socket caps and browser origins are enforced',async t=>{
+ const url=await setup(t,{maxRoomsPerIP:1,maxConnectionsPerIP:2});
+ const host=await peer(t,url);host.send({type:'create'});await host.next('joined');
+ const second=await peer(t,url);
+ const rejected=new WebSocket(url,{headers:{'X-Forwarded-For':'192.0.2.9'}});
+ await once(rejected,'error');
+ second.send({type:'create'});assert.match((await second.next('error')).message,/Cannot create/);
+ const evil=new WebSocket(url,{origin:'https://untrusted.example'});await once(evil,'error');
+});

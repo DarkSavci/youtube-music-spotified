@@ -65,6 +65,6 @@ export function useToggleLike() {
       if (!res.ok) throw new Error(`status ${res.status}`);
     },
     // Then re-read: the playlist is the source of truth.
-    onSettled: () => qc.invalidateQueries({ queryKey: ["liked"] }),
+    onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: ["liked"] }), qc.invalidateQueries({ queryKey: ["playlist", "LM"] })]),
   });
 }

@@ -1,6 +1,7 @@
 package renderers
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -255,10 +256,6 @@ func ParsePlaylist(doc Node, id string, pc ParseContext) (domain.Playlist, bool)
 	return pl, true
 }
 
-// maxPlaylistPages bounds the paging. YouTube caps a playlist at 5,000
-// tracks, which is 50 pages of 100.
-const maxPlaylistPages = 60
-
 /*
 AppendPlaylistPages pages in the rest of a playlist's tracks.
 
@@ -269,22 +266,23 @@ playlist silently missing its tail looks complete when it is not.
 */
 func AppendPlaylistPages(pl *domain.Playlist, first Node, fetch func(token string) (Node, error)) error {
 	derivedCount := pl.TrackCount == len(pl.Tracks)
-	tok := playlistContinuation(playlistShelves(first))
-	for page := 0; tok != "" && page < maxPlaylistPages; page++ {
+	tok := PlaylistNext(first)
+	seen := map[string]bool{}
+	for tok != "" {
+		if seen[tok] {
+			return fmt.Errorf("repeated playlist continuation")
+		}
+		seen[tok] = true
 		doc, err := fetch(tok)
 		if err != nil {
 			return err
 		}
-		items := Find(doc, "appendContinuationItemsAction").Nodes("continuationItems")
-		tracks := listTracks(items)
-		if len(tracks) == 0 {
-			break
-		}
+		tracks, next := ParsePlaylistContinuation(doc)
 		pl.Tracks = append(pl.Tracks, tracks...)
 		for _, t := range tracks {
 			pl.DurationMs += t.DurationMs
 		}
-		tok = continuationItemToken(items)
+		tok = next
 	}
 	if derivedCount {
 		pl.TrackCount = len(pl.Tracks)

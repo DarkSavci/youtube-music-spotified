@@ -99,11 +99,12 @@ type Server struct {
 	deps Deps
 	mux  *http.ServeMux
 
-	videoMu  sync.Mutex
-	videos   map[string]resolvedEntry
-	streams  *streamCache
-	prefetch *prefetcher
-	autoplay *autoplay
+	videoMu      sync.Mutex
+	videos       map[string]resolvedEntry
+	videoFlights map[string]*videoFlight
+	streams      *streamCache
+	prefetch     *prefetcher
+	autoplay     *autoplay
 	// lastFailure is each track's most recent resolution error, for
 	// diagnosing a failed track without resolving it again.
 	lastFailure sync.Map
@@ -515,7 +516,7 @@ func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request) {
 	preferTimed := q.Get("timed") == "1"
 
 	got, err := s.deps.Lyrics.Lyrics(r.Context(), track, preferTimed)
-	if errors.Is(err, lyrics.ErrNotFound) || (err == nil && preferTimed && !got.Synced) {
+	if q.Get("video") == "1" && (errors.Is(err, lyrics.ErrNotFound) || (err == nil && preferTimed && !got.Synced)) {
 		if fallback, fallbackErr := s.videoLyrics(r.Context(), track, preferTimed); fallbackErr == nil && (err != nil || fallback.Synced) {
 			got, err = fallback, nil
 		}

@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { signInLabel, useSignIn } from "../lib/signin";
-import { IconHome, IconChevronLeft, IconChevronRight, IconSearch, IconSettings } from "./Icon";
+import { IconBrowse, IconHome, IconChevronLeft, IconChevronRight, IconSearch, IconSettings } from "./Icon";
 import { useTogether } from "../lib/together";
 import { WhatsNew } from "./WhatsNew";
 import { AccountMenu } from "./AccountMenu";
@@ -15,12 +15,10 @@ import { AccountMenu } from "./AccountMenu";
  */
 export function TopBar({
   scrollRef,
-  onNavigate,
   query,
   onQueryChange,
 }: {
   scrollRef: RefObject<HTMLElement>;
-  onNavigate?: () => void;
   query?: string;
   onQueryChange?: (value: string) => void;
 }) {
@@ -81,7 +79,7 @@ export function TopBar({
   });
 
   return (
-    <header onClick={onNavigate} className="topbar" data-scrolled={scrolled || undefined}>
+    <header className="topbar" data-scrolled={scrolled || undefined}>
       <div className="topbar__nav">
         <button className="iconbtn iconbtn--round" aria-label="Go back" onClick={() => navigate(-1)}>
           <IconChevronLeft size={20} />
@@ -95,11 +93,13 @@ export function TopBar({
         </button>
       </div>
 
+      <div className="topbar__search-group">
       <button className="iconbtn topbar__home" aria-label="Home" title="Home" onClick={() => navigate("/")}><IconHome size={24} filled={location.pathname === "/"} /></button>
-      <div className="searchfield">
+      <div className="searchfield" onClick={() => inputRef.current?.focus()}>
         <button className="iconbtn" aria-label="Search" title="Search" onClick={() => { navigate("/search"); inputRef.current?.focus(); }}><IconSearch size={20} /></button>
         <span className="sr-only">Search</span>
         <input
+          aria-label="Search music"
           ref={inputRef}
           type="search"
           placeholder="What do you want to listen to?"
@@ -118,6 +118,8 @@ export function TopBar({
             }
           }}
         />
+        <button className="iconbtn searchfield__browse" aria-label="Browse all" title="Browse all" onClick={e => { e.stopPropagation(); setLocal(""); navigate("/search"); }}><IconBrowse size={22} /></button>
+      </div>
       </div>
 
       <div className="topbar__spacer" />

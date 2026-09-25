@@ -1,6 +1,6 @@
 import { VideoSurface, VideoNotice } from "./components/VideoPlayer";
 import { usePlayer } from "./lib/player";
-import { useVideo, setVideoEnabled, checkVideoAvailability } from "./lib/video";
+import { useVideo, checkVideoAvailability } from "./lib/video";
 import { useEffect, useRef, useState } from "react";
 import { PageBoundary } from "./components/PageBoundary";
 import { Toast } from "./components/Toast";
@@ -57,10 +57,13 @@ export function App() {
   const videoTrackID = usePlayer(s => s.track?.id);
   useEffect(() => {
     void checkVideoAvailability();
-    if (useVideo.getState().enabled && videoTrackID) void setVideoEnabled(true);
+    // Do not replace automatically advanced songs: that restarts audio and
+    // discards gapless prefetch. Switching versions is an explicit action.
+    if (!usePlayer.getState().track?.isVideo) useVideo.setState({ enabled: false });
     if (!videoTrackID) useVideo.setState({ enabled: false, error: null });
   }, [videoTrackID]);
   const location = useLocation();
+  useEffect(() => { setLibraryExpanded(false); }, [location.key, location.pathname, location.search]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [queueOpen, setQueueOpen] = useState(false);
   const [libraryExpanded, setLibraryExpanded] = useState(false);
@@ -148,7 +151,7 @@ export function App() {
         onToggleFullScreen={() => setFullScreen((f) => !f)}
       />
       <PlaybackNotice />
-      <TopBar scrollRef={scrollRef} onNavigate={() => setLibraryExpanded(false)} />
+      <TopBar scrollRef={scrollRef} />
       <LibrarySidebar expanded={libraryExpanded} onExpand={() => setLibraryExpanded(v => !v)} onNavigate={() => setLibraryExpanded(false)} />
 
       <main className="main panel">

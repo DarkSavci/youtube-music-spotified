@@ -77,14 +77,16 @@ let picture: HTMLVideoElement | null = null;
 let timer: ReturnType<typeof setInterval> | undefined;
 let currentKey = "";
 let attemptingPlay = false;
+let waiting = false;
 
 function tick() {
   if (!picture) return;
   const state = usePlayer.getState();
   const options = useVideo.getState();
-  const key = options.enabled && state.track ? `${state.track.id}:${options.revision}` : "";
+  const key = options.enabled && !options.busy && state.track?.isVideo ? `${state.track.id}:${options.revision}` : "";
   if (key !== currentKey) {
     currentKey = key;
+    waiting = false;
     picture.pause();
     picture.removeAttribute("src");
     picture.load();
@@ -94,7 +96,11 @@ function tick() {
   if (!key || picture.readyState < 1 || picture.error) return;
   const position = currentPosition(state) / 1000;
   const target = Number.isFinite(picture.duration) ? Math.min(position, Math.max(0, picture.duration - 0.05)) : position;
-  if (Math.abs(picture.currentTime - target) > 0.35) picture.currentTime = target;
+  if (!picture.seeking && !waiting) {
+    const drift = target - picture.currentTime;
+    if (Math.abs(drift) > 2 || (state.state !== "playing" && Math.abs(drift) > 0.35)) picture.currentTime = target;
+    else picture.playbackRate = Math.abs(drift) > 0.1 ? (drift > 0 ? 1.05 : 0.95) : 1;
+  }
   const playing = state.state === "playing";
   if (!playing) { picture.pause(); return; }
   if (picture.paused && !attemptingPlay && !picture.ended) {
@@ -129,9 +135,10 @@ function place() {
     const element = picture;
     const update = (patch: Partial<ReturnType<typeof useVideo.getState>>) => { if (picture === element) useVideo.setState(patch); };
     picture.addEventListener("loadedmetadata", tick);
-    picture.addEventListener("playing", () => update({ loading: false }));
-    picture.addEventListener("loadeddata", () => update({ loading: false }));
-    picture.addEventListener("waiting", () => update({ loading: true }));
+    picture.addEventListener("playing", () => { waiting = false; update({ loading: false }); });
+    picture.addEventListener("canplay", () => { waiting = false; });
+    picture.addEventListener("loadeddata", () => { waiting = false; update({ loading: false }); });
+    picture.addEventListener("waiting", () => { waiting = true; update({ loading: true }); });
     picture.addEventListener("error", () => update({ loading: false, error: "The video could not be loaded. You can keep listening or retry." }));
     timer = setInterval(tick, 100);
   }

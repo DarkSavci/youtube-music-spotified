@@ -95,7 +95,7 @@ func TestVideoLyricsCounterpartTiming(t *testing.T) {
 				{ID: "song1234567", DurationMs: 120000, Playable: true},
 			}}, Lyrics: &lyrics.Service{Primary: songLyrics{}}})
 			w := httptest.NewRecorder()
-			srv.ServeHTTP(w, httptest.NewRequest("GET", fmt.Sprintf("/v1/tracks/clip1234567/lyrics?durationMs=%d&timed=1", tc.duration), nil))
+			srv.ServeHTTP(w, httptest.NewRequest("GET", fmt.Sprintf("/v1/tracks/clip1234567/lyrics?durationMs=%d&timed=1&video=1", tc.duration), nil))
 			if w.Code != tc.status {
 				t.Fatalf("status %d", w.Code)
 			}
@@ -122,12 +122,63 @@ func TestVideoPlainLyricsPreferSongTimings(t *testing.T) {
 		{ID: "song1234567", DurationMs: 190000, Playable: true},
 	}}, Lyrics: &lyrics.Service{Primary: songLyrics{videoPlain: true}}})
 	w := httptest.NewRecorder()
-	srv.ServeHTTP(w, httptest.NewRequest("GET", "/v1/tracks/clip1234567/lyrics?durationMs=196000&timed=1", nil))
+	srv.ServeHTTP(w, httptest.NewRequest("GET", "/v1/tracks/clip1234567/lyrics?durationMs=196000&timed=1&video=1", nil))
 	var got domain.Lyrics
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
 	if w.Code != 200 || !got.Synced || got.Source != "test" {
 		t.Fatalf("did not prefer song timing: %d %+v", w.Code, got)
+	}
+}
+
+type concurrentVideoResolver struct {
+	videoResolver
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r *concurrentVideoResolver) ResolveVideo(ctx context.Context, id string) (domain.Stream, error) {
+	if id == "slow1234567" {
+		close(r.started)
+		select {
+		case <-r.release:
+		case <-ctx.Done():
+			return domain.Stream{}, ctx.Err()
+		}
+	}
+	return domain.Stream{Kind: domain.StreamURL, VideoID: id, URL: r.url, SizeBytes: 1, ExpiresAt: time.Now().Add(time.Hour)}, nil
+}
+func TestVideoCacheHitDoesNotWaitForAnotherResolution(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("x")) }))
+	defer upstream.Close()
+	resolver := &concurrentVideoResolver{videoResolver: videoResolver{url: upstream.URL}, started: make(chan struct{}), release: make(chan struct{})}
+	srv := api.New(api.Deps{Resolver: resolver})
+	get := func(id string) {
+		srv.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/v1/video-stream/"+id, nil))
+	}
+	get("fast1234567")
+	slowDone := make(chan struct{})
+	go func() { get("slow1234567"); close(slowDone) }()
+	<-resolver.started
+	defer func() { close(resolver.release); <-slowDone }()
+	done := make(chan struct{})
+	go func() { get("fast1234567"); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cached range blocked by unrelated resolver")
+	}
+}
+func TestVideoRejectsForeignBrowserOrigins(t *testing.T) {
+	srv := api.New(api.Deps{})
+	for _, route := range []string{"/v1/video-stream/abcdefghijk", "/v1/tracks/abcdefghijk/versions"} {
+		req := httptest.NewRequest("GET", route, nil)
+		req.Header.Set("Origin", "https://untrusted.example")
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		if w.Code != 403 {
+			t.Fatalf("status %d", w.Code)
+		}
 	}
 }

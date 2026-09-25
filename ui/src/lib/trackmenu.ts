@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import { IconLibrary } from "../components/Icon";
 import { useNavigate } from "react-router-dom";
 import { share } from "./share";
 import { useQueryClient } from "@tanstack/react-query";
@@ -50,7 +52,6 @@ export function useTrackMenu(): (
     const destinations: MenuItem[] = [];
     destinations.push({
       label: "New playlist…",
-      separated: true,
       onSelect: () => {
         void (async () => {
           const name = await prompt.text({
@@ -65,6 +66,7 @@ export function useTrackMenu(): (
     for (const pl of playlists) {
       destinations.push({
         label: pl.title,
+        icon: createElement(IconLibrary, { size: 18 }),
         onSelect: () => addTo.mutate({ playlistId: pl.id, trackIds: [track.id] }),
       });
     }
@@ -122,6 +124,7 @@ export function useTrackMenu(): (
             body: JSON.stringify({ rating: isLiked ? "none" : "like" }),
           });
           void qc.invalidateQueries({ queryKey: ["liked"] });
+          void qc.invalidateQueries({ queryKey: ["playlist", "LM"] });
         })();
       },
     });

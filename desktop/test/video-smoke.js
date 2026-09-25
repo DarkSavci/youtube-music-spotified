@@ -22,7 +22,7 @@ app.whenReady().then(async()=>{
    await new Promise(r=>setTimeout(r,2000));recorder.stop();await done;clearInterval(timer);stream.getTracks().forEach(t=>t.stop());
    url=URL.createObjectURL(new Blob(chunks,{type:'video/webm'}));
   }
-  const state={track:{id:${JSON.stringify(process.env.VIDEO_SMOKE_ID||'abcdefghijk')}},position:600,state:'paused'};
+  const state={track:{isVideo:true,id:${JSON.stringify(process.env.VIDEO_SMOKE_ID||'abcdefghijk')}},position:600,state:'paused'};
   const exports={};const module={exports};
   const require=name=>{
    if(name==='zustand')return {create:initial=>{let s=initial();return {getState:()=>s,setState:p=>{s={...s,...p}}}}};

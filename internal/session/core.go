@@ -473,6 +473,10 @@ func (c *Core) HandleEngine(ev EngineEvent) []LogEntry {
 	case EvEnded:
 		logs := c.closeOutCurrent(true)
 		if c.following {
+			if track := c.state.Queue.Current(); track != nil && track.DurationMs > 0 {
+				c.state.PositionMs = track.DurationMs
+				c.lastPositionMs = track.DurationMs
+			}
 			c.state.State = domain.StatePaused
 			c.bump()
 			return logs
@@ -830,14 +834,18 @@ func (c *Core) switchVariant(cmd Command) (Reject, []LogEntry) {
 	track := cmd.Tracks[0]
 	pos := c.positionNow()
 	if track.DurationMs > 0 && pos >= track.DurationMs {
-		pos = track.DurationMs - 1
+		pos = max(int64(0), track.DurationMs-5000)
 	}
 	if pos < 0 {
 		pos = 0
 	}
-	paused := c.state.State == domain.StatePaused
+	paused := !c.playIntent()
 	oldID := current.ID
+	carriedPlay := c.playedMs
 	logs := c.closeOutCurrent(false)
+	if len(logs) > 0 {
+		carriedPlay = 0
+	}
 	c.state.Queue.Items[c.state.Queue.Index] = track
 	for i := range c.unshuffled {
 		if c.unshuffled[i].ID == oldID {
@@ -849,6 +857,7 @@ func (c *Core) switchVariant(cmd Command) (Reject, []LogEntry) {
 	c.consecutiveFaults = 0
 	c.state.Degraded = nil
 	c.startTrack(c.state.Queue.Index, pos)
+	c.playedMs += carriedPlay
 	if paused {
 		c.state.State = domain.StatePaused
 	}

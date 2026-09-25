@@ -1,4 +1,4 @@
-// Run after building ui: electron desktop/test/playlist-smoke.js
+// Run after building ui: electron desktop/test/navigation-smoke.js
 // Isolated renderer, fixture HTTP server, no account or external network access.
 const { app, BrowserWindow } = require('electron');
 const http = require('node:http');
@@ -46,11 +46,14 @@ app.whenReady().then(async()=>{
  await win.loadURL(origin+'/#/playlist/fixture');
  await waitFor(`document.querySelector('.trackrow') && document.querySelectorAll('.libitem').length===20`);
  await read(`document.querySelector('.end-time').click()`);
- assert.ok(await read(`document.querySelector('.end-time').textContent.includes('−')`));
+ assert.equal(await read(`document.querySelector('.end-time').getAttribute('aria-label')`),'Show total duration');
+ assert.ok(await read(`!document.querySelector('.end-time').textContent.includes('−')`));
  await win.reload();
- await waitFor(`document.querySelector('.end-time')?.textContent.includes('−') && document.querySelector('.trackrow')`);
+ await waitFor(`document.querySelector('.end-time')?.getAttribute('aria-label')==='Show total duration' && document.querySelector('.trackrow')`);
  await read(`document.querySelector('[aria-label="Search"]').click()`);
  assert.equal(await read(`document.activeElement.type`),'search');
+ await read(`document.querySelector('[aria-label="Browse all"]').click()`);
+ assert.equal(await read(`location.hash`),'#/search');
  await read(`window.location.hash='/playlist/fixture'`);
  await waitFor(`document.querySelector('.trackrow')`);
  await read(`(()=>{const e=document.querySelector('[aria-label="Search in your library"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'playlist 19');e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
@@ -60,6 +63,11 @@ app.whenReady().then(async()=>{
  assert.ok(await read(`document.querySelector('.sidebar').getBoundingClientRect().width>800`));
  await read(`document.querySelector('[aria-label="Collapse library view"]').click()`);
  await waitFor(`document.querySelector('.trackrow')`);
+ await read(`document.querySelector('[aria-label="Expand library view"]').click(); window.location.hash='/search'`);
+ await waitFor(`getComputedStyle(document.querySelector('.main')).display!=='none'`);
+ await read(`window.location.hash='/playlist/fixture'`);
+ await waitFor(`document.querySelector('.trackrow')`);
+ await read(`document.querySelector('[aria-label="Search music"]').focus()`);
  await read(`document.querySelector('.trackrow').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:1150,clientY:760}))`);
  await waitFor(`document.querySelector('[aria-haspopup="menu"]')`);
  assert.equal(await read(`document.querySelectorAll('.ctxmenu').length`),1);
@@ -69,8 +77,14 @@ app.whenReady().then(async()=>{
  assert.ok(await read(`Array.from(document.querySelectorAll('.ctxmenu')).every(e=>{const r=e.getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight})`));
  await read(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
  assert.equal(await read(`document.querySelectorAll('.ctxmenu').length`),1);
+ await read(`document.querySelector('.ctxmenu [aria-haspopup="menu"]').click()`);
+ await waitFor(`document.querySelectorAll('.ctxmenu').length===2`);
+ await read(`document.querySelector('.ctxmenu__item:not([aria-haspopup])').dispatchEvent(new MouseEvent('mouseover',{bubbles:true}))`);
+ await waitFor(`document.querySelectorAll('.ctxmenu').length===1`);
+ assert.ok(await read(`document.activeElement.closest('.ctxmenu') !== null`));
  await read(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
  assert.equal(await read(`document.querySelectorAll('.ctxmenu').length`),0);
+ assert.equal(await read(`document.activeElement.getAttribute('aria-label')`),'Search music');
  console.log('NAVIGATION PASS: time preference survives reload, search focuses, library filters/expands, playlist submenu includes all entries and flips at edges');
  win.destroy();server.close();app.exit(0);
 }).catch(err=>{console.error(err);server.close();app.exit(1);});

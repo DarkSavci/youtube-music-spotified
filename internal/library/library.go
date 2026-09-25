@@ -231,6 +231,9 @@ func sortItems(items []domain.LibraryItem, s Sort) {
 }
 
 func pluralSongs(n int) string {
+	if n == 0 {
+		return "Auto playlist"
+	}
 	if n == 1 {
 		return "1 song"
 	}

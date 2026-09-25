@@ -6,6 +6,6 @@ export function EndTime({ duration, position, className }: { duration: number; p
   return <button className={`${className} end-time`} aria-label={remaining ? "Show total duration" : "Show remaining time"}
     title={remaining ? "Show total duration" : "Show remaining time"}
     onClick={() => useSettings.getState().set("remainingTime", !remaining)}>
-    {remaining ? `−${formatDuration(Math.max(0, duration - position))}` : formatDuration(duration)}
+    {remaining && duration > 0 ? `−${duration <= position ? "0:00" : formatDuration(duration - position)}` : formatDuration(duration)}
   </button>;
 }

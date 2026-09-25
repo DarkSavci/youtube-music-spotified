@@ -43,3 +43,13 @@ npm run build --prefix ui
 Room tests use independent WebSocket clients: invitation validation/expiration, host-only publishing, late joining, host departure, field allowlisting, clock calculations, and the shared app transport. Session tests cover atomic guest synchronization, local volume, rejection of guest transport edits, paused loading, end/failure behavior, and stale engine reports.
 
 Before treating this as ready for release, test two real accounts on different networks and operating systems, measure audible drift/traffic, and exercise slow buffering, sleep/wake, disconnect/rejoin and unavailable tracks.
+
+### Relay limits and deployment
+
+Each IP may hold at most 16 connections and four rooms. Rooms with only their host expire after five minutes; active rooms retain the six-hour maximum. WebSocket pong grace is 30 seconds to tolerate brief network interruptions. Host loss still ends a prototype room; invitations do not reconnect a host automatically.
+
+Browser origins must match the relay host or be listed in comma-separated `ALLOWED_ORIGINS`. Desktop file origins (`null`) and clients without an Origin header are accepted. `TRUST_PROXY=1` trusts the last X-Forwarded-For hop only when the TCP peer is loopback. Set it only behind a loopback TLS proxy that overwrites/appends the client address; forwarded headers are otherwise ignored.
+
+The UI allows arbitrary `wss:` endpoints in CSP to support user-selected self-hosted relays. This is a deliberate prototype trade-off: CSP cannot contain exfiltration over WebSockets after a renderer compromise. Deployments needing a fixed relay should restrict `connect-src` in `ui/vite.config.ts` to that relay. Invitations contain room credentials, not account tokens, and the protocol accepts only playback metadata.
+
+The core has one shared playback session: a guest room locks transport for every controller, while volume remains local. Only the playback owner clears a stale room on reload; opening a second controller does not interrupt it. Blocked guests have a Retry playback button in the visible notice.

@@ -41,3 +41,22 @@ func TestVariantKeepsQueuePositionAndPreferences(t *testing.T) {
 		t.Fatal("guest changed host version")
 	}
 }
+
+func TestVariantCarriesPartialListenAndDoesNotResumeEndedTrack(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 1)
+	before := c.State()
+	c.HandleEngine(EngineEvent{Kind: EvPosition, Epoch: before.Epoch, PositionMs: 1000})
+	variant := *c.State().Queue.Current()
+	variant.ID = "clip"
+	reject, logs := c.Apply(Command{Kind: CmdVariant, ExpectedID: before.Queue.Current().ID, Tracks: []domain.Track{variant}})
+	if reject != RejectNone || len(logs) != 0 || c.playedMs != 1000 {
+		t.Fatalf("partial listen lost: %s %v %d", reject, logs, c.playedMs)
+	}
+	c.HandleEngine(EngineEvent{Kind: EvEnded, Epoch: c.State().Epoch})
+	variant.ID = "song"
+	_, _ = c.Apply(Command{Kind: CmdVariant, ExpectedID: "clip", Tracks: []domain.Track{variant}})
+	if c.playIntent() {
+		t.Fatal("switching an ended track resumed playback")
+	}
+}

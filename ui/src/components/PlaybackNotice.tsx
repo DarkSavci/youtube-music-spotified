@@ -1,3 +1,4 @@
+import { retryTogetherPlayback } from "../lib/together";
 import { usePlayer } from "../lib/player";
 
 /**
@@ -11,12 +12,14 @@ import { usePlayer } from "../lib/player";
  * A track that merely failed is not announced here; its row is greyed instead.
  */
 export function PlaybackNotice() {
+  const following = usePlayer(s => s.followingRoom);
   const notice = usePlayer((s) => s.notice);
   if (!notice) return null;
 
   return (
     <div className="playnotice" role="status">
       {notice}
+      {following ? <button className="chip" onClick={retryTogetherPlayback}>Retry playback</button> : null}
     </div>
   );
 }

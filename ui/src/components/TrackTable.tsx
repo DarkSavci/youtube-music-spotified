@@ -87,6 +87,7 @@ export function TrackTable({
     observer.observe(scroll);
     if (scroll.firstElementChild) observer.observe(scroll.firstElementChild);
     return () => observer.disconnect();
+  // Empty tables render no DOM; reattach measurements when rows first arrive.
   }, [tracks.length === 0]);
 
   const virtualizer = useVirtualizer({
