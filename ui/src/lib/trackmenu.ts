@@ -125,6 +125,7 @@ export function useTrackMenu(): (
           });
           void qc.invalidateQueries({ queryKey: ["liked"] });
           void qc.invalidateQueries({ queryKey: ["playlist", "LM"] });
+          void qc.invalidateQueries({ queryKey: ["library"] });
         })();
       },
     });

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"io"
 	"net/http"
@@ -68,7 +69,7 @@ func (s *Server) videoLyrics(ctx context.Context, track domain.Track, timed bool
 }
 
 func (s *Server) handleTrackVersions(w http.ResponseWriter, r *http.Request) {
-	if !allowVideoRequest(w, r) {
+	if !s.allowVideoRequest(w, r) {
 		return
 	}
 	id := r.PathValue("id")
@@ -120,15 +121,39 @@ func (s *Server) resolveVideo(ctx context.Context, id string, refresh bool) (dom
 	flight := &videoFlight{done: make(chan struct{})}
 	s.videoFlights[id] = flight
 	s.videoMu.Unlock()
+	// Always settle the flight, even if the resolver panics, so requests
+	// waiting on it are not left hanging.
+	settled := false
+	defer func() {
+		if !settled {
+			flight.err = errors.New("video resolution did not complete")
+			s.settleVideo(id, flight)
+		}
+	}()
 	provider, ok := s.deps.Resolver.(interface {
 		ResolveVideo(context.Context, string) (domain.Stream, error)
 	})
 	if !ok {
 		flight.err = errors.New("video playback is unavailable with this resolver")
 	} else {
-		flight.stream, flight.err = provider.ResolveVideo(ctx, id)
+		// Other requests share this result, so one of them going away must
+		// not cancel it for the rest. It still needs a bound of its own.
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
+		flight.stream, flight.err = provider.ResolveVideo(rctx, id)
+		if flight.err == nil && flight.stream.URL == "" {
+			flight.err = errors.New("video resolution returned no stream")
+		}
 	}
+	settled = true
+	s.settleVideo(id, flight)
+	return flight.stream, flight.err
+}
+
+// settleVideo publishes a finished flight: caches a success and wakes waiters.
+func (s *Server) settleVideo(id string, flight *videoFlight) {
 	s.videoMu.Lock()
+	defer s.videoMu.Unlock()
 	if flight.err == nil {
 		if len(s.videos) >= 32 {
 			for key := range s.videos {
@@ -140,18 +165,31 @@ func (s *Server) resolveVideo(ctx context.Context, id string, refresh bool) (dom
 	}
 	delete(s.videoFlights, id)
 	close(flight.done)
-	s.videoMu.Unlock()
-	return flight.stream, flight.err
 }
 
+// ClientTokenHeader carries Deps.ClientToken on the desktop shell's requests.
+const ClientTokenHeader = "X-Spotifier-Client"
+
 // Browser pages outside the app must not be able to start local video jobs.
-func allowVideoRequest(w http.ResponseWriter, r *http.Request) bool {
+func (s *Server) allowVideoRequest(w http.ResponseWriter, r *http.Request) bool {
+	if token := s.deps.ClientToken; token != "" {
+		// The desktop shell adds the header at the network layer, so it
+		// reaches <video> requests too; no web page can learn the value.
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get(ClientTokenHeader)), []byte(token)) == 1 {
+			return true
+		}
+		http.Error(w, "origin not allowed", http.StatusForbidden)
+		return false
+	}
+	// Without a token (a core run by hand for development), fall back to
+	// what the browser reports. "null" is never trusted: sandboxed and data:
+	// frames on any site send it.
 	origin := r.Header.Get("Origin")
 	// Electron's file:// renderer omits Origin even for CORS requests.
 	// Ordinary cross-site web CORS fetches include Origin; no-cors embeds
 	// must still be rejected so arbitrary pages cannot start a video job.
 	desktopCORS := origin == "" && r.Header.Get("Sec-Fetch-Mode") == "cors"
-	if desktopCORS || origin == "null" || (origin == "" && r.Header.Get("Sec-Fetch-Site") != "cross-site") {
+	if desktopCORS || (origin == "" && r.Header.Get("Sec-Fetch-Site") != "cross-site") {
 		return true
 	}
 	if u, err := url.Parse(origin); err == nil && (u.Scheme == "http" || u.Scheme == "https") && (u.Host == r.Host || u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1") {
@@ -162,7 +200,7 @@ func allowVideoRequest(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Server) handleVideoStream(w http.ResponseWriter, r *http.Request) {
-	if !allowVideoRequest(w, r) {
+	if !s.allowVideoRequest(w, r) {
 		return
 	}
 	id := r.PathValue("id")

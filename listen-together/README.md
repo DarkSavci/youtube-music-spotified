@@ -46,7 +46,7 @@ Before treating this as ready for release, test two real accounts on different n
 
 ### Relay limits and deployment
 
-Each IP may hold at most 16 connections and four rooms. Rooms with only their host expire after five minutes; active rooms retain the six-hour maximum. WebSocket pong grace is 30 seconds to tolerate brief network interruptions. Host loss still ends a prototype room; invitations do not reconnect a host automatically.
+Each IP may hold at most 16 connections and four rooms. Rooms with only their host expire after 30 minutes; active rooms retain the six-hour maximum. WebSocket pong grace is 30 seconds to tolerate brief network interruptions. Host loss still ends a prototype room; invitations do not reconnect a host automatically.
 
 Browser origins must match the relay host or be listed in comma-separated `ALLOWED_ORIGINS`. Desktop file origins (`null`) and clients without an Origin header are accepted. `TRUST_PROXY=1` trusts the last X-Forwarded-For hop only when the TCP peer is loopback. Set it only behind a loopback TLS proxy that overwrites/appends the client address; forwarded headers are otherwise ignored.
 

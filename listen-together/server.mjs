@@ -1,17 +1,29 @@
 import { createServer } from 'node:http';
+import { isIPv6 } from 'node:net';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { cleanSnapshot, positionAt } from './protocol.mjs';
 
 /** In-memory, metadata-only prototype. Put behind TLS for remote use. */
-export function createRoomServer({ maxRooms = 100, maxMembers = 8, lifetimeMs = 6 * 3600000, maxConnectionsPerIP = 16, maxRoomsPerIP = 4, emptyRoomMs = 5 * 60000, heartbeatMs = 30000, trustProxy = false, allowedOrigins = [] } = {}) {
+export function createRoomServer({ maxRooms = 100, maxMembers = 8, lifetimeMs = 6 * 3600000, maxConnectionsPerIP = 16, maxRoomsPerIP = 4, emptyRoomMs = 30 * 60000, heartbeatMs = 30000, trustProxy = false, allowedOrigins = [] } = {}) {
   const rooms = new Map();
   const connections = new Map();
+  // Per-IP limits key IPv6 clients by /64, since one host usually holds a
+  // whole /64 and could otherwise take a fresh address per connection.
+  const limitKey = address => {
+    const ip = address.startsWith('::ffff:') ? address.slice(7) : address;
+    if (!isIPv6(ip)) return ip;
+    const [head, tail = ''] = ip.split('::');
+    const left = head ? head.split(':') : [];
+    const right = tail ? tail.split(':') : [];
+    const groups = [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right];
+    return `${groups.slice(0, 4).map(g => parseInt(g || '0', 16).toString(16)).join(':')}::/64`;
+  };
   const clientIP = req => {
     const address = req.socket.remoteAddress || 'unknown';
     const proxy = trustProxy && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address);
-    return proxy && typeof req.headers['x-forwarded-for'] === 'string' ? req.headers['x-forwarded-for'].split(',').at(-1).trim() : address;
+    return limitKey(proxy && typeof req.headers['x-forwarded-for'] === 'string' ? req.headers['x-forwarded-for'].split(',').at(-1).trim() : address);
   };
   const originAllowed = req => {
     const origin = req.headers.origin;

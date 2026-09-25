@@ -39,6 +39,11 @@ type Deps struct {
 	AccountScope string
 	Catalog      catalog.Catalog
 
+	// ClientToken, when set, is a per-launch secret the desktop shell attaches
+	// to its own requests. The video routes require it, so a web page cannot
+	// drive them through the open CORS policy.
+	ClientToken string
+
 	// Account holds the signed-in state and everything derived from it. It is
 	// read per request rather than captured here, because signing in happens
 	// while the process is running. Nil, or holding a signed-out State, leaves

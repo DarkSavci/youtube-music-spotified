@@ -91,7 +91,9 @@ function MiniPlayer({ win }: { win: Window }) {
   const color = useArtColor(artworkAtLeast(track?.artwork ?? [], 300));
 
   const choosePanel = (next: Panel) => {
-    if (panel === next && (next !== "video" || video)) return setPanel("art");
+    // Queue and lyrics are only shown in the tall layout, so only there does
+    // a second click close them.
+    if (panel === next && (next === "video" ? video : layout === "tall")) return setPanel("art");
     setPanel(next);
     if (next === "video") {
       if (!useVideo.getState().enabled) void setVideoEnabled(true);

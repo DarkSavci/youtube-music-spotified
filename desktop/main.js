@@ -11,9 +11,11 @@
  * shutdown function, including the abnormal ones.
  */
 
-const { app, BrowserWindow, ipcMain, shell, globalShortcut, Menu, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, globalShortcut, Menu, dialog, session } = require("electron");
 const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const net = require("node:net");
 const fs = require("node:fs");
 const auth = require("./auth");
@@ -29,6 +31,12 @@ const { waitForOwnedCore } = require("./core-ready");
 const isDev = !app.isPackaged;
 const CORE_PORT = 8674;
 const CORE_HOST = "127.0.0.1";
+// A per-launch secret the core requires on routes that start yt-dlp work, so
+// web pages cannot drive them through its open CORS policy.
+const CLIENT_TOKEN = crypto.randomBytes(32).toString("hex");
+// webContents ids of the app's own windows: the main window and its mini
+// player. Only their top-level documents get CLIENT_TOKEN.
+const appContents = new Set();
 const DEV_URL = "http://127.0.0.1:5219/";
 
 let mainWindow = null;
@@ -246,7 +254,11 @@ function startCore() {
   if (deno) args.push("-deno", deno);
   else console.warn("[core] no bundled deno; yt-dlp will look for one on PATH");
 
-  const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  const child = spawn(bin, args, {
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+    env: { ...process.env, SPOTIFIER_CLIENT_TOKEN: CLIENT_TOKEN },
+  });
 
   child.ready = waitForOwnedCore(child);
   logs.attachCore(child);
@@ -411,6 +423,16 @@ function createWindow() {
   if (source.url) mainWindow.loadURL(source.url);
   else mainWindow.loadFile(path.join(source.dir, "index.html"));
 
+  // The window only ever shows the app. A dropped link or file would
+  // otherwise replace it with a page the core trusts.
+  const appEntry = source.url || pathToFileURL(path.join(source.dir, "index.html")).href;
+  const contentsId = mainWindow.webContents.id;
+  appContents.add(contentsId);
+  mainWindow.webContents.once("destroyed", () => appContents.delete(contentsId));
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (url.split("#")[0] !== appEntry) event.preventDefault();
+  });
+
   // The mini player is the one window the page may open; external links
   // belong in the user's browser, not in the app shell.
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -420,7 +442,12 @@ function createWindow() {
     return { action: "deny" };
   });
   mainWindow.webContents.on("did-create-window", (child, { frameName }) => {
-    if (frameName === miniplayer.FRAME) miniplayer.adopt(child);
+    if (frameName !== miniplayer.FRAME) return;
+    miniplayer.adopt(child);
+    const childId = child.webContents.id;
+    appContents.add(childId);
+    child.webContents.once("destroyed", () => appContents.delete(childId));
+    child.webContents.on("will-navigate", (event) => event.preventDefault());
   });
 
   // Closing hides to the tray rather than quitting, while that setting is on.
@@ -491,6 +518,18 @@ if (!app.requestSingleInstanceLock()) {
       app.quit();
       return;
     }
+    // Adding the header here also covers <video> requests, which cannot set
+    // headers themselves. Embedded frames (YouTube's player) share the
+    // session, so the header goes only on the app windows' own documents.
+    // Electron keeps one listener per event: registering another replaces it.
+    session.defaultSession.webRequest.onBeforeSendHeaders(
+      { urls: [`http://${CORE_HOST}:${CORE_PORT}/*`] },
+      (details, callback) => {
+        const own = details.webContents && appContents.has(details.webContents.id) && details.frame && !details.frame.parent;
+        if (!own) return callback({});
+        callback({ requestHeaders: { ...details.requestHeaders, "X-Spotifier-Client": CLIENT_TOKEN } });
+      },
+    );
     accounts.initialize(dataDir());
     accounts.register(() => mainWindow, CORE_PORT, restartCore);
     miniplayer.register(dataDir());

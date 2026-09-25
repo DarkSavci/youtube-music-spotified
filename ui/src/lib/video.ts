@@ -58,8 +58,10 @@ export async function setVideoEnabled(enabled: boolean) {
     const alternative = pair?.find(t => t.playable && t.isVideo === enabled);
     if (enabled && !track.isVideo && !alternative) throw new Error("No matching music video is available for this song.");
     if (alternative && alternative.id !== track.id) {
-      if (usePlayer.getState().followingRoom) throw new Error("The host chooses the song or video version. You can watch the current video when the host selects it.");
-      if (!await switchTrackVariant(alternative, track.id)) throw new Error("Could not switch versions. Please try again.");
+      if (usePlayer.getState().followingRoom) {
+        // Hiding the picture is enough; the host picks the version.
+        if (enabled) throw new Error("The host chooses the song or video version. You can watch the current video when the host selects it.");
+      } else if (!await switchTrackVariant(alternative, track.id)) throw new Error("Could not switch versions. Please try again.");
     }
     if (generation === request) useVideo.setState({ enabled, error: null, revision: useVideo.getState().revision + 1 });
   } catch (error) {

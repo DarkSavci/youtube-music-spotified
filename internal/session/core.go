@@ -150,7 +150,11 @@ func (c *Core) Apply(cmd Command) (Reject, []LogEntry) {
 	case CmdLeaveRoom:
 		if c.following {
 			c.following = false
+			// A room that never had a track leaves nothing to resume.
 			c.state.State = domain.StatePaused
+			if c.state.Queue.Current() == nil {
+				c.state.State = domain.StateIdle
+			}
 			c.state.PositionAt = c.clk.Now()
 			c.bump()
 		}

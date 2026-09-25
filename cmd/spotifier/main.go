@@ -64,7 +64,11 @@ func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
 	rec := obs.NewRecorder()
-	deps := api.Deps{AccountScope: *accountScope, Recorder: rec, Log: log}
+	// The token comes through the environment rather than a flag, so it does
+	// not show up in process listings.
+	deps := api.Deps{AccountScope: *accountScope, ClientToken: os.Getenv("SPOTIFIER_CLIENT_TOKEN"), Recorder: rec, Log: log}
+	// Keep it out of the environment yt-dlp and deno inherit.
+	_ = os.Unsetenv("SPOTIFIER_CLIENT_TOKEN")
 
 	// The Control plane is ours and needs no credentials. If it cannot open,
 	// browsing and playback still work; only the statistics surfaces and the

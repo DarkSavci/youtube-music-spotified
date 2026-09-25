@@ -200,3 +200,43 @@ func TestVideoVersionsAcceptDesktopCORSButRejectCrossSiteEmbeds(t *testing.T) {
 		}
 	}
 }
+
+func TestVideoRejectsNullOrigin(t *testing.T) {
+	// Sandboxed and data: frames on any site send Origin: null.
+	srv := api.New(api.Deps{})
+	req := httptest.NewRequest("GET", "/v1/tracks/abcdefghijk/versions", nil)
+	req.Header.Set("Origin", "null")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status %d", w.Code)
+	}
+}
+
+func TestVideoRequiresClientTokenWhenConfigured(t *testing.T) {
+	srv := api.New(api.Deps{ClientToken: "secret"})
+	for _, tc := range []struct {
+		name   string
+		header string
+		origin string
+		want   int
+	}{
+		{"desktop shell", "secret", "", http.StatusOK},
+		{"no token", "", "", http.StatusForbidden},
+		{"wrong token", "guess", "", http.StatusForbidden},
+		{"same-origin page without token", "", "http://127.0.0.1:8674", http.StatusForbidden},
+	} {
+		req := httptest.NewRequest("GET", "/v1/tracks/abcdefghijk/versions", nil)
+		if tc.header != "" {
+			req.Header.Set(api.ClientTokenHeader, tc.header)
+		}
+		if tc.origin != "" {
+			req.Header.Set("Origin", tc.origin)
+		}
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		if w.Code != tc.want {
+			t.Fatalf("%s: status %d want %d", tc.name, w.Code, tc.want)
+		}
+	}
+}
