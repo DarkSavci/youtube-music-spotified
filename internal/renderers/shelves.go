@@ -317,6 +317,7 @@ func ParseMoodChips(doc Node) []domain.MoodChip {
 		return nil
 	}
 	out := make([]domain.MoodChip, 0, len(nodes))
+	seen := make(map[[2]string]bool)
 	for _, n := range nodes {
 		title := textOf(n.Child("buttonText"))
 		if title == "" {
@@ -329,6 +330,15 @@ func ParseMoodChips(doc Node) []domain.MoodChip {
 		if cmd := Find(n, "browseEndpoint"); cmd != nil {
 			chip.ID = cmd.Str("browseId")
 			chip.Params = cmd.Str("params")
+		}
+		// Featured categories can repeat in the full moods/genres sections.
+		// Match the destination, not the title: params identifies a category.
+		key := [2]string{chip.ID, chip.Params}
+		if chip.ID != "" {
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 		}
 		out = append(out, chip)
 	}

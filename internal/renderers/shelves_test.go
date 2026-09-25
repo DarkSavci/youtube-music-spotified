@@ -156,3 +156,17 @@ func TestPodcastAndEpisodeTargetsAreDistinguished(t *testing.T) {
 		}
 	}
 }
+
+func TestMoodChipsDeduplicateDestinations(t *testing.T) {
+	chip := func(title, params string) any {
+		return map[string]any{NodeNavButton: map[string]any{
+			"buttonText":   map[string]any{"simpleText": title},
+			"clickCommand": map[string]any{"browseEndpoint": map[string]any{"browseId": "FEmusic_moods_and_genres_category", "params": params}},
+		}}
+	}
+	doc := Node{"contents": []any{chip("Chill", "chill"), chip("Focus", "focus"), chip("Chill", "chill"), chip("Focus", "focus"), chip("Chill", "different-destination")}}
+	got := ParseMoodChips(doc)
+	if len(got) != 3 || got[0].Params != "chill" || got[1].Params != "focus" || got[2].Params != "different-destination" {
+		t.Fatalf("expected unique destinations in first-seen order: %+v", got)
+	}
+}
