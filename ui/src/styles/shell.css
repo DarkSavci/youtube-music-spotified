@@ -1291,9 +1291,8 @@
   pointer-events: none;
 }
 
-/* Native Mac traffic lights sit above the sidebar, outside the content grid. */
-.app-shell[data-platform="darwin"] { padding-top: 38px; }
-.app-shell[data-platform="darwin"]::before { height: 30px; }
+/* Native traffic lights share the navigation row. */
+.app-shell[data-platform="darwin"] > .topbar { padding-left: 88px; }
 
 .account-menu {
   position: fixed;
@@ -1395,13 +1394,22 @@ body:has(.account-menu, .whats-new-dialog[open]) .app-shell::before {
 .sidebar__search input:focus, .sidebar__search input:focus-visible { outline: none; box-shadow: none; }
 .topbar__search-group { display: flex; align-items: center; gap: 12px; position: absolute; left: 50%; transform: translateX(-50%); width: min(40vw, 560px); }
 .topbar__search-group .searchfield { width: auto; flex: 1; }
-.searchfield { -webkit-app-region: no-drag; cursor: text; }
-.searchfield__browse { border-left: 1px solid var(--border-subtle); border-radius: 0; padding-left: 8px; width: 40px; }
-/* The divider needs square corners, so a hover fill would be a hard-edged box
-   inside the rounded field; brighten the icon instead. */
-.searchfield__browse:hover:not(:disabled) { background: transparent; }
+.searchfield { -webkit-app-region: no-drag; cursor: text; padding-right: 0; }
+.searchfield__browse { position: relative; align-self: stretch; height: auto; width: 48px; padding: 0; border-radius: 0 28px 28px 0; }
+.searchfield__browse::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 1px; background: var(--border-subtle); pointer-events: none; }
+
 @media (max-width: 1100px) {
   .topbar__search-group { position: static; transform: none; width: auto; flex: 1; min-width: 180px; }
   .topbar__spacer { display: none; }
   .topbar__account { max-width: 130px; }
 }
+
+.wincontrols { margin-right: -12px; flex-shrink: 0; }
+@media (max-width: 1000px) {
+  .topbar__account-name { display: none; }
+  .topbar__search-group { min-width: 120px; gap: 6px; }
+  .topbar__search-group .searchfield { min-width: 100px; }
+  .topbar { gap: 6px; }
+}
+
+.app-shell[data-native-titlebar="true"] > .topbar { padding-right: max(150px, calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px))); }

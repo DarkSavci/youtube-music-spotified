@@ -30,6 +30,7 @@ export interface SavedAccounts {
 interface DesktopBridge {
   accountScope?: string;
   platform?: string;
+  nativeTitleBar?: boolean;
   corePort(): Promise<number>;
   dataDir(): Promise<string>;
   /** Absent in shells older than 0.1.2. */

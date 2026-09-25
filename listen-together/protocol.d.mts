@@ -1,4 +1,4 @@
-export interface RoomTrack { id: string; title: string; durationMs: number; artists: { name: string }[] }
+export interface RoomTrack { isVideo?: boolean; id: string; title: string; durationMs: number; artists: { name: string }[] }
 export interface Snapshot { track: RoomTrack | null; playing: boolean; positionMs: number; at: number; seq: number }
 export function cleanSnapshot(value: unknown): Omit<Snapshot, "at" | "seq">;
 export function positionAt(snapshot: Snapshot, serverNow: number): number;

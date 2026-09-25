@@ -5,7 +5,7 @@ import { WebSocket } from 'ws';
 import { createRoomServer } from '../server.mjs';
 import { RoomClient } from '../client.mjs';
 import { cleanSnapshot, decodeInvite, encodeInvite, endpointURL, positionAt } from '../protocol.mjs';
-const state = { track: { id: 'abcdefghijk', title: 'Test track', durationMs: 180000, artists: [{name:'Test artist'}] }, playing: true, positionMs: 5000 };
+const state = { track: { isVideo:false, id: 'abcdefghijk', title: 'Test track', durationMs: 180000, artists: [{name:'Test artist'}] }, playing: true, positionMs: 5000 };
 async function setup(t, options) {
  const server = createRoomServer(options);
  server.http.listen(0, '127.0.0.1'); await once(server.http, 'listening');
@@ -73,4 +73,27 @@ test('per-IP room and socket caps and browser origins are enforced',async t=>{
  await once(rejected,'error');
  second.send({type:'create'});assert.match((await second.next('error')).message,/Cannot create/);
  const evil=new WebSocket(url,{origin:'https://untrusted.example'});await once(evil,'error');
+});
+
+test('a guest reconnects after a dropped socket and receives the latest host snapshot', async t => {
+ const url=await setup(t);
+ let invitation;
+ const host=new RoomClient({WebSocketImpl:WebSocket,onStatus:s=>{if(s.invitation)invitation=s.invitation},onSnapshot:()=>{},getSnapshot:()=>state});
+ t.after(()=>host.stop());host.connect({server:url});
+ const wait=async predicate=>{const end=Date.now()+5000;while(!predicate()){if(Date.now()>end)throw Error('Timed out');await new Promise(r=>setTimeout(r,20));}};
+ await wait(()=>invitation);
+ let connected=0, snapshots=0, reconnecting=false;
+ const guest=new RoomClient({WebSocketImpl:WebSocket,onStatus:s=>{if(s.status==='connected')connected++;if(s.status==='reconnecting')reconnecting=true},onSnapshot:()=>snapshots++,getSnapshot:()=>state});
+ t.after(()=>guest.stop());guest.connect({invitation});
+ await wait(()=>connected===1&&snapshots>0);
+ guest.socket.terminate();
+ await wait(()=>connected===2&&snapshots>1);
+ assert.ok(reconnecting);assert.equal(guest.role,'guest');
+ guest.socket.terminate();await wait(()=>guest.retryTimer);guest.stop();
+ await new Promise(r=>setTimeout(r,1100));assert.equal(guest.socket,null);
+});
+
+test('snapshot retains video mode without sharing private track fields', () => {
+ const got=cleanSnapshot({...state,track:{...state.track,isVideo:true,cookie:'private',streamURL:'private'}});
+ assert.equal(got.track.isVideo,true);assert.equal(got.track.cookie,undefined);assert.equal(got.track.streamURL,undefined);
 });

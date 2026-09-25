@@ -118,5 +118,6 @@ contextBridge.exposeInMainWorld("spotifier", {
   },
 
   platform: process.platform,
+  nativeTitleBar: process.platform === "win32",
   isDesktop: true,
 });

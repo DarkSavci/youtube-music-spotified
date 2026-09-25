@@ -22,7 +22,7 @@ export function Together() {
     <h1>Listen Together <span className="together-badge">Prototype</span></h1>
     <p>Listen in sync with friends. Everyone plays through their own account and keeps their own volume.</p>
     {room.status !== "disconnected" ? <section className="together-card">
-      <h2>{room.status === "connecting" ? "Connecting…" : room.role === "host" ? "You’re hosting" : "Following the host"}</h2>
+      <h2>{room.status === "reconnecting" ? "Reconnecting…" : room.status === "connecting" ? "Connecting…" : room.role === "host" ? "You’re hosting" : "Following the host"}</h2>
       {room.status === "connected" && <p>{room.members} {room.members === 1 ? "listener" : "listeners"} · The host chooses music, pauses, seeks, and skips.</p>}
       {room.role === "host" && <>
         <label>Private invitation<input readOnly value={room.invitation} onFocus={e => e.currentTarget.select()} /></label>

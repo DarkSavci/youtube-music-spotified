@@ -7,13 +7,24 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../../ui/dist');
 let first = 0, next = 0, full = 0, failNext = true;
+let previewActive = 0, previewMax = 0;
+const previews = new Set();
 const track = i => ({id:`fixture${String(i).padStart(4,'0')}`,title:`Fixture song ${i}`,artists:[{id:'artist',name:'Fixture artist'}],artwork:[],durationMs:180000,playable:true});
 const server = http.createServer((req,res) => {
  const url = new URL(req.url,'http://localhost');
  if (url.pathname.startsWith('/v1/')) {
   res.setHeader('Content-Type','application/json');
   let body;
-  if (url.pathname === '/v1/playlists/fixture') {
+  if (url.pathname === '/v1/browse/FEmusic_moods_and_genres') {
+   body={shelves:[],moods:Array.from({length:60},(_,i)=>({id:'mood'+i,title:'Mood '+i,color:'#185a74'}))};
+  } else if (url.pathname.startsWith('/v1/browse/')) {
+   previews.add(url.pathname); previewActive++; previewMax=Math.max(previewMax,previewActive);
+   let finished=false;
+   const finish=()=>{if(!finished){finished=true;previewActive--;}};
+   res.on('close',finish);
+   setTimeout(()=>{finish();res.end(JSON.stringify({shelves:[{title:'Recommendations',items:[{playlist:{id:'preview',title:'Preview',artwork:[{url:'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22240%22 height=%22240%22%3E%3Crect width=%22240%22 height=%22240%22 fill=%22red%22/%3E%3C/svg%3E',width:240,height:240}]}}]}]}));},120);
+   return;
+  } else if (url.pathname === '/v1/playlists/fixture') {
    if (url.searchParams.get('paged') !== '1') { full++; body={id:'fixture',title:'Fixture playlist',tracks:Array.from({length:120},(_,i)=>track(i+1))}; }
    else if (url.searchParams.has('continuation')) { next++; if(failNext) { res.statusCode=503; res.end(JSON.stringify({error:'temporary fixture failure'})); return; } body={playlist:{id:'fixture',tracks:Array.from({length:20},(_,i)=>track(i+101))}}; }
    else { first++; body={playlist:{id:'fixture',title:'Fixture playlist',artwork:[],trackCount:120,tracks:Array.from({length:100},(_,i)=>track(i+1))},next:'page2'}; }
@@ -54,6 +65,10 @@ app.whenReady().then(async()=>{
  assert.equal(await read(`document.activeElement.type`),'search');
  await read(`document.querySelector('[aria-label="Browse all"]').click()`);
  assert.equal(await read(`location.hash`),'#/search');
+ await waitFor(`document.querySelector('.mood__art')?.complete && document.querySelector('.mood__art')?.naturalWidth>0`);
+ assert.ok(previewMax<=2, 'preview requests must be bounded');
+ assert.ok(!previews.has('/v1/browse/mood59'), 'offscreen categories must not fetch artwork');
+ assert.ok(await read(`(()=>{const b=document.querySelector('[aria-label="Browse all"]'),f=b.closest('.searchfield');if(!f)return false;const br=b.getBoundingClientRect(),fr=f.getBoundingClientRect();return Math.abs(br.right-fr.right)<3 && Math.abs(br.height-fr.height)<3 && getComputedStyle(b).borderTopRightRadius!=='0px';})()`), 'browse hitbox must reach the rounded search-field edge');
  await read(`window.location.hash='/playlist/fixture'`);
  await waitFor(`document.querySelector('.trackrow')`);
  await read(`(()=>{const e=document.querySelector('[aria-label="Search in your library"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'playlist 19');e.dispatchEvent(new Event('input',{bubbles:true}));})()`);

@@ -387,12 +387,12 @@ function createWindow() {
     backgroundColor: "#0f0f0f",
     show: false,
     autoHideMenuBar: true,
-    // The app draws its own title bar. The default Windows one is a light
-    // strip above a dark app with a menu we do not use, and it cannot be
-    // themed — so the frame goes and the controls move into the top bar,
-    // where the rest of the chrome already lives.
-    frame: process.platform === "darwin",
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
+    // The navigation row shares the native caption area. Windows uses the
+    // native overlay (including maximize/Snap); macOS retains traffic lights.
+    frame: true,
+    titleBarStyle: "hidden",
+    ...(process.platform === "win32" ? { titleBarOverlay: { color: "#0f0f0f", symbolColor: "#b3b3b3", height: 72 } } : {}),
+    ...(process.platform === "darwin" ? { trafficLightPosition: { x: 16, y: 28 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

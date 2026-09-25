@@ -1,3 +1,4 @@
+import { watchFullscreenIdle } from "../lib/fullscreenIdle";
 import { EndTime } from "./EndTime";
 import { VideoSurface, VideoSwitch, VideoNotice } from "./VideoPlayer";
 import { useVideo } from "../lib/video";
@@ -26,6 +27,10 @@ import { artworkAtLeast, formatDuration } from "../lib/types";
  */
 export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
   const video = useVideo(s => s.enabled);
+  const videoError = useVideo(s => s.error);
+  const notice = usePlayer(s => s.notice);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [hidden, setHidden] = useState(false);
   const { track, state, repeat, shuffle, origin } = usePlayer();
   const position = usePlaybackPosition();
   const [scrubbing, setScrubbing] = useState<number | null>(null);
@@ -39,9 +44,15 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
       }
     };
     window.addEventListener("keydown", onKey, true);
-    closeRef.current?.focus();
+    rootRef.current?.focus();
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
+
+  useEffect(() => {
+    setHidden(false);
+    if (state !== "playing" || videoError || notice || !rootRef.current) return;
+    return watchFullscreenIdle(rootRef.current, setHidden);
+  }, [state, track?.id, videoError, notice]);
 
   if (!track) return null;
 
@@ -51,7 +62,7 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
   const art = artworkAtLeast(track.artwork, 1000);
 
   return (
-    <div className="fsp" role="dialog" aria-modal="true" aria-label="Now playing">
+    <div ref={rootRef} tabIndex={-1} data-controls-hidden={hidden || undefined} className="fsp" role="dialog" aria-modal="true" aria-label="Now playing">
       {video ? <VideoSurface priority={10} className="fsp__video" /> : <img className="fsp__bleed" src={art} alt="" aria-hidden="true" />}
       {/* A gradient only at the bottom, where the controls are: the artwork
           stays untouched everywhere the eye actually looks. */}
