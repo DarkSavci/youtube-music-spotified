@@ -22,7 +22,7 @@ function setup(){
  vm.runInNewContext(code,{module,exports:module.exports,Map,Promise,Error,Math,Number,queueMicrotask,document:doc,setInterval:f=>{ticks.push(f);return ticks.length;},clearInterval:()=>{},fetch:async()=>({ok:true,json:async()=>response}),require:n=>{
   if(n==='zustand')return {create:makeStore};
   if(n==='./base')return {apiUrl:p=>p};
-  if(n==='./player')return {usePlayer:{getState:()=>player},currentPosition:s=>s.position};
+  if(n==='./player')return {usePlayer:{getState:()=>player},currentPosition:s=>s.position,interpolationRate:s=>s.outputElsewhere?1:(s.speed||1)};
   if(n==='./playback')return {switchTrackVariant:async(t,expected)=>{switches.push({t,expected});player.track=t;return true;}};
   throw Error(n);
  }});
