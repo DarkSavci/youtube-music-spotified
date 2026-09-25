@@ -135,8 +135,7 @@ function MadeForYou({ mixes }: { mixes: Mix[] }) {
         <span className="shelf__showall">FROM YOUR LISTENING</span>
       </div>
       <div
-        className="shelf__row"
-        style={{ "--card-count": Math.min(mixes.length, 5) } as React.CSSProperties}
+        className="shelf__row shelf__row--mixes"
       >
         {mixes.map((mix) => (
           // Opens the mix; only the play button plays it, as with an album.

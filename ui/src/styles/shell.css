@@ -1545,3 +1545,14 @@ button:is(:hover, :focus-visible) .share-icon__copy,
    between the steps, wrapping only when narrow as well. */
 .speedpanel[data-compact] { width: min(480px, calc(100vw - 16px)); padding: var(--space-2); }
 .speedpanel[data-compact] .speedpanel__presets { flex: 1; margin-top: 0; }
+
+/* Keep all three groups in layout flow so titlebar controls cannot overlap search. */
+.app-shell > .topbar { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(160px, 560px) minmax(max-content, 1fr); }
+.topbar__actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-width: 0; }
+.topbar__search-group { position: static; transform: none; width: 100%; min-width: 0; }
+.topbar__search-group .searchfield { min-width: 0; }
+.topbar__actions > .iconbtn { flex-shrink: 0; }
+@media (max-width: 1100px) {
+  .topbar__actions { gap: 6px; }
+  .app-shell > .topbar { grid-template-columns: max-content minmax(100px, 1fr) max-content; }
+}

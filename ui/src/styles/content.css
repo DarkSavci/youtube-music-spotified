@@ -1777,3 +1777,6 @@ li[data-state="active"] .lyrics__line {
 .room-namefield > span, .room-namefield > small { color: var(--text-secondary); font-size: 12px; }
 .room-namefield > input { width: 100%; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: #ffffff08; color: var(--text-primary); }
 .room-sessionhead h2 { overflow-wrap: anywhere; }
+
+/* Sparse personal shelves keep normal card sizes instead of filling the row. */
+.shelf__row--mixes { grid-template-columns: repeat(auto-fill, minmax(min(168px, 100%), 220px)); }
