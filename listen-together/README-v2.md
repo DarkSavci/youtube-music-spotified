@@ -5,12 +5,12 @@ V2 is a new protocol. Deploy it alongside v1 while testing; the existing `server
 ```sh
 cd listen-together
 npm ci
-PORT=8766 HOST=127.0.0.1 node server-v2.mjs
+PORT=8766 HOST=127.0.0.1 npm run start:v2
 ```
 
 For remote access, put this listener behind an HTTPS reverse proxy that forwards WebSocket upgrades. Enter its `wss://` URL in the app. TLS verification must remain enabled. Desktop `file://` and opaque `null` origins are accepted explicitly; a browser preview must be listed in `ALLOWED_ORIGINS` (comma separated, exact origins). Origin checks are not authentication: the PIN admits a member and a separate unguessable credential authorizes reconnecting.
 
-`TRUST_PROXY=1` accepts the rightmost X-Forwarded-For value **only from a loopback peer**. Configure the local reverse proxy to overwrite/append the real peer address, and do not expose the Node port directly. Without this setting, all clients of a local proxy share its address limits. Defaults are 100 rooms, 12 seats per room, 200 connections, 24 connections/address, four created rooms/address, and 30 admission attempts/address/minute (600 globally). The canonical queue holds at most 500 entries; additions are limited to 100 songs per command. Rooms expire after six hours; a disconnected seat has 20 seconds to resume, and an empty room expires after a minute. Restarting the relay ends rooms.
+`TRUST_PROXY=1` accepts the rightmost X-Forwarded-For value **only from a loopback peer**. Configure the local reverse proxy to overwrite/append the real peer address, and do not expose the Node port directly. Without this setting, all clients of a local proxy share its address limits. Limits: 100 rooms and 12 seats per room (the `maxRooms` and `maxMembers` options of `createRoomServerV2`); the rest are fixed in `server-v2.mjs`: 200 connections, 24 connections/address, four created rooms/address, and 30 create/join attempts/address/minute (600 across the relay). Reconnecting with a room credential has its own limit of 60/address/minute and does not count toward the create/join limits. IPv6 addresses are grouped by /64. Each room sends at most one state update every 200 ms; a listener whose connection falls behind skips to the latest state instead of being disconnected. The canonical queue holds at most 500 entries; additions are limited to 100 songs per command. Rooms expire after six hours; a disconnected seat has 20 seconds to resume, and an empty room expires after a minute. Restarting the relay ends rooms.
 
 ## Implemented preview
 

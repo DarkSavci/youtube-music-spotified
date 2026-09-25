@@ -1,5 +1,7 @@
 # Listen Together prototype
 
+> **This is the v1 relay, kept only for app releases before Listen Together v2.** Current builds need the v2 relay (`npm run start:v2`); see [README-v2.md](README-v2.md). `client.mjs` remains as the v1 relay's test client.
+
 Private rooms synchronize **track identity, play/pause, seeking and track changes**. Each listener resolves and plays the track using their own local app/account. The host's existing queue drives the room; guests see the current track, not a copy of the whole queue. Volume is always local.
 
 This is an opt-in prototype, not a hosted service or a guarantee of frame-accurate synchronization. No audio, Google cookies, credentials, resolved media URLs, artwork URLs, or account identifiers are sent to the room server. Track titles and artist names are visible to the server and room participants. The server has no persistent storage or request-body logging.

@@ -11,6 +11,11 @@ export class RoomClientV2 {
     return Date.now() + this.offset;
   }
   connect(options) {
+    // A second connect replaces the first rather than leaving its socket
+    // and timers running.
+    clearTimeout(this.retry);
+    clearTimeout(this.timeout);
+    this.socket?.close();
     this.server = endpointURL(options.server);
     this.options = options;
     this.stopped = false;
@@ -22,12 +27,20 @@ export class RoomClientV2 {
     const ws = (this.socket = new WebSocket(this.server));
     let ready = false;
     let connectionError = "";
-    this.timeout = setTimeout(() => {
+    const noHandshake = () => {
       connectionError =
         "No v2 handshake received. Check the server address and upgrade the relay to v2.";
       this.onError(connectionError);
       ws.close();
-    }, 10000);
+    };
+    // Connecting may be slow, but a v2 relay greets as soon as the socket is
+    // open, so a v1 relay is recognised a few seconds after that.
+    this.timeout = setTimeout(noHandshake, 10000);
+    ws.onopen = () => {
+      if (this.socket !== ws || ready) return;
+      clearTimeout(this.timeout);
+      this.timeout = setTimeout(noHandshake, 3000);
+    };
     ws.onmessage = ({ data }) => {
       if (this.socket !== ws || this.stopped) return;
       let msg;

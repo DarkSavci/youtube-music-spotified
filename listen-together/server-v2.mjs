@@ -45,6 +45,7 @@ export function createRoomServerV2({
   const rooms = new Map(),
     pins = new Map(),
     attempts = new Map(),
+    resumes = new Map(),
     pending = new Map();
   const http = createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -67,19 +68,54 @@ export function createRoomServerV2({
       );
     },
   });
-  const sendRaw = (ws, text) => {
+  const send = (ws, data) => {
     if (ws?.readyState === WebSocket.OPEN) {
       if (ws.bufferedAmount > 2 * 1024 * 1024)
         ws.close(1008, "Slow connection");
-      else ws.send(text);
+      else ws.send(JSON.stringify(data));
     }
   };
-  const send = (ws, data) => sendRaw(ws, JSON.stringify(data));
-  // A full queue makes the snapshot large, so it is serialized once per
-  // change rather than once per listener.
-  const broadcast = (room) => {
-    const text = JSON.stringify({ type: "state", room: snapshot(room) });
-    for (const m of room.members.values()) sendRaw(m.socket, text);
+  // Each state replaces the last, so a listener who cannot keep up skips
+  // states and is sent the latest once their connection drains, instead of
+  // being disconnected by another member's burst of changes.
+  const sendState = (ws, text) => {
+    if (ws?.readyState !== WebSocket.OPEN) return;
+    if (ws.bufferedAmount > 1024 * 1024) {
+      ws.behind = true;
+      return;
+    }
+    ws.behind = false;
+    ws.send(text);
+  };
+  // A full queue makes the snapshot large and any member can change the
+  // room several times a second, so a room sends at most one state every
+  // 200 ms, serialized once for everyone. Acknowledgements wait for the
+  // state they depend on, so a client never acts on an older revision.
+  const outbox = new Map(),
+    sentAt = new WeakMap();
+  const flush = (room) => {
+    const box = outbox.get(room);
+    clearTimeout(box?.timer);
+    outbox.delete(room);
+    sentAt.set(room, Date.now());
+    if (rooms.has(room.id)) {
+      const text = JSON.stringify({ type: "state", room: snapshot(room) });
+      for (const m of room.members.values()) sendState(m.socket, text);
+    }
+    for (const [ws, message] of box?.acks ?? []) send(ws, message);
+  };
+  const broadcast = (room, ack) => {
+    let box = outbox.get(room);
+    if (!box) outbox.set(room, (box = { timer: null, acks: [] }));
+    if (ack) box.acks.push(ack);
+    if (box.timer) return;
+    const wait = 200 - (Date.now() - (sentAt.get(room) ?? 0));
+    if (wait <= 0) flush(room);
+    else box.timer = setTimeout(() => flush(room), wait);
+  };
+  const acknowledge = (room, ws, message) => {
+    if (outbox.has(room)) outbox.get(room).acks.push([ws, message]);
+    else send(ws, message);
   };
   const pin = () => {
     let value;
@@ -95,6 +131,8 @@ export function createRoomServerV2({
   const end = (room, reason) => {
     rooms.delete(room.id);
     pins.delete(room.pin);
+    clearTimeout(outbox.get(room)?.timer);
+    outbox.delete(room);
     for (const m of room.members.values()) {
       const socket = m.socket;
       m.socket = null;
@@ -125,7 +163,6 @@ export function createRoomServerV2({
       event(room, `${member.name} left.`);
     }
     ws.room = null;
-    room.revision++;
     broadcast(room);
   };
   const joined = (ws, room, member) => {
@@ -139,7 +176,6 @@ export function createRoomServerV2({
     member.connected = true;
     member.disconnectedAt = null;
     if (!room.owner) room.owner = member.id;
-    room.revision++;
     send(ws, {
       type: "joined",
       member: member.id,
@@ -207,7 +243,17 @@ export function createRoomServerV2({
           send(ws, { type: "ready" });
           return;
         }
-        if (!ws.compatible) throw new Error("Complete the v2 handshake first.");
+        if (!ws.compatible) {
+          // Older app versions skip the v2 handshake entirely.
+          send(ws, {
+            type: "error",
+            fatal: true,
+            message:
+              "This Listen Together server needs a newer version of the app. Update the app, then join again.",
+          });
+          ws.close();
+          return;
+        }
         if (msg.type === "ping" && Number.isFinite(msg.sent)) {
           send(ws, { type: "pong", sent: msg.sent, at: now });
           return;
@@ -215,17 +261,27 @@ export function createRoomServerV2({
         if (["create", "join", "resume"].includes(msg.type)) {
           if (ws.room || ws.waiting)
             throw new Error("Leave your current room first.");
+          // Creating and joining are limited per source and across the
+          // relay, which is what makes guessing PINs slow. Reconnecting
+          // carries an unguessable credential, so it has its own per-source
+          // limit and cannot be starved by other people's guessing.
+          const resuming = msg.type === "resume";
           if (now - globalWindow > 60000) {
             globalWindow = now;
             globalAttempts = 0;
           }
-          const bucket = attempts.get(ip) || { at: now, count: 0 };
+          const buckets = resuming ? resumes : attempts;
+          const bucket = buckets.get(ip) || { at: now, count: 0 };
           if (now - bucket.at > 60000) {
             bucket.at = now;
             bucket.count = 0;
           }
-          attempts.set(ip, bucket);
-          if (++bucket.count > 30 || ++globalAttempts > 600)
+          buckets.set(ip, bucket);
+          if (
+            resuming
+              ? ++bucket.count > 60
+              : ++bucket.count > 30 || ++globalAttempts > 600
+          )
             throw new Error("Too many room attempts. Try again in a minute.");
           if (msg.type === "create") {
             if (
@@ -323,6 +379,17 @@ export function createRoomServerV2({
         }
         if (msg.type !== "command") throw new Error("Unknown request.");
         const c = msg.command;
+        // A retry of an operation that already succeeded (its ack was lost)
+        // is acknowledged, not re-checked against a member or request that
+        // it has itself removed.
+        if (typeof c?.op === "string" && member.operations.has(c.op)) {
+          acknowledge(room, ws, {
+            type: "ack",
+            op: c.op,
+            revision: room.revision,
+          });
+          return;
+        }
         if (
           ["approve", "deny"].includes(c?.kind) &&
           (!pending.has(c.request) ||
@@ -377,9 +444,16 @@ export function createRoomServerV2({
             end(room, "The leader ended the room.");
             return;
           }
-          broadcast(room);
-        }
-        send(ws, { type: "ack", op: c.op, revision: room.revision });
+          broadcast(room, [
+            ws,
+            { type: "ack", op: c.op, revision: room.revision },
+          ]);
+        } else
+          acknowledge(room, ws, {
+            type: "ack",
+            op: c.op,
+            revision: room.revision,
+          });
       } catch (error) {
         send(ws, {
           type: "error",
@@ -413,8 +487,9 @@ export function createRoomServerV2({
         item.ws.close();
         broadcast(item.room);
       }
-    for (const [ip, bucket] of attempts)
-      if (now - bucket.at > 60000) attempts.delete(ip);
+    for (const buckets of [attempts, resumes])
+      for (const [ip, bucket] of buckets)
+        if (now - bucket.at > 60000) buckets.delete(ip);
     for (const room of rooms.values()) {
       if (room.expires <= now) {
         end(room, "This room expired.");
@@ -425,7 +500,6 @@ export function createRoomServerV2({
         if (!m.connected && now - m.disconnectedAt > graceMs) {
           room.members.delete(m.id);
           if (room.owner === m.id) transfer(room);
-          room.revision++;
           changed = true;
         }
       if (![...room.members.values()].some((m) => m.connected)) {
@@ -436,6 +510,12 @@ export function createRoomServerV2({
         }
       } else room.emptySince = null;
       if (changed) broadcast(room);
+      else if (
+        [...room.members.values()].some(
+          (m) => m.socket?.behind && m.socket.bufferedAmount < 256 * 1024,
+        )
+      )
+        broadcast(room);
     }
     for (const ws of wss.clients) {
       if (

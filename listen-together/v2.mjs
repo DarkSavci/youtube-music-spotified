@@ -126,7 +126,11 @@ export function snapshot(room) {
       ({ token, operations, socket, ...m }) => m,
     ),
     undo: room.undo
-      ? { revision: room.undo.revision, expires: room.undo.expires }
+      ? {
+          revision: room.undo.revision,
+          expires: room.undo.expires,
+          by: room.undo.by,
+        }
       : null,
   };
 }
@@ -150,7 +154,6 @@ function currentEntry(room) {
 function advance(room, direction = 1, now = Date.now()) {
   const old = currentEntry(room);
   const index = room.queue.findIndex((e) => e.id === room.current);
-  if (old && direction > 0) room.history = [...room.history.slice(-99), old];
   let next = index + direction;
   if (next >= room.queue.length && room.repeat === "all") next = 0;
   if (next < 0) next = 0;
@@ -158,6 +161,10 @@ function advance(room, direction = 1, now = Date.now()) {
     room.playing = false;
     room.positionMs = old?.track.durationMs || 0;
   } else {
+    // Only a song that is left behind joins the history; pressing next at
+    // the end of the queue must not record the same song again.
+    if (old && direction > 0 && room.queue[next].id !== old.id)
+      room.history = [...room.history.slice(-99), old];
     room.current = room.queue[next]?.id || null;
     room.positionMs = 0;
   }
@@ -242,6 +249,10 @@ export function command(room, member, cmd, now = Date.now()) {
     throw new Error("The room changed. Try again.");
   const entry = room.queue.find((e) => e.id === cmd.entry);
   const oldPosition = position(room, now);
+  // Ready answers and skip votes that do not skip describe listeners, not
+  // the queue or playback, so they must not make the leader's pending
+  // commands stale by moving the revision.
+  let presence = false;
   switch (cmd.kind) {
     case "play":
       if (!currentEntry(room)) throw new Error("Add some music first.");
@@ -283,11 +294,20 @@ export function command(room, member, cmd, now = Date.now()) {
       )
         throw new Error("Add between 1 and 100 songs at a time.");
       const tracks = cmd.tracks.map(cleanTrack);
+      // Played songs stay in the queue for "previous", but only a few: the
+      // history keeps the rest, and the cap is for what is still to come.
+      const at = room.queue.findIndex((e) => e.id === room.current);
+      if (cmd.kind !== "replace" && at > 20)
+        room.queue = room.queue.slice(at - 20);
       if (room.queue.length + tracks.length > 500 && cmd.kind !== "replace")
         throw new Error("The room queue is full (500 songs).");
-      const future = room.queue.slice(
-        room.queue.findIndex((e) => e.id === room.current) + 1,
-      );
+      // A replaced queue no longer holds anyone's upcoming songs.
+      const future =
+        cmd.kind === "replace"
+          ? []
+          : room.queue.slice(
+              room.queue.findIndex((e) => e.id === room.current) + 1,
+            );
       if (
         !owner &&
         future.filter((e) => e.addedBy.id === member.id).length +
@@ -295,15 +315,16 @@ export function command(room, member, cmd, now = Date.now()) {
           room.limit
       )
         throw new Error("Your queue contribution limit has been reached.");
-      if (
-        !room.duplicates &&
-        new Set([
-          ...(cmd.kind === "replace" ? [] : future.map((e) => e.track.id)),
-          ...tracks.map((t) => t.id),
-        ]).size <
-          (cmd.kind === "replace" ? 0 : future.length) + tracks.length
-      )
-        throw new Error("Duplicate songs are disabled in this room.");
+      // Only the new songs are judged: a duplicate queued before the
+      // setting was turned off must not block every later addition.
+      if (!room.duplicates) {
+        const seen = new Set(future.map((e) => e.track.id));
+        for (const track of tracks) {
+          if (seen.has(track.id))
+            throw new Error("Duplicate songs are disabled in this room.");
+          seen.add(track.id);
+        }
+      }
       const added = tracks.map((track) => ({
         id: id(),
         track,
@@ -334,7 +355,8 @@ export function command(room, member, cmd, now = Date.now()) {
           room.positionMs = 0;
           room.at = now;
         }
-        fair(room);
+        // "Play next" is a deliberate position that taking turns must keep.
+        if (!cmd.before) fair(room);
       }
       event(
         room,
@@ -464,17 +486,29 @@ export function command(room, member, cmd, now = Date.now()) {
       if (!room.voteSkip || !room.current)
         throw new Error("Skip voting is not enabled.");
       if (cmd.current !== room.current) throw new Error("The song changed.");
-      if (!room.votes.includes(member.id)) room.votes.push(member.id);
+      if (room.votes.includes(member.id)) {
+        member.operations.set(cmd.op, room.revision);
+        return false;
+      }
+      room.votes.push(member.id);
       const connected = [...room.members.values()].filter((m) => m.connected);
       if (
         room.votes.filter((v) => connected.some((m) => m.id === v)).length >
         connected.length / 2
       )
         advance(room, 1, now);
+      else presence = true;
       break;
     }
     case "ready":
+      if (!room.countdown || room.countdown.startAt)
+        throw new Error("There is no ready check right now.");
+      if (member.ready === (cmd.ready === true)) {
+        member.operations.set(cmd.op, room.revision);
+        return false;
+      }
       member.ready = cmd.ready === true;
+      presence = true;
       break;
     case "countdown":
       if (!currentEntry(room)) throw new Error("Add music first.");
@@ -485,6 +519,8 @@ export function command(room, member, cmd, now = Date.now()) {
         expires: now + 60000,
         startAt: cmd.force ? now + 3000 : null,
       };
+      // Answers belong to one ready check, not to whichever comes next.
+      for (const m of room.members.values()) m.ready = false;
       event(
         room,
         cmd.force
@@ -512,11 +548,17 @@ export function command(room, member, cmd, now = Date.now()) {
         : oldPosition;
     room.at = now;
   }
-  if (transport.includes(cmd.kind) && !["display"].includes(cmd.kind))
+  if (
+    room.countdown &&
+    transport.includes(cmd.kind) &&
+    !["display"].includes(cmd.kind)
+  ) {
     room.countdown = null;
+    for (const m of room.members.values()) m.ready = false;
+  }
   if (transport.includes(cmd.kind))
     room.lastControlledBy = { id: member.id, name: member.name };
-  room.revision++;
+  if (!presence) room.revision++;
   member.operations.set(cmd.op, room.revision);
   if (member.operations.size > 500)
     member.operations.delete(member.operations.keys().next().value);
@@ -544,6 +586,7 @@ export function tick(room, now = Date.now()) {
     }
     if (room.countdown.expires < now) {
       room.countdown = null;
+      for (const m of room.members.values()) m.ready = false;
       event(room, "Ready check expired. The leader can try again.", now);
       room.revision++;
       return true;

@@ -205,8 +205,9 @@ async function connect(url) {
 test("real sockets: rotation, reconnect, kick revocation, leave vs end and desktop Origin", async (t) => {
   const server = createRoomServerV2({
     intervalMs: 20,
-    graceMs: 200,
-    emptyMs: 300,
+    // Long enough that a slow CI runner still reconnects within the grace.
+    graceMs: 2000,
+    emptyMs: 3000,
   });
   await new Promise((r) => server.http.listen(0, "127.0.0.1", r));
   t.after(() => server.close());
@@ -401,4 +402,244 @@ test("per-source limits group IPv6 clients by /64", () => {
     limitKey("2001:db8:1:2:bbbb:cccc:dddd:eeee"),
   );
   assert.notEqual(limitKey("2001:db8:1:2::1"), limitKey("2001:db8:1:3::1"));
+});
+
+const song = (n) => ({ ...track(0), id: `s${String(n).padStart(10, "0")}` });
+test("a duplicate queued before duplicates were turned off does not block new songs", () => {
+  const { room, leader, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [song(1), song(2), song(2)] });
+  send(leader, { kind: "settings", duplicates: false });
+  send(leader, { kind: "enqueue", tracks: [song(3)] });
+  assert.equal(room.queue.at(-1).track.id, song(3).id);
+  assert.throws(
+    () => send(leader, { kind: "enqueue", tracks: [song(2)] }),
+    /Duplicate/,
+  );
+  assert.throws(
+    () => send(leader, { kind: "enqueue", tracks: [song(4), song(4)] }),
+    /Duplicate/,
+  );
+});
+test("ready answers belong to one ready check and never make other commands stale", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [track(0)] });
+  assert.throws(() => send(guest, { kind: "ready", ready: true }), /ready check/);
+  send(leader, { kind: "countdown" });
+  const revision = room.revision;
+  send(guest, { kind: "ready", ready: true });
+  assert.equal(room.revision, revision);
+  assert.equal(send(guest, { kind: "ready", ready: true }), false);
+  // A leader command prepared before the ready answer is still current.
+  assert.equal(
+    command(room, leader, {
+      kind: "seek",
+      positionMs: 1000,
+      op: "seek-after-ready",
+      base: revision,
+      current: room.current,
+    }),
+    true,
+  );
+  tick(room, 62000);
+  assert.equal(room.countdown, null);
+  assert.equal(guest.ready, false);
+  send(leader, { kind: "countdown" });
+  send(leader, { kind: "ready", ready: true });
+  assert.equal(room.countdown.startAt, null);
+});
+test("play next keeps its place when the room takes turns", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [song(1), song(2), song(3)] });
+  send(leader, { kind: "settings", policy: "turns" });
+  send(leader, {
+    kind: "enqueue",
+    tracks: [song(4)],
+    before: room.queue[1].id,
+  });
+  assert.equal(room.queue[1].track.id, song(4).id);
+});
+test("played songs do not count against the queue cap or repeat in history", () => {
+  const { room, leader, send } = setup();
+  send(leader, { kind: "settings", limit: 100 });
+  for (let i = 0; i < 5; i++)
+    send(leader, {
+      kind: "enqueue",
+      tracks: Array.from({ length: 100 }, (_, j) => song(i * 100 + j)),
+    });
+  assert.equal(room.queue.length, 500);
+  room.current = room.queue.at(-1).id;
+  send(leader, { kind: "enqueue", tracks: [song(900)] });
+  assert.ok(room.queue.length <= 22);
+  assert.equal(room.queue.at(-1).track.id, song(900).id);
+  const history = room.history.length;
+  send(leader, { kind: "next" });
+  send(leader, { kind: "next" });
+  send(leader, { kind: "next" });
+  assert.equal(room.history.length, history + 1);
+});
+test("replacing the queue only counts the new songs against a contribution limit", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, { kind: "role", member: guest.id, role: "dj" });
+  send(leader, { kind: "settings", limit: 3 });
+  send(guest, { kind: "enqueue", tracks: [song(1), song(2), song(3)] });
+  send(guest, { kind: "replace", tracks: [song(4), song(5)] });
+  assert.deepEqual(
+    room.queue.map((e) => e.track.id),
+    [song(4).id, song(5).id],
+  );
+});
+test("the undo offer names who may take it", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, { kind: "settings", mode: "contributions" });
+  send(leader, { kind: "enqueue", tracks: [song(1)] });
+  send(guest, { kind: "enqueue", tracks: [song(2)] });
+  send(guest, { kind: "remove", entry: room.queue[1].id });
+  assert.equal(snapshot(room).undo.by, guest.id);
+});
+test("a burst of status changes reaches everyone as a few states, and no one is dropped", async (t) => {
+  const server = createRoomServerV2({ intervalMs: 20 });
+  await new Promise((r) => server.http.listen(0, "127.0.0.1", r));
+  t.after(() => server.close());
+  const url = `ws://127.0.0.1:${server.http.address().port}`;
+  const a = await connect(url);
+  a.send({ type: "create", mode: "listen", profile: { name: "A" } });
+  const initial = (await a.wait((m) => m.type === "state")).room;
+  const b = await connect(url);
+  b.send({ type: "join", pin: initial.pin, profile: { name: "B" } });
+  await b.wait((m) => m.type === "joined");
+  await new Promise((r) => setTimeout(r, 300));
+  const before = a.messages.filter((m) => m.type === "state").length;
+  let closed = false;
+  a.ws.on("close", () => (closed = true));
+  for (let i = 0; i < 90; i++)
+    b.send({ type: "status", status: i % 2 ? "paused" : "listening" });
+  await new Promise((r) => setTimeout(r, 600));
+  const states = a.messages.filter((m) => m.type === "state").length - before;
+  assert.equal(closed, false);
+  assert.ok(states >= 1 && states <= 6, `${states} states`);
+  assert.equal(
+    a.state().members.find((m) => m.name === "B").status,
+    "paused",
+  );
+});
+test("guessing PINs cannot stop members with a credential from reconnecting", async (t) => {
+  const server = createRoomServerV2({ trustProxy: true });
+  await new Promise((r) => server.http.listen(0, "127.0.0.1", r));
+  t.after(() => server.close());
+  const url = `ws://127.0.0.1:${server.http.address().port}`;
+  const a = await connect(url);
+  a.send({ type: "create", profile: { name: "A" } });
+  const joined = await a.wait((m) => m.type === "joined");
+  const from = async (address) => {
+    const ws = new WebSocket(url, {
+      origin: "file://",
+      headers: { "x-forwarded-for": address },
+    });
+    await new Promise((r) => ws.once("open", r));
+    ws.send(JSON.stringify({ type: "hello", version: 2 }));
+    return ws;
+  };
+  for (let i = 0; i < 21; i++) {
+    const ws = await from(`2001:db8:${i}::1`);
+    for (let j = 0; j < 30; j++)
+      ws.send(JSON.stringify({ type: "join", pin: "00000000" }));
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  a.ws.close();
+  const back = await connect(url);
+  back.send({ type: "resume", roomId: joined.roomId, token: joined.token });
+  await back.wait((m) => m.type === "joined");
+});
+test("a retried moderation command is acknowledged, and old apps are told to update", async (t) => {
+  const server = createRoomServerV2();
+  await new Promise((r) => server.http.listen(0, "127.0.0.1", r));
+  t.after(() => server.close());
+  const url = `ws://127.0.0.1:${server.http.address().port}`;
+  const a = await connect(url);
+  a.send({ type: "create", profile: { name: "A" } });
+  const initial = (await a.wait((m) => m.type === "state")).room;
+  const b = await connect(url);
+  b.send({ type: "join", pin: initial.pin, profile: { name: "B" } });
+  const bj = await b.wait((m) => m.type === "joined");
+  const kick = { kind: "kick", member: bj.member, op: "kick-once" };
+  a.send({ type: "command", command: kick });
+  await a.wait((m) => m.type === "ack" && m.op === "kick-once");
+  a.send({ type: "command", command: kick });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(
+    a.messages.filter((m) => m.type === "ack" && m.op === "kick-once").length,
+    2,
+  );
+  assert.ok(!a.messages.some((m) => m.type === "error"));
+  const old = new WebSocket(url, { origin: "file://" });
+  const messages = [];
+  old.on("message", (raw) => messages.push(JSON.parse(raw)));
+  await new Promise((r) => old.once("open", r));
+  old.send(JSON.stringify({ type: "create" }));
+  await new Promise((r) => old.once("close", r));
+  assert.match(
+    messages.find((m) => m.type === "error").message,
+    /newer version of the app/,
+  );
+});
+
+test("the app's client resumes its seat after a dropped connection and forgets it on stop", async (t) => {
+  const { RoomClientV2 } = await import("../client-v2.mjs");
+  const server = createRoomServerV2({ intervalMs: 20 });
+  await new Promise((r) => server.http.listen(0, "127.0.0.1", r));
+  t.after(() => server.close());
+  const statuses = [],
+    errors = [];
+  let member = "",
+    ended = null;
+  const joins = [];
+  const client = new RoomClientV2({
+    onState: () => {},
+    onStatus: (s) => statuses.push(s),
+    onError: (e) => errors.push(e),
+    onEnded: (reason) => (ended = reason),
+    onJoined: (id) => {
+      member = id;
+      joins.push(id);
+    },
+  });
+  const until = async (check) => {
+    for (let i = 0; i < 200 && !check(); i++)
+      await new Promise((r) => setTimeout(r, 10));
+    assert.ok(check());
+  };
+  client.connect({
+    server: `ws://127.0.0.1:${server.http.address().port}`,
+    profile: { name: "App" },
+  });
+  await until(() => joins.length === 1 && client.state);
+  client.socket.close();
+  await until(() => joins.length === 2);
+  assert.equal(joins[1], member);
+  assert.ok(statuses.includes("reconnecting"));
+  assert.equal(ended, null);
+  client.stop();
+  assert.equal(client.credential, null);
+});
+test("the app's client recognises a relay that never greets within a few seconds of connecting", async (t) => {
+  const { RoomClientV2 } = await import("../client-v2.mjs");
+  const { WebSocketServer } = await import("ws");
+  const silent = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  await new Promise((r) => silent.once("listening", r));
+  t.after(() => new Promise((r) => silent.close(r)));
+  const started = Date.now();
+  const reason = await new Promise((resolve) => {
+    new RoomClientV2({
+      onState: () => {},
+      onStatus: () => {},
+      onError: () => {},
+      onEnded: resolve,
+    }).connect({
+      server: `ws://127.0.0.1:${silent.address().port}`,
+      profile: { name: "App" },
+    });
+  });
+  assert.match(reason, /No v2 handshake/);
+  assert.ok(Date.now() - started < 6000);
+  for (const ws of silent.clients) ws.terminate();
 });
