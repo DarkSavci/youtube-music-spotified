@@ -1413,3 +1413,11 @@ body:has(.account-menu, .whats-new-dialog[open]) .app-shell::before {
 }
 
 .app-shell[data-native-titlebar="true"] > .topbar { padding-right: max(150px, calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px))); }
+
+.share-icon { display: inline-grid; flex-shrink: 0; pointer-events: none; }
+.share-icon > svg { grid-area: 1 / 1; }
+.share-icon__copy { visibility: hidden; }
+button:is(:hover, :focus-visible) .share-icon__share,
+[role="menuitem"]:is(:hover, :focus-visible) .share-icon__share { visibility: hidden; }
+button:is(:hover, :focus-visible) .share-icon__copy,
+[role="menuitem"]:is(:hover, :focus-visible) .share-icon__copy { visibility: visible; }

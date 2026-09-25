@@ -54,6 +54,7 @@ const SIMPLE = [
   ["IconBrowse", "inventory_2"],
   ["IconSettings", "settings-fill"],
   ["IconShare", "share"],
+  ["IconCopy", "content_copy"],
   ["IconMiniPlayer", "picture_in_picture_alt"],
   ["IconOpenApp", "open_in_new"],
 ];

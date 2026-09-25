@@ -1,3 +1,4 @@
+import { ShareIcon } from "./ShareIcon";
 import { watchFullscreenIdle } from "../lib/fullscreenIdle";
 import { EndTime } from "./EndTime";
 import { VideoSurface, VideoSwitch, VideoNotice } from "./VideoPlayer";
@@ -12,7 +13,6 @@ import { usePlaybackPosition } from "../lib/tick";
 import { Slider } from "./Slider";
 import {
   IconClose, IconPause, IconPlay, IconRepeat, IconShuffle, IconSkipNext, IconSkipPrev,
-  IconShare,
 } from "./Icon";
 import { artworkAtLeast, formatDuration } from "../lib/types";
 
@@ -121,7 +121,7 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
         <div className="fsp__controls">
           <div className="fsp__side">
             <button className="iconbtn" aria-label="Share" onClick={() => void share("track", track.id)}>
-              <IconShare size={18} />
+              <ShareIcon size={18} />
             </button>
           </div>
           <div className="fsp__transport">
