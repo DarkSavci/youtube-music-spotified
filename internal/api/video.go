@@ -147,7 +147,11 @@ func (s *Server) resolveVideo(ctx context.Context, id string, refresh bool) (dom
 // Browser pages outside the app must not be able to start local video jobs.
 func allowVideoRequest(w http.ResponseWriter, r *http.Request) bool {
 	origin := r.Header.Get("Origin")
-	if origin == "null" || (origin == "" && r.Header.Get("Sec-Fetch-Site") != "cross-site") {
+	// Electron's file:// renderer omits Origin even for CORS requests.
+	// Ordinary cross-site web CORS fetches include Origin; no-cors embeds
+	// must still be rejected so arbitrary pages cannot start a video job.
+	desktopCORS := origin == "" && r.Header.Get("Sec-Fetch-Mode") == "cors"
+	if desktopCORS || origin == "null" || (origin == "" && r.Header.Get("Sec-Fetch-Site") != "cross-site") {
 		return true
 	}
 	if u, err := url.Parse(origin); err == nil && (u.Scheme == "http" || u.Scheme == "https") && (u.Host == r.Host || u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1") {

@@ -126,6 +126,7 @@ function place() {
   }
   if (!picture) {
     picture = document.createElement("video");
+    picture.crossOrigin = "anonymous";
     picture.muted = true;
     picture.defaultMuted = true;
     picture.playsInline = true;

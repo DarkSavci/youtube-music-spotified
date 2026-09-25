@@ -182,3 +182,21 @@ func TestVideoRejectsForeignBrowserOrigins(t *testing.T) {
 		}
 	}
 }
+
+func TestVideoVersionsAcceptDesktopCORSButRejectCrossSiteEmbeds(t *testing.T) {
+	srv := api.New(api.Deps{})
+	for _, mode := range []string{"cors", "no-cors"} {
+		req := httptest.NewRequest("GET", "/v1/tracks/abcdefghijk/versions", nil)
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		req.Header.Set("Sec-Fetch-Mode", mode)
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		want := http.StatusOK
+		if mode == "no-cors" {
+			want = http.StatusForbidden
+		}
+		if w.Code != want {
+			t.Fatalf("mode=%s status=%d want=%d", mode, w.Code, want)
+		}
+	}
+}
