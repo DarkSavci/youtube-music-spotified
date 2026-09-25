@@ -1421,3 +1421,5 @@ button:is(:hover, :focus-visible) .share-icon__share,
 [role="menuitem"]:is(:hover, :focus-visible) .share-icon__share { visibility: hidden; }
 button:is(:hover, :focus-visible) .share-icon__copy,
 [role="menuitem"]:is(:hover, :focus-visible) .share-icon__copy { visibility: visible; }
+
+.topbar__history, .topbar__history:hover:not(:disabled) { width: 36px; height: 40px; background: transparent; }
