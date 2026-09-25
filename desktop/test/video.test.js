@@ -22,7 +22,7 @@ function setup(canControl=false){
  vm.runInNewContext(code,{module,exports:module.exports,Map,Promise,Error,Math,Number,queueMicrotask,document:doc,setInterval:f=>{ticks.push(f);return ticks.length;},clearInterval:()=>{},fetch:async()=>({ok:true,json:async()=>response}),require:n=>{
   if(n==='zustand')return {create:makeStore};
   if(n==='./base')return {apiUrl:p=>p};
-  if(n==='./player')return {usePlayer:{getState:()=>player},currentPosition:s=>s.position};
+  if(n==='./player')return {usePlayer:{getState:()=>player},currentPosition:s=>s.position,interpolationRate:s=>s.outputElsewhere?1:(s.speed||1)};
   if(n==='./together')return {useTogether:{getState:()=>({room:{current:'entry'}})},roomCanControl:()=>canControl,roomCommand:async c=>{roomCommands.push(c);if(c.kind==='variant')player.track=c.track;return true;}};
   if(n==='./playback')return {switchTrackVariant:async(t,expected)=>{switches.push({t,expected});player.track=t;return true;}};
   throw Error(n);

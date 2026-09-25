@@ -1,4 +1,4 @@
-import { usePlayer, currentPosition } from "./player";
+import { usePlayer, currentPosition, interpolationRate } from "./player";
 import { transport } from "./playback";
 import { artistNames, artworkAtLeast } from "./types";
 
@@ -97,7 +97,8 @@ export function installMediaSession(): () => void {
       const duration = track.durationMs / 1000;
       const position = Math.min(currentPosition(s) / 1000, duration || 0);
       if (duration > 0 && position >= 0) {
-        ms.setPositionState({ duration, position, playbackRate: 1 });
+        // The OS scrubber interpolates on its own, so it needs the real rate.
+        ms.setPositionState({ duration, position, playbackRate: interpolationRate(s) || 1 });
       }
     } catch {
       /* inconsistent state mid-transition; the next tick corrects it */

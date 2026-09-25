@@ -6,7 +6,7 @@ import { useSettings, applyDocumentSettings, type Settings as Prefs } from "../l
 import { SHORTCUTS, describeKeys } from "../lib/shortcuts";
 import { engineCapabilities, engineName, transport } from "../lib/playback";
 import { usePlayer } from "../lib/player";
-import { desktop, type UpdateStatus } from "../lib/desktop";
+import { desktop, type LoginItemState, type UpdateStatus } from "../lib/desktop";
 import { pendingCount } from "../lib/playlog";
 import { diagnostics } from "../lib/diagnostics";
 import { Equaliser } from "../components/Equaliser";
@@ -145,6 +145,8 @@ export function SettingsView() {
             onChange={(v) => prefs.set("closeToTray", v)}
           />
         )}
+
+        <LaunchAtLogin />
 
         {/* The only setting here that writes to the account, so it says so
             plainly rather than describing only the benefit. */}
@@ -407,6 +409,46 @@ function Row({
       </div>
       <div className="settings__control">{children}</div>
     </div>
+  );
+}
+
+/*
+ * Launch at login.
+ *
+ * Not a saved preference: the OS holds the answer, and the person can switch
+ * the entry off in Task Manager or System Settings behind the app's back. So
+ * it asks when drawn, and after a change shows what the OS then reports.
+ * Absent where it cannot work — the browser, and development builds, which
+ * would register a bare Electron.
+ */
+function LaunchAtLogin() {
+  const [state, setState] = useState<LoginItemState | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void desktop.loginItem().then((s) => { if (live) setState(s); });
+    return () => { live = false; };
+  }, []);
+
+  if (!state?.supported) return null;
+  return (
+    <Toggle
+      label="Open at login"
+      hint={state.needsApproval
+        ? "Waiting for your approval: allow Youtube Music Spotified in System Settings › General › Login Items."
+        : desktop.isMac
+          ? "Start in the menu bar when you log in to your Mac. Nothing plays until you press play."
+          : "Start in the notification area when you sign in to Windows. Nothing plays until you press play."}
+      checked={state.enabled}
+      disabled={busy}
+      onChange={(on) => {
+        setBusy(true);
+        void desktop.setLoginItem(on)
+          .then(setState)
+          .finally(() => setBusy(false));
+      }}
+    />
   );
 }
 

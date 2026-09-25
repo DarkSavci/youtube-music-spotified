@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { apiUrl } from "./base";
-import { usePlayer, currentPosition } from "./player";
+import { usePlayer, currentPosition, interpolationRate } from "./player";
 import { switchTrackVariant } from "./playback";
 import type { Track } from "./types";
 
@@ -131,8 +131,10 @@ function tick() {
   const target = Number.isFinite(picture.duration) ? Math.min(position, Math.max(0, picture.duration - 0.05)) : position;
   if (!picture.seeking && !waiting) {
     const drift = target - picture.currentTime;
+    // Drift is closed by nudging the picture 5% either side of the playback
+    // speed, so a sped-up track keeps its video in step.
     if (Math.abs(drift) > 2 || (state.state !== "playing" && Math.abs(drift) > 0.35)) picture.currentTime = target;
-    else picture.playbackRate = Math.abs(drift) > 0.1 ? (drift > 0 ? 1.05 : 0.95) : 1;
+    else picture.playbackRate = (interpolationRate(state) || 1) * (Math.abs(drift) > 0.1 ? (drift > 0 ? 1.05 : 0.95) : 1);
   }
   const playing = state.state === "playing";
   if (!playing) { picture.pause(); return; }

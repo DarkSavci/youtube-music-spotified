@@ -10,7 +10,8 @@ import { EmbeddedEngine } from "./embedded";
 import { maxVolume, useSettings } from "./settings";
 import { SessionClient, type Projection } from "./sessionclient";
 import type { Track } from "./types";
-import { usePlayer } from "./player";
+import { currentPosition, interpolationRate, usePlayer } from "./player";
+import { effectiveSpeed, playableSpeed, type SpeedSupport } from "./speed";
 import { recordPlay } from "./playlog";
 import { toast } from "./toast";
 
@@ -47,6 +48,7 @@ let deviceSettings: {
 
 /** Pushes the remembered settings into whatever engine is current. */
 function applyDeviceSettings() {
+  applySpeed();
   if (!deviceSettings || !(engine instanceof NativeEngine)) return;
   engine.setNormalization(deviceSettings.normalization, deviceSettings.normalizationLevel);
   engine.setEq(deviceSettings.eq);
@@ -242,7 +244,7 @@ function onEngineEvent(e: EngineEvent) {
       // one-per-second correction is enough to stay accurate without
       // re-rendering at frame rate.
       usePlayer.setState((s) => ({
-        anchor: { positionMs: e.positionMs, atMs: performance.now(), rate: 1 },
+        anchor: { positionMs: e.positionMs, atMs: performance.now(), rate: interpolationRate(s) },
         track:
           s.track && e.durationMs > 0 && !s.track.durationMs
             ? { ...s.track, durationMs: e.durationMs }
@@ -307,7 +309,12 @@ function applyProjection(p: Projection) {
   // projection and a null list here took the whole page down. Cheap to hold.
   const items = p.state.queue.items ?? [];
   const track = items[p.state.queue.index] ?? null;
+  // Speed is per device. While another device is the one playing, this
+  // window is a remote for it: its speed is not ours to know, so interpolate
+  // at 1× and let the core's projections correct it.
+  const remote = (p.devices ?? []).some((d) => d.owner && d.id !== session?.deviceID);
   usePlayer.setState({
+    outputElsewhere: remote,
     followingRoom: Boolean(p.followingRoom),
     state: p.state.state,
     track,
@@ -322,7 +329,7 @@ function applyProjection(p: Projection) {
     anchor: {
       positionMs: p.state.positionMs,
       atMs: performance.now(),
-      rate: p.state.state === "playing" ? 1 : 0,
+      rate: p.state.state !== "playing" ? 0 : interpolationRate({ speed: usePlayer.getState().speed, outputElsewhere: remote }),
     },
   });
 
@@ -638,6 +645,35 @@ export function stopPlayback() {
 /** Which engine is producing sound, for the diagnostics panel. */
 export function engineName(): string | null {
   return engine?.name ?? null;
+}
+
+/**
+ * Plays at the speed in effect: the chosen one, or 1× in a Listen Together
+ * room (see speed.ts). An engine with a fixed list of speeds plays the
+ * nearest one, and the control shows that rather than what was asked.
+ *
+ * Speed is this device's, like volume: the core keeps track time, and the
+ * engine reports positions in track time, so nothing upstream changes. The
+ * anchor is re-taken at the new rate so interpolation does not jump.
+ */
+export function applySpeed() {
+  const rate = playableSpeed(effectiveSpeed(), engine?.speeds() ?? "any");
+  engine?.setSpeed(rate);
+  const s = usePlayer.getState();
+  if (s.speed === rate) return;
+  usePlayer.setState({
+    speed: rate,
+    anchor: {
+      positionMs: currentPosition(s),
+      atMs: performance.now(),
+      rate: s.state === "playing" ? interpolationRate({ speed: rate, outputElsewhere: s.outputElsewhere }) : 0,
+    },
+  });
+}
+
+/** The speeds the current engine can play. */
+export function availableSpeeds(): SpeedSupport {
+  return engine?.speeds() ?? "any";
 }
 
 export function engineCapabilities() {

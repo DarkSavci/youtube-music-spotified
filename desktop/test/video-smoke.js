@@ -27,7 +27,7 @@ app.whenReady().then(async()=>{
   const require=name=>{
    if(name==='zustand')return {create:initial=>{let s=initial();return {getState:()=>s,setState:p=>{s={...s,...p}}}}};
    if(name==='./base')return {apiUrl:p=>origin?origin+p:url};
-   if(name==='./player')return {usePlayer:{getState:()=>state},currentPosition:s=>s.position};
+   if(name==='./player')return {usePlayer:{getState:()=>state},currentPosition:s=>s.position,interpolationRate:s=>s.outputElsewhere?1:(s.speed||1)};
    if(name==='./playback')return {switchTrackVariant:()=>{throw Error('View changed audio session')}};
    throw Error(name);
   };
