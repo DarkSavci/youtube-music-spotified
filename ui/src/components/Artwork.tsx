@@ -1,14 +1,20 @@
-import { useState, type ImgHTMLAttributes } from "react";
+import { useState, type ImgHTMLAttributes, type ReactNode } from "react";
 import { IconAlbum } from "./Icon";
 /** Missing/expired artwork should never display a browser broken-image glyph. */
 export function Artwork({
   src,
   className,
+  fallback,
   ...props
-}: ImgHTMLAttributes<HTMLImageElement>) {
+}: ImgHTMLAttributes<HTMLImageElement> & {
+  /** Shown instead of the album glyph, e.g. a listener's initial. */
+  fallback?: ReactNode;
+}) {
   const [failed, setFailed] = useState<string>();
   if (!src || failed === src)
-    return (
+    return fallback !== undefined ? (
+      <>{fallback}</>
+    ) : (
       <span
         className={`${className || ""} artwork-fallback`}
         role="img"

@@ -1,5 +1,6 @@
 import { useTogether } from "../lib/together";
 import { Artwork } from "./Artwork";
+import { initial } from "./RoomAvatar";
 /** Entry identity, not song ID, distinguishes repeated songs in the room. */
 export function RoomAttribution({ index }: { index?: number }) {
   const room = useTogether((s) => s.room);
@@ -14,11 +15,11 @@ export function RoomAttribution({ index }: { index?: number }) {
       title={`Added by ${entry.addedBy.name}`}
       aria-label={`Added by ${entry.addedBy.name}`}
     >
-      {entry.addedBy.avatar ? (
-        <Artwork src={entry.addedBy.avatar} alt="" />
-      ) : (
-        <span>{entry.addedBy.name.slice(0, 1).toUpperCase()}</span>
-      )}
+      <Artwork
+        src={entry.addedBy.avatar}
+        alt=""
+        fallback={<span>{initial(entry.addedBy.name)}</span>}
+      />
     </span>
   );
 }
