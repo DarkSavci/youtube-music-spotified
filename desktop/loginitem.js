@@ -24,11 +24,40 @@ const NAME = "Youtube Music Spotified";
 // Marks a launch the OS made at login.
 const LOGIN_ARG = "--launched-at-login";
 
+const RUN_KEY = String.raw`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`;
+const APPROVED_KEY = String.raw`HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run`;
+
+/**
+ * Reads this app's Run entry by name, whatever it launches.
+ *
+ * Electron cannot do this: getLoginItemSettings lists only entries that
+ * launch the path it is asked about, so an entry left pointing at an old
+ * install is invisible to it. Returns the command and whether Task Manager
+ * has it switched on, or null when there is no entry.
+ */
+function readRunEntry(name) {
+  const { execFileSync } = require("node:child_process");
+  const query = (key) => {
+    try {
+      // A missing value is an ordinary answer here; keep reg's error text off the log.
+      return execFileSync("reg", ["query", key, "/v", name], { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+    } catch {
+      return "";
+    }
+  };
+  const run = query(RUN_KEY).match(/REG_(?:EXPAND_)?SZ\s+(.+?)\s*$/m);
+  if (!run) return null;
+  // StartupApproved's first byte is 3 when switched off in Task Manager.
+  const approved = query(APPROVED_KEY).match(/REG_BINARY\s+([0-9A-F]{2})/i);
+  return { command: run[1], enabled: !approved || approved[1] !== "03" };
+}
+
 class LoginItem {
-  constructor(app, platform = process.platform, execPath = process.execPath) {
+  constructor(app, platform = process.platform, execPath = process.execPath, readRun = readRunEntry) {
     this.app = app;
     this.platform = platform;
     this.execPath = execPath;
+    this.readRun = readRun;
   }
 
   supported() {
@@ -82,10 +111,12 @@ class LoginItem {
    */
   refresh() {
     if (!this.supported() || this.platform !== "win32") return;
-    const items = this.app.getLoginItemSettings(this.windowsItem()).launchItems ?? [];
-    const here = this.execPath.toLowerCase();
-    if (items.length === 0 || items.some((i) => String(i.path).toLowerCase() === here)) return;
-    this.app.setLoginItemSettings({ ...this.windowsItem(), openAtLogin: true, enabled: items[0].enabled !== false });
+    const entry = this.readRun(NAME);
+    if (!entry) return;
+    // The command is the executable, quoted or not, then the arguments.
+    const launches = entry.command.replace(/"/g, "").toLowerCase();
+    if (launches.startsWith(this.execPath.toLowerCase())) return;
+    this.app.setLoginItemSettings({ ...this.windowsItem(), openAtLogin: true, enabled: entry.enabled });
   }
 
   /** Whether this process was started by the OS at login. */

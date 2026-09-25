@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const { LoginItem, NAME, LOGIN_ARG } = require("../loginitem");
 
 // A stand-in for Electron's app that keeps Windows' Run entries in a map.
+// Like Electron, it lists only entries that launch the path asked about.
 function fakeApp({ packaged = true, items = [] } = {}) {
   const run = new Map(items.map((i) => [i.name, { ...i }]));
   return {
@@ -14,7 +15,7 @@ function fakeApp({ packaged = true, items = [] } = {}) {
       return {
         openAtLogin: mine,
         executableWillLaunchAtLogin: mine && item.enabled !== false,
-        launchItems: item ? [{ ...item }] : [],
+        launchItems: mine ? [{ ...item }] : [],
       };
     },
     setLoginItemSettings({ name, path, args, openAtLogin, enabled }) {
@@ -51,24 +52,40 @@ test("a development build never registers a bare Electron", () => {
   assert.equal(app.run.size, 0);
 });
 
+// What reg.exe reports for the entry, read by name whatever it launches.
+const readFrom = (app) => (name) => {
+  const item = app.run.get(name);
+  return item ? { command: `${item.path} ${item.args.join(" ")}`, enabled: item.enabled !== false } : null;
+};
+
 test("an entry left by a build that moved is pointed at this one", () => {
   const app = fakeApp({ items: [{ name: NAME, path: "D:\\old\\app.exe", args: [LOGIN_ARG], enabled: false }] });
-  new LoginItem(app, "win32", EXE).refresh();
+  // Electron cannot see it: it lists only entries launching this executable.
+  assert.equal(app.getLoginItemSettings({ name: NAME, path: EXE }).launchItems.length, 0);
+  new LoginItem(app, "win32", EXE, readFrom(app)).refresh();
   assert.equal(app.run.get(NAME).path, EXE);
   // Switched off stays switched off.
   assert.equal(app.run.get(NAME).enabled, false);
 });
 
+// A quoted executable, as other installers and older builds write it.
+test("an entry quoting this executable counts as current", () => {
+  let writes = 0;
+  const app = { ...fakeApp(), setLoginItemSettings: () => { writes++; } };
+  new LoginItem(app, "win32", EXE, () => ({ command: `"${EXE}" ${LOGIN_ARG}`, enabled: true })).refresh();
+  assert.equal(writes, 0);
+});
+
 test("refreshing leaves things alone when there is no entry or it is current", () => {
   const empty = fakeApp();
-  new LoginItem(empty, "win32", EXE).refresh();
+  new LoginItem(empty, "win32", EXE, readFrom(empty)).refresh();
   assert.equal(empty.run.size, 0);
 
   const current = fakeApp({ items: [{ name: NAME, path: EXE, args: [LOGIN_ARG], enabled: true }] });
   let writes = 0;
   const set = current.setLoginItemSettings;
   current.setLoginItemSettings = (o) => { writes++; set(o); };
-  new LoginItem(current, "win32", EXE).refresh();
+  new LoginItem(current, "win32", EXE, readFrom(current)).refresh();
   assert.equal(writes, 0);
 });
 
