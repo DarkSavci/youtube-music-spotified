@@ -29,11 +29,13 @@ export function VideoSwitch() {
   const busy = useVideo(s => s.busy);
   const { blocked, reason } = useVideoControl();
   const track = usePlayer(s => s.track);
+  const following = usePlayer(s => s.followingRoom);
   if (!track) return null;
   return <button
     className="iconbtn video-toggle"
     // The app's tooltip reads aria-label; a title would show a second one.
-    aria-label={enabled ? "Hide music video" : reason}
+    // In a room the video only hides for you; alone it switches back to the song.
+    aria-label={enabled ? (following ? "Hide music video" : "Switch to song") : reason}
     aria-pressed={enabled}
     aria-busy={busy}
     data-active={enabled || undefined}

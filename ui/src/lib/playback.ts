@@ -425,14 +425,13 @@ export async function leaveRoomPlayback() {
 /** Sends an intent to the core, or falls back to the local store. */
 export const transport = {
   play(tracks: Track[], index: number, origin: string) {
-    if (routeRoom("replace", { tracks: tracks.slice(index) })) return;
-    if (roomControlsLocked()) return;
     /*
      * Clicking the song that is already playing does not restart it.
      *
      * Nobody double-clicks the current song to hear its first seconds again;
      * they click it because it is there. Paused, it resumes; playing, nothing
-     * happens.
+     * happens. In a room this comes first, or the click would replace
+     * everyone's queue with the song they are already hearing.
      */
     const s = usePlayer.getState();
     const clicked = tracks[index];
@@ -441,6 +440,8 @@ export const transport = {
       if (!playing) this.toggle();
       return;
     }
+    if (routeRoom("replace", { tracks: tracks.slice(index) })) return;
+    if (roomControlsLocked()) return;
     if (serverAuthoritative && session) {
       void session.command({ Kind: "play", Tracks: tracks, StartIndex: index, Origin: origin });
     } else {
@@ -457,14 +458,16 @@ export const transport = {
    * radio once it ends.
    */
   playRadio(track: Track, origin?: string) {
-    if (routeRoom("replace", { tracks: [track] })) return;
-    if (roomControlsLocked()) return;
+    // As in play(): the song already playing is not restarted, and in a room
+    // clicking it must not replace everyone's queue.
     const s = usePlayer.getState();
     if (s.track?.id === track.id) {
       const playing = s.state === "playing" || s.state === "loading" || s.state === "stalled";
       if (!playing) this.toggle();
       return;
     }
+    if (routeRoom("replace", { tracks: [track] })) return;
+    if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.startRadio(track, origin);
     else usePlayer.getState().playFrom([track], 0, origin ?? `${track.title} radio`);
   },

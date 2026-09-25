@@ -83,6 +83,15 @@ let task: Promise<void> = Promise.resolve();
 let appliedEntry = "";
 let personalVideo = false;
 let reconnectPause: Promise<void> | null = null;
+// A forced sync (an explicit seek, a retry) that arrives while another sync
+// is running is kept for the follow-up instead of being dropped.
+let pendingForce = false;
+// After reconnecting, the last state received is stale until the relay
+// sends a fresh one, so nothing is applied from it in the meantime.
+let awaitingFresh = false;
+// While a new room is being seeded from the creator's own music, its first
+// states (empty, then paused at the start) must not interrupt that music.
+let awaitingSeed = false;
 export function roomCanControl() {
   const { room, member } = useTogether.getState();
   return (
@@ -91,6 +100,10 @@ export function roomCanControl() {
       room.mode === "collaborative" ||
       room.members.find((m) => m.id === member)?.role === "dj")
   );
+}
+/** The relay's clock, for countdowns and expiries it sets. */
+export function roomNow() {
+  return client?.serverNow() ?? Date.now();
 }
 export async function roomCommand(data: Record<string, unknown>) {
   if (useTogether.getState().status !== "connected") {
@@ -112,12 +125,21 @@ function position(room: RoomState) {
 }
 async function applyLatest(force = false) {
   const { room, status } = useTogether.getState();
-  if (applying || reconnectPause || !room || !client || status !== "connected")
+  if (applying || reconnectPause) {
+    if (force) pendingForce = true;
     return;
+  }
+  if (!room || !client || status !== "connected" || awaitingFresh) return;
+  if (awaitingSeed) return;
+  force ||= pendingForce;
+  pendingForce = false;
   const index = room.queue.findIndex((e) => e.id === room.current);
   const track = room.queue[index]?.track ?? null;
+  // appliedEntry is "" for no song, so an empty room must compare as "" too
+  // or it looks changed on every tick and re-syncs once a second.
   const state = usePlayer.getState(),
-    changed = appliedEntry !== room.current || state.track?.id !== track?.id;
+    changed =
+      appliedEntry !== (room.current ?? "") || state.track?.id !== track?.id;
   if (!force && !changed && (state.notice || state.track?.playable === false)) {
     useTogether.setState({ sync: "Track unavailable" });
     client.send({ type: "status", status: "unavailable" });
@@ -191,7 +213,10 @@ async function applyLatest(force = false) {
     }
   })();
   await task;
-  if (version === generation && room !== useTogether.getState().room)
+  if (
+    version === generation &&
+    (room !== useTogether.getState().room || pendingForce)
+  )
     void applyLatest();
 }
 // Mirrors the relay's permission rules, so a listener without them gets the
@@ -213,6 +238,7 @@ function denied(room: RoomState, kind: string, data: Record<string, unknown>) {
       ? null
       : "You may only edit your upcoming contributions.";
   }
+  if (kind === "move") return "The leader controls queue order.";
   return ["enqueue", "enqueueNext", "remove"].includes(kind)
     ? "This room is listen only."
     : "The leader controls playback in this room.";
@@ -232,6 +258,7 @@ function routeSeek(positionMs: unknown, current: string | null) {
 function route(kind: string, data: Record<string, unknown> = {}) {
   const { room, status } = useTogether.getState();
   if (status === "disconnected") return false;
+  if (!room && (status === "connecting" || status === "waiting")) return false;
   if (!room || status !== "connected") {
     toast("Wait for the room to connect.");
     return true;
@@ -248,6 +275,16 @@ function route(kind: string, data: Record<string, unknown> = {}) {
   if (kind === "seek") {
     routeSeek(data.positionMs, room.current);
     return true;
+  }
+  if (["jump", "remove", "move"].includes(kind)) {
+    const local = usePlayer.getState().queue;
+    if (
+      local.length !== room.queue.length ||
+      local.some((t, i) => t.id !== room.queue[i]?.track.id)
+    ) {
+      toast("The room's queue changed. Try again in a moment.");
+      return true;
+    }
   }
   let command: Record<string, unknown> = { kind, ...data };
   if (Array.isArray(data.tracks) && data.tracks.length > 100) {
@@ -279,6 +316,9 @@ function route(kind: string, data: Record<string, unknown> = {}) {
 export async function leaveTogether(next?: string) {
   const leavingGeneration = ++generation;
   reconnectPause = null;
+  pendingForce = false;
+  awaitingFresh = false;
+  awaitingSeed = false;
   clearInterval(timer);
   clearTimeout(seekTimer);
   const old = client;
@@ -317,6 +357,7 @@ export async function connectTogether(options: ConnectOptions) {
       if (version !== generation) return;
       useTogether.setState({ status });
       if (status === "reconnecting") {
+        awaitingFresh = true;
         const paused = task.then(async () => {
           if (
             version === generation &&
@@ -361,6 +402,7 @@ export async function connectTogether(options: ConnectOptions) {
       if (version !== generation) return;
       const previous = useTogether.getState().room;
       if (previous && previous.revision > room.revision) return;
+      awaitingFresh = false;
       useTogether.setState({ room });
       if (room.video && room.video.revision > lastVideo) {
         lastVideo = room.video.revision;
@@ -382,21 +424,32 @@ export async function connectTogether(options: ConnectOptions) {
       if (!seeded && !options.pin) {
         seeded = true;
         if (seed.track) {
+          // The creator's music keeps playing until the room has it at the
+          // same place, rather than stopping for the empty first state.
+          awaitingSeed = true;
           void roomCommand({
             kind: "enqueue",
             tracks: seed.queue.slice(
               Math.max(0, seed.index),
               Math.max(0, seed.index) + 100,
             ),
-          }).then(async (ok) => {
-            if (ok && version === generation) {
-              await roomCommand({
-                kind: "seek",
-                positionMs: currentPosition(seed),
-              });
-              if (seed.state === "playing") await roomCommand({ kind: "play" });
-            }
-          });
+          })
+            .then(async (ok) => {
+              if (ok && version === generation) {
+                const now = usePlayer.getState();
+                await roomCommand({
+                  kind: "seek",
+                  positionMs: currentPosition(now),
+                });
+                if (["playing", "loading", "stalled"].includes(now.state))
+                  await roomCommand({ kind: "play" });
+              }
+            })
+            .finally(() => {
+              if (version !== generation) return;
+              awaitingSeed = false;
+              void applyLatest();
+            });
         }
       }
       const jumped =

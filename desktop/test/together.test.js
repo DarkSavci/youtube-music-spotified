@@ -100,8 +100,11 @@ async function setup(t) {
         return {
           isServerAuthoritative: () => true,
           setRoomTransport: (r) => (route = r),
-          leaveRoomPlayback: async () =>
-            player.setState({ followingRoom: false, state: "paused" }),
+          // Like the core: leaving only pauses when a room was followed.
+          leaveRoomPlayback: async () => {
+            if (player.getState().followingRoom)
+              player.setState({ followingRoom: false, state: "paused" });
+          },
           syncRoomPlayback: async (
             track,
             positionMs,
@@ -338,4 +341,136 @@ test("a settled seek stays pinned to the song it was dragged on", async (t) => {
   await new Promise((r) => setTimeout(r, 200));
   assert.equal(c.commands.length, 1);
   assert.equal(c.commands[0].current, "entry1");
+});
+test("tiny drift is left alone, an unavailable song is not retried in a loop, and Retry resyncs once", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  c.onState(room(1, { playing: false, positionMs: 12000 }));
+  await h.flush();
+  const count = h.calls.length;
+  c.onState(room(2, { playing: false, positionMs: 12100 }));
+  await h.flush();
+  assert.equal(h.calls.length, count, "tiny drift should not seek");
+  h.player.setState({
+    track: { ...h.player.getState().track, playable: false },
+    notice: "Unavailable",
+  });
+  c.onState(room(3, { playing: true, positionMs: 12100 }));
+  await h.flush();
+  assert.equal(h.calls.length, count, "failed song must not loop retries");
+  h.api.retryTogetherPlayback();
+  await h.flush();
+  assert.equal(h.calls.length, count + 1);
+});
+test("after reconnecting nothing is replayed until the relay sends a fresh state", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  c.onState(room(1));
+  await h.flush();
+  c.onStatus("reconnecting");
+  await h.flush();
+  assert.equal(h.player.getState().state, "paused");
+  const count = h.calls.length;
+  h.api.retryTogetherPlayback();
+  await h.flush();
+  assert.equal(h.calls.length, count, "old state must not resume while reconnecting");
+  c.onStatus("connected");
+  h.api.retryTogetherPlayback();
+  await h.flush();
+  assert.equal(h.calls.length, count, "wait for a fresh state after reconnecting");
+  c.onState(room(1, { positionMs: 30000 }));
+  await h.flush();
+  assert.equal(h.player.getState().state, "playing");
+  assert.ok(h.player.getState().anchor.positionMs >= 30000);
+});
+test("an empty room is followed once, not re-synced every second", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether({ ...options, pin: "01234567" });
+  const c = h.clients[0];
+  c.onState(room(1, { queue: [], current: null, playing: false }));
+  await h.flush();
+  const count = h.calls.length;
+  await new Promise((r) => setTimeout(r, 2200));
+  assert.equal(h.calls.length, count);
+});
+test("a seek that arrives during another sync is applied as soon as that sync ends", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  c.onState(room(1, { playing: false, positionMs: 10000 }));
+  await h.flush();
+  let release;
+  h.hold(new Promise((r) => (release = r)));
+  c.onState(room(2, { playing: true, positionMs: 10000 }));
+  await h.flush();
+  c.onState(room(3, { playing: true, positionMs: 120000 }));
+  await h.flush();
+  h.hold(null);
+  release();
+  await h.flush();
+  await h.flush();
+  assert.ok(h.calls.at(-1).positionMs >= 120000);
+});
+test("queue edits wait while the app's copy of the room queue is behind", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  c.onState(room(1));
+  await h.flush();
+  h.player.setState({ queue: h.player.getState().queue.slice(0, 1) });
+  h.route("remove", { at: 1 });
+  assert.equal(c.commands.length, 0);
+  assert.match(h.toasts.at(-1), /queue changed/);
+});
+test("your own music stays yours while a room is connecting or awaiting approval", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  h.api.useTogether.setState({ status: "waiting", room: null });
+  assert.equal(h.route("toggle"), false);
+  h.api.useTogether.setState({ status: "connecting", room: null });
+  assert.equal(h.route("next"), false);
+});
+test("creating a room from a playing song keeps it playing until the room has it", async (t) => {
+  const h = await setup(t);
+  const song = room(1).queue[0].track;
+  h.player.setState({
+    track: song,
+    queue: [song],
+    index: 0,
+    state: "playing",
+    anchor: { positionMs: 42000, atMs: performance.now(), rate: 1 },
+  });
+  await h.api.connectTogether({ ...options, pin: undefined });
+  const c = h.clients[0];
+  const answers = [];
+  c.command = (cmd) => {
+    c.commands.push(cmd);
+    return new Promise((r) => answers.push(() => r(true)));
+  };
+  c.onState(room(1, { owner: "self", queue: [], current: null, playing: false }));
+  await h.flush();
+  assert.deepEqual(
+    c.commands.map((x) => x.kind),
+    ["enqueue"],
+  );
+  c.onState(room(2, { owner: "self", queue: [room(1).queue[0]], playing: false, positionMs: 0 }));
+  await h.flush();
+  answers.shift()();
+  await h.flush();
+  answers.shift()();
+  await h.flush();
+  c.onState(room(4, { owner: "self", queue: [room(1).queue[0]], playing: true, positionMs: 42000 }));
+  assert.equal(h.calls.length, 0, "the room's first states must not stop the music");
+  answers.shift()();
+  await h.flush();
+  await h.flush();
+  assert.deepEqual(
+    c.commands.map((x) => x.kind),
+    ["enqueue", "seek", "play"],
+  );
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].playing, true);
+  assert.ok(h.calls[0].positionMs >= 42000);
 });
