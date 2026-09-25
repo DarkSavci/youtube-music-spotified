@@ -811,6 +811,11 @@
   color: #fff;
   -webkit-app-region: no-drag;
 }
+/* Windows draws its caption buttons over the top-right of the page, so the
+   close button moves below them rather than hiding underneath. */
+.app-shell[data-native-titlebar="true"] .fsp__close {
+  top: calc(env(titlebar-area-height, 52px) + var(--space-3));
+}
 
 .fsp__foot {
   position: absolute;
@@ -1325,9 +1330,11 @@
 
 .whats-new-button { position: relative; }
 .whats-new-button__dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-.whats-new-dialog { width: min(600px, calc(100vw - 32px)); max-height: min(720px, calc(100vh - 48px)); padding: 0; margin: auto; border: 1px solid #ffffff24; border-radius: 16px; background: #181818; color: var(--text-primary); box-shadow: 0 20px 80px #0009; }
+.whats-new-dialog { width: min(600px, calc(100vw - 32px)); max-height: min(720px, calc(100vh - 48px)); overflow: hidden; padding: 0; margin: auto; border: 1px solid #ffffff24; border-radius: 16px; background: #181818; color: var(--text-primary); box-shadow: 0 20px 80px #0009; }
 .whats-new-dialog::backdrop { background: #0009; }
-.whats-new-dialog__body { display: flex; flex-direction: column; max-height: min(720px, calc(100vh - 48px)); }
+/* Only the release list scrolls. The body fits inside the dialog's 1px border,
+   or the dialog overflowed by 2px and grew a second, native scrollbar. */
+.whats-new-dialog__body { display: flex; flex-direction: column; max-height: calc(min(720px, 100vh - 48px) - 2px); }
 .whats-new-dialog__header { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid #ffffff16; }
 .whats-new-dialog__header h2 { font-size: 24px; }
 .whats-new-dialog__scroll { overflow-y: auto; min-height: 0; padding: 24px; }

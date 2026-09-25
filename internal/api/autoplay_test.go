@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -147,5 +148,62 @@ func TestAutoplayOffLeavesTheQueueAlone(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if n := len(queueIDs(hub)); n != 1 || len(cat.asked()) != 0 {
 		t.Fatalf("queue %d, asked %v", n, cat.asked())
+	}
+}
+
+// A repeating playlist loops as it is: no radio joins it near the end (#26).
+func TestRepeatKeepsAPlaylistToItself(t *testing.T) {
+	for _, mode := range []domain.RepeatMode{domain.RepeatAll, domain.RepeatOne} {
+		_, hub, cat, _ := radioServer(t)
+		ctx := context.Background()
+		_, _ = hub.Command(ctx, "d", session.Command{Kind: session.CmdSetRepeat, Repeat: mode})
+		list := []domain.Track{track("p1"), track("p2"), track("p3")}
+		_, _ = hub.Command(ctx, "d", session.Command{Kind: session.CmdPlay, Tracks: list, StartIndex: 2, Origin: "Playlist"})
+		time.Sleep(300 * time.Millisecond)
+		if ids := queueIDs(hub); len(ids) != 3 || len(cat.asked()) != 0 {
+			t.Fatalf("repeat %s: queue %v, asked %v", mode, ids, cat.asked())
+		}
+	}
+}
+
+// Shuffling a repeating playlist near its end shuffles only the playlist (#28).
+func TestShuffleOnARepeatingPlaylistStaysInIt(t *testing.T) {
+	_, hub, cat, _ := radioServer(t)
+	ctx := context.Background()
+	_, _ = hub.Command(ctx, "d", session.Command{Kind: session.CmdSetRepeat, Repeat: domain.RepeatAll})
+	var list []domain.Track
+	for i := 0; i < 8; i++ {
+		list = append(list, track(fmt.Sprintf("p%d", i)))
+	}
+	_, _ = hub.Command(ctx, "d", session.Command{Kind: session.CmdPlay, Tracks: list, StartIndex: 6, Origin: "Playlist"})
+	// As in the report: near the end long enough for autoplay to act, then shuffle.
+	time.Sleep(300 * time.Millisecond)
+	_, _ = hub.Command(ctx, "d", session.Command{Kind: session.CmdSetShuffle, Shuffle: true})
+	time.Sleep(300 * time.Millisecond)
+	ids := queueIDs(hub)
+	if len(ids) != len(list) || len(cat.asked()) != 0 {
+		t.Fatalf("queue %v, asked %v", ids, cat.asked())
+	}
+	for _, id := range ids {
+		if !strings.HasPrefix(id, "p") {
+			t.Fatalf("a track from outside the playlist: %v", ids)
+		}
+	}
+}
+
+// Turning repeat off lets a playlist carry on into radio again.
+func TestRepeatOffResumesAutoplay(t *testing.T) {
+	_, hub, _, _ := radioServer(t)
+	ctx := context.Background()
+	_, _ = hub.Command(ctx, "d", session.Command{Kind: session.CmdSetRepeat, Repeat: domain.RepeatAll})
+	list := []domain.Track{track("p1"), track("p2"), track("p3")}
+	_, _ = hub.Command(ctx, "d", session.Command{Kind: session.CmdPlay, Tracks: list, Origin: "Playlist"})
+	time.Sleep(300 * time.Millisecond)
+	if n := len(queueIDs(hub)); n != 3 {
+		t.Fatalf("topped up while repeating: %d", n)
+	}
+	_, _ = hub.Command(ctx, "d", session.Command{Kind: session.CmdSetRepeat, Repeat: domain.RepeatOff})
+	if ids := waitQueue(t, hub, 4); ids[3] != "p3-r0-0" {
+		t.Fatalf("queue %v", ids)
 	}
 }

@@ -1,6 +1,6 @@
 import { useTogether } from "../lib/together";
 import { useEffect, useRef } from "react";
-import { attachVideo, retryVideo, setVideoEnabled, useVideo } from "../lib/video";
+import { attachVideo, isVideoTrack, retryVideo, setVideoEnabled, useVideo } from "../lib/video";
 import { IconExpand, IconVideo } from "./Icon";
 import { usePlayer } from "../lib/player";
 
@@ -11,15 +11,16 @@ export function useVideoControl() {
   const track = usePlayer(s => s.track);
   const following = usePlayer(s => s.followingRoom);
   const controlsRoom = useTogether(s => !!s.room && (s.room.owner === s.member || s.room.mode === 'collaborative' || s.room.members.find(m => m.id === s.member)?.role === 'dj'));
-  const status = track?.isVideo ? "available" : availabilityID === track?.id ? availability : "checking";
+  const video = isVideoTrack(track);
+  const status = video ? "available" : availabilityID === track?.id ? availability : "checking";
   const reason = busy ? "Switching playback format…"
     : !track ? "Play a song to watch its video."
-    : following && !controlsRoom && !track.isVideo ? "The room leader chooses the media version."
+    : following && !controlsRoom && !video ? "The room leader chooses the media version."
     : status === "checking" ? "Checking for a music video…"
     : status === "unavailable" ? "No matching music video is available for this song."
     : status === "error" ? "Could not check video availability. Click to retry."
     : "Watch music video";
-  return { blocked: busy || !track || (following && !controlsRoom && !track.isVideo) || status === "checking" || status === "unavailable", reason };
+  return { blocked: busy || !track || (following && !controlsRoom && !video) || status === "checking" || status === "unavailable", reason };
 }
 
 /** Song/video toggle: one icon, lit while the video shows, as in the mini player. */

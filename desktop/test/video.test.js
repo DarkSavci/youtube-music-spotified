@@ -79,3 +79,15 @@ test('room video visibility remains personal while shared variant is selected th
  await h.setVideoEnabled(false);assert.equal(h.player.track.id,h.clip.id);assert.equal(h.roomCommands[1].kind,'display');assert.equal(h.roomCommands[1].shown,false);
  const guest=setup();guest.player.followingRoom=true;guest.player.track=guest.clip;await guest.setVideoEnabled(true);assert.equal(guest.useVideo.getState().enabled,true);assert.equal(guest.roomCommands.length,0);
 });
+
+test('a restored video version without its isVideo flag still shows the picture', async () => {
+ const h=setup();
+ // A queue saved by an older version: the clip's id, but no video flag.
+ h.player.track={...h.clip,isVideo:false};
+ await h.setVideoEnabled(true);
+ assert.equal(h.switches.length,0,'already the video version; nothing to switch');
+ assert.equal(h.isVideoTrack(h.player.track),true);
+
+ h.attachVideo(h.host(),0);h.tick();
+ assert.match(h.videoElements[0].src,/\/v1\/video-stream\/clip1234567$/);
+});

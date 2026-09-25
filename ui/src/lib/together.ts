@@ -234,6 +234,7 @@ function route(kind: string, data: Record<string, unknown> = {}) {
 }
 export async function leaveTogether(next?: string) {
   const leavingGeneration = ++generation;
+  reconnectPause = null;
   clearInterval(timer);
   const old = client;
   client = null;

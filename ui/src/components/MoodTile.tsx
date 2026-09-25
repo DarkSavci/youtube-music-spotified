@@ -22,7 +22,7 @@ export function MoodTile({ mood }: { mood: MoodChip }) {
   const ref = useRef<HTMLAnchorElement>(null);
   const [visible, setVisible] = useState(false);
   useEffect(() => {
-    const observer = new IntersectionObserver(([entry]) => setVisible(Boolean(entry?.isIntersecting)));
+    const observer = new IntersectionObserver((entries) => setVisible(Boolean(entries.at(-1)?.isIntersecting)));
     if (ref.current) observer.observe(ref.current);
     return () => observer.disconnect();
   }, []);

@@ -27,6 +27,16 @@ async function loadVersions(track: Track): Promise<Track[]> {
   try { return await task; } finally { pendingVersions.delete(track.id); }
 }
 
+/**
+ * Whether a track is the video version. Its own flag can be missing: a queue
+ * saved by an older version, or a list that does not report it, still holds
+ * the video's id. YouTube's version list for that id settles it.
+ */
+export function isVideoTrack(track: Track | null | undefined): boolean {
+  if (!track) return false;
+  return track.isVideo || Boolean(versions.get(track.id)?.some(v => v.id === track.id && v.isVideo));
+}
+
 export async function checkVideoAvailability() {
   const track = usePlayer.getState().track;
   if (!track) return;
@@ -73,11 +83,11 @@ export async function setVideoEnabled(enabled: boolean) {
   try {
     let pair: Track[];
     try { pair = await loadVersions(track); }
-    catch (error) { if (track.isVideo || !enabled) pair = [track]; else throw error; }
+    catch (error) { if (isVideoTrack(track) || !enabled) pair = [track]; else throw error; }
     if (generation !== request || usePlayer.getState().track?.id !== track.id) return;
-    useVideo.setState({ availabilityID: track.id, availability: track.isVideo || pair.some(t => t.isVideo && t.playable) ? "available" : "unavailable" });
+    useVideo.setState({ availabilityID: track.id, availability: isVideoTrack(track) || pair.some(t => t.isVideo && t.playable) ? "available" : "unavailable" });
     const alternative = pair?.find(t => t.playable && t.isVideo === enabled);
-    if (enabled && !track.isVideo && !alternative) throw new Error("No matching music video is available for this song.");
+    if (enabled && !isVideoTrack(track) && !alternative) throw new Error("No matching music video is available for this song.");
     if (alternative && alternative.id !== track.id) {
       if (usePlayer.getState().followingRoom) {
         // Hiding the picture is enough; the host picks the version.
@@ -106,7 +116,7 @@ function tick() {
   if (!picture) return;
   const state = usePlayer.getState();
   const options = useVideo.getState();
-  const key = options.enabled && !options.busy && state.track?.isVideo ? `${state.track.id}:${options.revision}` : "";
+  const key = options.enabled && !options.busy && state.track && isVideoTrack(state.track) ? `${state.track.id}:${options.revision}` : "";
   if (key !== currentKey) {
     currentKey = key;
     waiting = false;

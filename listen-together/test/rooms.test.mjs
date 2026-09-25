@@ -97,3 +97,41 @@ test('snapshot retains video mode without sharing private track fields', () => {
  const got=cleanSnapshot({...state,track:{...state.track,isVideo:true,cookie:'private',streamURL:'private'}});
  assert.equal(got.track.isVideo,true);assert.equal(got.track.cookie,undefined);assert.equal(got.track.streamURL,undefined);
 });
+
+test('a guest notices a silent connection loss and reconnects', async t => {
+ const url=await setup(t);
+ let invitation;
+ const host=new RoomClient({WebSocketImpl:WebSocket,onStatus:s=>{if(s.invitation)invitation=s.invitation},onSnapshot:()=>{},getSnapshot:()=>state});
+ t.after(()=>host.stop());host.connect({server:url});
+ const wait=async(predicate,ms=8000)=>{const end=Date.now()+ms;while(!predicate()){if(Date.now()>end)throw Error('Timed out');await new Promise(r=>setTimeout(r,20));}};
+ await wait(()=>invitation);
+ let connected=0, reconnecting=false;
+ const guest=new RoomClient({WebSocketImpl:WebSocket,onStatus:s=>{if(s.status==='connected')connected++;if(s.status==='reconnecting')reconnecting=true},onSnapshot:()=>{},getSnapshot:()=>state});
+ t.after(()=>guest.stop());guest.connect({invitation});
+ await wait(()=>connected===1);
+ // The socket stays open but nothing arrives any more, as after sleep.
+ guest.socket.onmessage=()=>{};
+ // Detection takes the 8s silence limit plus one 2s tick, then a retry delay.
+ await wait(()=>connected===2,15000);
+ assert.ok(reconnecting);assert.equal(guest.role,'guest');
+});
+
+test('a guest rejoining a full room retries until its stale slot frees', async t => {
+ const url=await setup(t,{maxMembers:2});
+ let invitation;
+ const host=new RoomClient({WebSocketImpl:WebSocket,onStatus:s=>{if(s.invitation)invitation=s.invitation},onSnapshot:()=>{},getSnapshot:()=>state});
+ t.after(()=>host.stop());host.connect({server:url});
+ const wait=async(predicate,ms=10000)=>{const end=Date.now()+ms;while(!predicate()){if(Date.now()>end)throw Error('Timed out');await new Promise(r=>setTimeout(r,20));}};
+ await wait(()=>invitation);
+ let connected=0, full=false, stopped=false;
+ const guest=new RoomClient({WebSocketImpl:WebSocket,onStatus:s=>{if(s.status==='connected')connected++;if(s.status==='disconnected')stopped=true},onSnapshot:()=>{},getSnapshot:()=>state});
+ const failed=guest.failed.bind(guest);guest.failed=error=>{if(/full/i.test(error))full=true;failed(error);};
+ t.after(()=>guest.stop());guest.connect({invitation});
+ await wait(()=>connected===1);
+ // Drop the guest's side without the server noticing: the old socket keeps its slot.
+ const stale=guest.socket; stale.close=()=>{}; guest.failed('Connection lost.');
+ await wait(()=>full);
+ stale.terminate();
+ await wait(()=>connected===2);
+ assert.equal(stopped,false);assert.equal(guest.role,'guest');
+});

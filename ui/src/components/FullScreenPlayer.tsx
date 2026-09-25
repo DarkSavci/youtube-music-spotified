@@ -1,6 +1,6 @@
 import { Artwork } from "./Artwork";
 import { ShareIcon } from "./ShareIcon";
-import { watchFullscreenIdle } from "../lib/fullscreenIdle";
+import { trapTab, watchFullscreenIdle } from "../lib/fullscreenIdle";
 import { EndTime } from "./EndTime";
 import { VideoSurface, VideoSwitch, VideoNotice } from "./VideoPlayer";
 import { useVideo } from "../lib/video";
@@ -49,6 +49,13 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
+  // Windows draws its caption buttons over the page; while fullscreen they sit
+  // straight on the artwork or video instead of on a dark box.
+  useEffect(() => {
+    window.spotifier?.window?.setImmersiveTitleBar?.(true);
+    return () => window.spotifier?.window?.setImmersiveTitleBar?.(false);
+  }, []);
+
   useEffect(() => {
     setHidden(false);
     if (state !== "playing" || videoError || notice || !rootRef.current) return;
@@ -63,7 +70,9 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
   const art = artworkAtLeast(track.artwork, 1000);
 
   return (
-    <div ref={rootRef} tabIndex={-1} data-controls-hidden={hidden || undefined} className="fsp" role="dialog" aria-modal="true" aria-label="Now playing">
+    <div ref={rootRef} tabIndex={-1} data-controls-hidden={hidden || undefined} className="fsp" role="dialog" aria-modal="true" aria-label="Now playing"
+      // Also while paused, when the idle watcher is not running.
+      onKeyDown={(e) => { if (e.key === "Tab" && rootRef.current) trapTab(rootRef.current, e.nativeEvent); }}>
       {video ? <VideoSurface priority={10} className="fsp__video" /> : <Artwork className="fsp__bleed" src={art} alt="" aria-hidden="true" />}
       {/* A gradient only at the bottom, where the controls are: the artwork
           stays untouched everywhere the eye actually looks. */}

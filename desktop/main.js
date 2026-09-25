@@ -31,6 +31,15 @@ const { waitForOwnedCore } = require("./core-ready");
 const isDev = !app.isPackaged;
 const CORE_PORT = 8674;
 const CORE_HOST = "127.0.0.1";
+/*
+ * Windows caption buttons over the app. Normally they sit on the top bar's
+ * colour; over fullscreen artwork or video a solid box looks pasted on, so
+ * "immersive" draws them straight onto the picture in white.
+ */
+const TITLE_BAR = {
+  normal: { color: "#0f0f0f", symbolColor: "#b3b3b3" },
+  immersive: { color: "#00000000", symbolColor: "#ffffff" },
+};
 // A per-launch secret the core requires on routes that start yt-dlp work, so
 // web pages cannot drive them through its open CORS policy.
 const CLIENT_TOKEN = crypto.randomBytes(32).toString("hex");
@@ -391,7 +400,7 @@ function createWindow() {
     // native overlay (including maximize/Snap); macOS retains traffic lights.
     frame: true,
     titleBarStyle: "hidden",
-    ...(process.platform === "win32" ? { titleBarOverlay: { color: "#0f0f0f", symbolColor: "#b3b3b3", height: 52 } } : {}),
+    ...(process.platform === "win32" ? { titleBarOverlay: { ...TITLE_BAR.normal, height: 52 } } : {}),
     ...(process.platform === "darwin" ? { trafficLightPosition: { x: 16, y: 23 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -623,6 +632,13 @@ process.on("uncaughtException", (err) => {
 ipcMain.handle("core-port", () => CORE_PORT);
 
 /* ---------- window controls ---------- */
+
+ipcMain.on("window:immersive-title-bar", (e, on) => {
+  if (process.platform !== "win32") return;
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (win !== mainWindow || win.isDestroyed()) return;
+  win.setTitleBarOverlay({ ...(on === true ? TITLE_BAR.immersive : TITLE_BAR.normal), height: 52 });
+});
 
 // Drawing our own title bar means owning what the frame used to do. Each of
 // these is addressed to the window the request came from, so a second window
