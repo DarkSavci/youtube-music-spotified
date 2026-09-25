@@ -376,7 +376,8 @@ function Extras({ panel, onPanel }: PanelProps) {
   const { blocked, reason } = useVideoControl();
   return (
     <div className="mini__extras">
-      <button className="iconbtn" aria-label="Music video" title={panel === "video" ? "Hide music video" : reason}
+      {/* The mini player has no custom tooltip layer, so title is its only tooltip. */}
+      <button className="iconbtn" aria-label={panel === "video" ? "Hide music video" : reason} title={panel === "video" ? "Hide music video" : reason}
         aria-pressed={panel === "video"} data-active={panel === "video" || undefined}
         aria-disabled={panel !== "video" && blocked} onClick={() => { if (panel === "video" || !blocked) onPanel("video"); }}>
         <IconVideo size={18} />

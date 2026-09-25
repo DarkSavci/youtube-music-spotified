@@ -94,10 +94,10 @@ export function TopBar({
       </div>
 
       <div className="topbar__search-group">
-      <button className="iconbtn topbar__home" aria-label="Home" title="Home" onClick={() => navigate("/")}><IconHome size={24} filled={location.pathname === "/"} /></button>
+      <button className="iconbtn topbar__home" aria-label="Home" onClick={() => navigate("/")}><IconHome size={24} filled={location.pathname === "/"} /></button>
       <div className="searchfield" onClick={() => inputRef.current?.focus()}>
         {/* On the search page already, only focus: navigating would drop ?q=. */}
-        <button className="iconbtn" aria-label="Search" title="Search" onClick={() => { if (location.pathname !== "/search") navigate("/search"); inputRef.current?.focus(); }}><IconSearch size={20} /></button>
+        <button className="iconbtn" aria-label="Search" onClick={() => { if (location.pathname !== "/search") navigate("/search"); inputRef.current?.focus(); }}><IconSearch size={20} /></button>
         <input
           aria-label="Search music"
           ref={inputRef}
@@ -118,7 +118,7 @@ export function TopBar({
             }
           }}
         />
-        <button className="iconbtn searchfield__browse" aria-label="Browse all" title="Browse all" onClick={e => { e.stopPropagation(); setLocal(""); navigate("/search"); }}><IconBrowse size={22} /></button>
+        <button className="iconbtn searchfield__browse" aria-label="Browse all" onClick={e => { e.stopPropagation(); setLocal(""); navigate("/search"); }}><IconBrowse size={22} /></button>
       </div>
       </div>
 

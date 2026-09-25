@@ -58,7 +58,7 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
       <div className="fsp__scrim" aria-hidden="true" />
 
       <div className="fsp__context">
-        <VideoSwitch /><VideoNotice />
+        <VideoNotice />
         <span className="fsp__contextlabel">
           {origin ? "Playing from" : "Playing"}
         </span>
@@ -151,6 +151,7 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className="fsp__side fsp__side--end">
+            <VideoSwitch />
             <VolumeControl className="fsp__volume" />
           </div>
         </div>

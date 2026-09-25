@@ -206,7 +206,7 @@ export function LibrarySidebar({ expanded, onExpand, onNavigate }: { expanded: b
           >
             <IconPlus size={18} />
           </button>
-          <button className="iconbtn" aria-label={expanded ? "Collapse library view" : "Expand library view"} title={expanded ? "Collapse library view" : "Expand library view"} onClick={onExpand}>{expanded ? <IconCollapse size={18} /> : <IconExpand size={18} />}</button>
+          <button className="iconbtn" aria-label={expanded ? "Collapse library view" : "Expand library view"} onClick={onExpand}>{expanded ? <IconCollapse size={18} /> : <IconExpand size={18} />}</button>
         </div>
       </div>
 

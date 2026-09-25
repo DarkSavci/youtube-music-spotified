@@ -917,6 +917,10 @@
 .fsp .iconbtn[data-active] {
   color: #fff;
 }
+/* The video toggle is lit the same way everywhere: player bar, mini player, here. */
+.fsp .video-toggle[data-active] {
+  color: var(--accent);
+}
 .playbtn--lg {
   width: 56px;
   height: 56px;
@@ -1393,6 +1397,9 @@ body:has(.account-menu, .whats-new-dialog[open]) .app-shell::before {
 .topbar__search-group .searchfield { width: auto; flex: 1; }
 .searchfield { -webkit-app-region: no-drag; cursor: text; }
 .searchfield__browse { border-left: 1px solid var(--border-subtle); border-radius: 0; padding-left: 8px; width: 40px; }
+/* The divider needs square corners, so a hover fill would be a hard-edged box
+   inside the rounded field; brighten the icon instead. */
+.searchfield__browse:hover:not(:disabled) { background: transparent; }
 @media (max-width: 1100px) {
   .topbar__search-group { position: static; transform: none; width: auto; flex: 1; min-width: 180px; }
   .topbar__spacer { display: none; }

@@ -20,26 +20,23 @@ export function useVideoControl() {
   return { blocked: busy || !track || (following && !track.isVideo) || status === "checking" || status === "unavailable", reason };
 }
 
-export function VideoSwitch({ iconOnly = false }: { iconOnly?: boolean }) {
+/** Song/video toggle: one icon, lit while the video shows, as in the mini player. */
+export function VideoSwitch() {
   const enabled = useVideo(s => s.enabled);
   const busy = useVideo(s => s.busy);
   const { blocked, reason } = useVideoControl();
   const track = usePlayer(s => s.track);
   if (!track) return null;
-  if (iconOnly) return <button
-    className="iconbtn"
-    aria-label="Music video"
-    title={enabled ? "Switch to song" : reason}
+  return <button
+    className="iconbtn video-toggle"
+    // The app's tooltip reads aria-label; a title would show a second one.
+    aria-label={enabled ? "Switch to song" : reason}
     aria-pressed={enabled}
     aria-busy={busy}
     data-active={enabled || undefined}
     aria-disabled={enabled ? busy : blocked}
     onClick={() => { if (!(enabled ? busy : blocked)) void setVideoEnabled(!enabled); }}
   ><IconVideo size={18} /></button>;
-  return <div className="video-switch" role="group" aria-label="Playback format">
-    <button className="chip" aria-pressed={!enabled} disabled={busy} onClick={() => void setVideoEnabled(false)}>Song</button>
-    <button className="chip" aria-pressed={enabled} aria-disabled={blocked} title={reason} onClick={() => { if (!blocked) void setVideoEnabled(true); }}>{busy ? "Switching…" : "Video"}</button>
-  </div>;
 }
 
 export function VideoSurface({ priority = 0, className = "", onExpand }: { priority?: number; className?: string; onExpand?: () => void }) {
