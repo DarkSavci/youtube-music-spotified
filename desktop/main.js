@@ -391,8 +391,8 @@ function createWindow() {
     // native overlay (including maximize/Snap); macOS retains traffic lights.
     frame: true,
     titleBarStyle: "hidden",
-    ...(process.platform === "win32" ? { titleBarOverlay: { color: "#0f0f0f", symbolColor: "#b3b3b3", height: 72 } } : {}),
-    ...(process.platform === "darwin" ? { trafficLightPosition: { x: 16, y: 33 } } : {}),
+    ...(process.platform === "win32" ? { titleBarOverlay: { color: "#0f0f0f", symbolColor: "#b3b3b3", height: 52 } } : {}),
+    ...(process.platform === "darwin" ? { trafficLightPosition: { x: 16, y: 23 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -406,12 +406,12 @@ function createWindow() {
 
   // AppKit can restore the default caption position after showing/restoring
   // a window or leaving fullscreen. Reapply the inset after those transitions.
-  // 8px shell gutter + half the 64px navigation row - half a 14px button.
+  // 8px shell gutter + half the 44px navigation row - half a 14px button.
   if (process.platform === "darwin") {
     const window = mainWindow;
     const alignWindowButtons = () => {
       if (!window.isDestroyed() && !window.isFullScreen()) {
-        window.setWindowButtonPosition({ x: 16, y: 33 });
+        window.setWindowButtonPosition({ x: 16, y: 23 });
       }
     };
     let alignmentTimer;
