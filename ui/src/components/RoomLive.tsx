@@ -105,11 +105,14 @@ function ReadyCheck({ room, owner }: { room: RoomState; owner: boolean }) {
     return () => clearInterval(timer);
   }, [startAt]);
   if (!countdown) return null;
+  const seconds = startAt ? Math.ceil((startAt - roomNow()) / 1000) : 0;
   return (
     <div className="room-ready room-panel" role="status">
       <strong>
-        {countdown.startAt
-          ? `Starting in ${Math.max(0, Math.ceil((countdown.startAt - roomNow()) / 1000))}…`
+        {startAt
+          ? seconds > 0
+            ? `Starting in ${seconds}…`
+            : "Starting…"
           : "Ready for a shared start?"}
       </strong>
       <span>

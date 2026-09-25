@@ -42,8 +42,8 @@ export function RoomLobby({
 }) {
   const prefs = useRoomPreferences();
   const status = useTogether((s) => s.status);
-  const [pin, setPin] = useState(""),
-    [mode, setMode] = useState<RoomMode>("collaborative");
+  const [pin, setPin] = useState("");
+  const mode = prefs.mode;
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: () => api.me() });
   const accountName = me?.account?.name || "Listener";
   const name = prefs.name.trim() || accountName;
@@ -128,7 +128,7 @@ export function RoomLobby({
                 key={p.id}
                 aria-pressed={mode === p.id}
                 className={`room-preset ${mode === p.id ? "is-selected" : ""}`}
-                onClick={() => setMode(p.id)}
+                onClick={() => prefs.update({ mode: p.id })}
               >
                 <span className="room-radio" />
                 <span>

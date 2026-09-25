@@ -4,6 +4,7 @@ import {
   RoomClientV2,
   type RoomState,
   type ConnectOptions,
+  type RoomMode,
 } from "../../../listen-together/client-v2.mjs";
 import { endpointURL } from "../../../listen-together/protocol.mjs";
 import { currentPosition, usePlayer } from "./player";
@@ -25,6 +26,8 @@ interface Preferences {
   servers: Server[];
   selected: string;
   roomName: string;
+  /** Who controls a new room, kept like its name so leaving the page does not reset it. */
+  mode: RoomMode;
   name: string;
   avatar: string;
   followVideo: boolean;
@@ -37,6 +40,7 @@ export const useRoomPreferences = create<Preferences>()(
       servers: [],
       selected: "",
       roomName: "",
+      mode: "collaborative",
       name: "",
       avatar: "",
       followVideo: false,
