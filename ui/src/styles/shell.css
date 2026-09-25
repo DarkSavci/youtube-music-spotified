@@ -150,6 +150,27 @@
 .libitem__art--round {
   border-radius: var(--radius-circle);
 }
+.libitem__artwrap {
+  position: relative;
+  flex: none;
+  display: block;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.libitem__artwrap > .libitem__art { display: block; }
+/* Plays without opening the page; shown over the artwork on hover. */
+.libitem__play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgb(0 0 0 / 0.5);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.libitem:hover .libitem__play { opacity: 1; }
 .libitem__text {
   min-width: 0;
   display: flex;
@@ -1378,6 +1399,7 @@ body:has(.account-menu, .whats-new-dialog[open]) .app-shell::before {
 .sidebar[data-grid] .sidebar__list > ul, .sidebar[data-grid] .libfolder__items { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; padding: 16px; }
 .sidebar[data-grid] .sidebar__list > ul > li:has(.libfolder) { grid-column: 1 / -1; }
 .sidebar[data-grid] .libitem { flex-direction: column; align-items: stretch; gap: 10px; padding: 10px; }
+.sidebar[data-grid] .libitem__artwrap { width: 100%; }
 .sidebar[data-grid] .libitem__art { width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; }
 .sidebar[data-grid] .libitem__text { display: flex; flex-direction: column; min-width: 0; }
 .sidebar[data-grid] .libitem__title { font-size: 15px; }
@@ -1387,6 +1409,8 @@ body:has(.account-menu, .whats-new-dialog[open]) .app-shell::before {
 .ctxmenu__item { display: flex; align-items: center; gap: 12px; }
 .ctxmenu__item > svg { flex-shrink: 0; color: var(--text-secondary); }
 .ctxmenu__item > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The share icon is a span too; without this it takes the label's share of the row. */
+.ctxmenu__item > .share-icon { flex: none; overflow: visible; color: var(--text-secondary); }
 .account-menu button[role="menuitem"] { display: flex; align-items: center; gap: 10px; }
 @container sidebar (max-width: 170px) {
   .sidebar__search, .sidebar__actions { display: none; }
@@ -1409,8 +1433,6 @@ body:has(.account-menu, .whats-new-dialog[open]) .app-shell::before {
   .topbar__search-group { position: static; transform: none; width: auto; flex: 1; min-width: 180px; }
   .topbar__spacer { display: none; }
   .topbar__account { max-width: 130px; }
-/* The share icon is a span too; without this it takes the label's share of the row. */
-.ctxmenu__item > .share-icon { flex: none; overflow: visible; color: var(--text-secondary); }
 }
 
 .wincontrols { margin-right: -12px; flex-shrink: 0; }
