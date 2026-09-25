@@ -19,5 +19,10 @@
     SetShellVarContext current
     RMDir /r "$APPDATA\Spotifier"
     RMDir /r "$LOCALAPPDATA\youtube-music-spotified-updater"
+    ; The launch-at-login entry (loginitem.js), and Task Manager's record of
+    ; whether it was switched off. Left behind, Windows would try to start a
+    ; program that no longer exists at every sign-in.
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Youtube Music Spotified"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "Youtube Music Spotified"
   ${endIf}
 !macroend
