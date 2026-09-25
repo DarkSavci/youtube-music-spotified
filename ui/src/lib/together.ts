@@ -47,6 +47,8 @@ async function applyLatest(force = false) {
 
 export async function leaveTogether() {
   generation++;
+  // A pause still in flight belongs to the room being left.
+  reconnectPause = null;
   useTogether.setState({ status: "disconnected", role: null, members: 0 });
   const old = client; client = null; latest = null;
   clearInterval(interval); clearTimeout(pendingPublish); unsubscribe?.(); unsubscribe = undefined;

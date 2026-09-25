@@ -1,3 +1,20 @@
+/**
+ * The player is a modal dialog, so Tab stays inside it: from the player itself
+ * it starts at the first control (Shift: the last), and it wraps at either end
+ * instead of reaching the app underneath. Handles each event once.
+ */
+export function trapTab(root: HTMLElement, e: KeyboardEvent) {
+  if (e.defaultPrevented) return;
+  const focusable = [...root.querySelectorAll<HTMLElement>('.fsp__close, .fsp__foot button:not([disabled]), .fsp__foot input')];
+  const first = focusable[0], last = focusable[focusable.length - 1];
+  const active = root.ownerDocument.activeElement;
+  const target = !root.contains(active) || active === root ? (e.shiftKey ? last : first)
+    : e.shiftKey && active === first ? last
+    : !e.shiftKey && active === last ? first
+    : null;
+  if (target) { e.preventDefault(); target.focus(); }
+}
+
 /** Fullscreen chrome stays available during keyboard, pointer and dialog use. */
 export function watchFullscreenIdle(root: HTMLElement, hide: (hidden: boolean) => void, delay = 3000) {
   const doc = root.ownerDocument;
@@ -26,12 +43,8 @@ export function watchFullscreenIdle(root: HTMLElement, hide: (hidden: boolean) =
   const leave = () => { overControls = false; reveal(); };
   const key = (e: KeyboardEvent) => {
     keyboard = true;
-    // Hidden controls are not focusable. Reveal before moving focus into them.
-    if (e.key === 'Tab' && root.dataset.controlsHidden === 'true') {
-      e.preventDefault();
-      reveal();
-      win.requestAnimationFrame(() => { if (!disposed) root.querySelector<HTMLButtonElement>('.fsp__close')?.focus(); });
-    } else reveal();
+    reveal();
+    if (e.key === 'Tab') trapTab(root, e);
   };
   root.addEventListener('pointermove', move);
   root.addEventListener('pointerdown', down);

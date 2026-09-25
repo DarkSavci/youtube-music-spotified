@@ -811,6 +811,11 @@
   color: #fff;
   -webkit-app-region: no-drag;
 }
+/* Windows draws its caption buttons over the top-right of the page, so the
+   close button moves below them rather than hiding underneath. */
+.app-shell[data-native-titlebar="true"] .fsp__close {
+  top: calc(env(titlebar-area-height, 52px) + var(--space-3));
+}
 
 .fsp__foot {
   position: absolute;
