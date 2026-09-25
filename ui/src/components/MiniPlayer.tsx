@@ -147,6 +147,7 @@ function Bar() {
         <Meta />
         <LikeButton />
         <Transport compact />
+        <SpeedControl titled />
         <WindowButtons />
       </div>
       <ThinProgress />
@@ -221,11 +222,18 @@ function Tall({ panel, onPanel }: PanelProps) {
 
 /* ---------- pieces ---------- */
 
-/** The strip the window is dragged by, with its buttons on the right. */
+/**
+ * The strip the window is dragged by, with its buttons on the right.
+ *
+ * Playback speed sits here rather than with the controls at the bottom, which
+ * already hold as much as a window this narrow can: it is set once and left,
+ * so it can live out of the way beside the window's own buttons.
+ */
 function Head({ children }: { children?: ReactNode }) {
   return (
     <div className="mini__head mini__drag">
       <div className="mini__headmain">{children}</div>
+      <SpeedControl titled />
       <WindowButtons />
     </div>
   );
@@ -377,7 +385,6 @@ function Extras({ panel, onPanel }: PanelProps) {
   const { blocked, reason } = useVideoControl();
   return (
     <div className="mini__extras">
-      <SpeedControl titled />
       {/* The mini player has no custom tooltip layer, so title is its only tooltip. */}
       <button className="iconbtn" aria-label={panel === "video" ? "Hide music video" : reason} title={panel === "video" ? "Hide music video" : reason}
         aria-pressed={panel === "video"} data-active={panel === "video" || undefined}

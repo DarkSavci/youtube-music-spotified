@@ -80,7 +80,7 @@ function SpeedPanel({ anchor, onClose }: { anchor: HTMLButtonElement; onClose: (
   // What is actually playing, which on a fixed-list engine can differ from
   // what was asked for; the panel shows the truth.
   const playing = usePlayer((s) => s.speed);
-  const [position, setPosition] = useState<{ left: number; bottom: number } | null>(null);
+  const [position, setPosition] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
 
   // The button can live in the mini player's window, so everything here is
   // that window's rather than this one's.
@@ -103,11 +103,18 @@ function SpeedPanel({ anchor, onClose }: { anchor: HTMLButtonElement; onClose: (
       }
       const rect = anchor.getBoundingClientRect();
       const width = panel.current?.offsetWidth ?? 360;
+      const height = panel.current?.offsetHeight ?? 220;
       const left = Math.min(Math.max(8, rect.left + rect.width / 2 - width / 2), view.innerWidth - width - 8);
-      setPosition({ left, bottom: view.innerHeight - rect.top + 8 });
+      // Above the button, which usually sits at the bottom of the window;
+      // below it where there is no room above, as in the mini player's top
+      // strip; and where there is room for neither, as in its one-line bar,
+      // over the window itself rather than off its edge.
+      if (rect.top - height - 8 >= 8) setPosition({ left, bottom: view.innerHeight - rect.top + 8 });
+      else if (rect.bottom + 8 + height <= view.innerHeight - 8) setPosition({ left, top: rect.bottom + 8 });
+      else setPosition({ left, top: Math.max(8, (view.innerHeight - height) / 2) });
     };
     place();
-    panel.current?.querySelector<HTMLInputElement>("input[type=range]")?.focus();
+    panel.current?.querySelector<HTMLElement>("input[type=range], .speedpanel__pill[data-active], .speedpanel__pill")?.focus();
     const outside = (e: PointerEvent) => {
       const target = e.target as Node;
       if (!panel.current?.contains(target) && !anchor.contains(target)) close.current();
@@ -128,59 +135,70 @@ function SpeedPanel({ anchor, onClose }: { anchor: HTMLButtonElement; onClose: (
   }, [anchor, doc, view]);
 
   const presetPlayable = (rate: number) => support === "any" || support.includes(rate);
+  // A window too short for the full panel — the mini player as a one-line
+  // bar — gets the presets alone, with a step either side: the part used most.
+  const compact = view.innerHeight < 260;
+
+  const step = (dir: -1 | 1) => (
+    <button
+      className="iconbtn iconbtn--round"
+      aria-label={dir < 0 ? "Slower" : "Faster"}
+      disabled={dir < 0 ? chosen <= MIN_SPEED : chosen >= MAX_SPEED}
+      onClick={() => choose(clampSpeed(chosen + dir * SPEED_STEP))}
+    >
+      {dir < 0 ? "−" : "+"}
+    </button>
+  );
+
+  const presets = SPEED_PRESETS.map((rate) => (
+    <div key={rate} className="speedpanel__preset">
+      <button
+        className="speedpanel__pill"
+        aria-pressed={chosen === rate}
+        data-active={chosen === rate || undefined}
+        disabled={!presetPlayable(rate)}
+        onClick={() => choose(rate)}
+      >
+        {Number.isInteger(rate) ? rate.toFixed(1) : String(rate)}
+      </button>
+      {rate === 1 && !compact ? <span className="speedpanel__note">Normal</span> : null}
+    </div>
+  ));
 
   return createPortal(
     <div
       ref={panel}
       className="speedpanel"
+      data-compact={compact || undefined}
       role="dialog"
-      aria-label="Playback speed"
-      style={position ? { left: position.left, bottom: position.bottom } : { visibility: "hidden" }}
+      aria-label={`Playback speed: ${playing.toFixed(2)}×`}
+      style={position ?? { visibility: "hidden" }}
     >
-      <div className="speedpanel__title">Playback speed</div>
-      <div className="speedpanel__value" aria-live="polite">{playing.toFixed(2)}×</div>
-      <div className="speedpanel__row">
-        <button
-          className="iconbtn iconbtn--round"
-          aria-label="Slower"
-          disabled={chosen <= MIN_SPEED}
-          onClick={() => choose(clampSpeed(chosen - SPEED_STEP))}
-        >
-          −
-        </button>
-        <Slider
-          className="speedpanel__slider"
-          label="Playback speed"
-          value={chosen - MIN_SPEED}
-          max={MAX_SPEED - MIN_SPEED}
-          step={SPEED_STEP}
-          onChange={(v) => choose(clampSpeed(v + MIN_SPEED))}
-        />
-        <button
-          className="iconbtn iconbtn--round"
-          aria-label="Faster"
-          disabled={chosen >= MAX_SPEED}
-          onClick={() => choose(clampSpeed(chosen + SPEED_STEP))}
-        >
-          +
-        </button>
-      </div>
-      <div className="speedpanel__presets">
-        {SPEED_PRESETS.map((rate) => (
-          <div key={rate} className="speedpanel__preset">
-            <button
-              className="speedpanel__pill"
-              aria-pressed={chosen === rate}
-              data-active={chosen === rate || undefined}
-              disabled={!presetPlayable(rate)}
-              onClick={() => choose(rate)}
-            >
-              {Number.isInteger(rate) ? rate.toFixed(1) : String(rate)}
-            </button>
-            {rate === 1 ? <span className="speedpanel__note">Normal</span> : null}
+      {compact ? (
+        <div className="speedpanel__row">
+          {step(-1)}
+          <div className="speedpanel__presets">{presets}</div>
+          {step(1)}
+        </div>
+      ) : (
+        <>
+          <div className="speedpanel__title">Playback speed</div>
+          <div className="speedpanel__value" aria-live="polite">{playing.toFixed(2)}×</div>
+          <div className="speedpanel__row">
+            {step(-1)}
+            <Slider
+              className="speedpanel__slider"
+              label="Playback speed"
+              value={chosen - MIN_SPEED}
+              max={MAX_SPEED - MIN_SPEED}
+              step={SPEED_STEP}
+              onChange={(v) => choose(clampSpeed(v + MIN_SPEED))}
+            />
+            {step(1)}
           </div>
-        ))}
-      </div>
+          <div className="speedpanel__presets">{presets}</div>
+        </>
+      )}
     </div>,
     doc.body,
   );

@@ -1541,3 +1541,7 @@ button:is(:hover, :focus-visible) .share-icon__copy,
 .speedpanel__pill[data-active="true"] { background: var(--text-primary); color: var(--surface-base, #121212); }
 .speedpanel__pill:disabled { opacity: 0.35; }
 .speedpanel__note { font-size: var(--text-xs); color: var(--text-secondary); }
+/* Compact, for windows too short for the whole panel: one row of presets
+   between the steps, wrapping only when narrow as well. */
+.speedpanel[data-compact] { width: min(480px, calc(100vw - 16px)); padding: var(--space-2); }
+.speedpanel[data-compact] .speedpanel__presets { flex: 1; margin-top: 0; }

@@ -92,6 +92,13 @@
   width: 28px;
   height: 28px;
 }
+/* Speed shares the strip with the window buttons, at their height. */
+.mini__bar .speedbtn,
+.mini__head .speedbtn {
+  flex: none;
+  height: 28px;
+  -webkit-app-region: no-drag;
+}
 /* On top or not has to be readable at a glance: the accent when it is. */
 .mini__winbtns .mini__pin[data-active] {
   color: var(--accent);
@@ -373,4 +380,10 @@ button.mini__title:hover {
   .mini__wide .mini__volume .slider {
     display: none;
   }
+}
+
+/* A bar too narrow for the title and the transport gives speed up first:
+   it is set once and left, where the transport is used all the time. */
+@media (max-width: 380px) {
+  .mini__bar .speedbtn { display: none; }
 }
