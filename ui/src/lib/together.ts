@@ -194,11 +194,54 @@ async function applyLatest(force = false) {
   if (version === generation && room !== useTogether.getState().room)
     void applyLatest();
 }
+// Mirrors the relay's permission rules, so a listener without them gets the
+// answer here rather than a rejected round trip for every press.
+function denied(room: RoomState, kind: string, data: Record<string, unknown>) {
+  const { member } = useTogether.getState();
+  if (kind === "repeat" && room.owner !== member)
+    return "Only the leader can change room settings.";
+  if (roomCanControl()) return null;
+  if (kind === "enqueue" && room.mode === "contributions") return null;
+  if (kind === "enqueueNext" && room.mode === "contributions")
+    return "Only playback controllers may insert ahead of others.";
+  if (kind === "remove" && room.mode === "contributions") {
+    const entry = room.queue[Number(data.at)];
+    return entry?.addedBy.id === member && entry.id !== room.current
+      ? null
+      : "You may only edit your upcoming contributions.";
+  }
+  return ["enqueue", "enqueueNext", "remove"].includes(kind)
+    ? "This room is listen only."
+    : "The leader controls playback in this room.";
+}
+// Dragging the seek bar fires every step; only where it settles is sent, so
+// a scrub neither trips the relay's message limit nor races its own revisions.
+let seekTimer: ReturnType<typeof setTimeout> | undefined;
+function routeSeek(positionMs: unknown) {
+  clearTimeout(seekTimer);
+  seekTimer = setTimeout(
+    () => void roomCommand({ kind: "seek", positionMs }),
+    150,
+  );
+}
 function route(kind: string, data: Record<string, unknown> = {}) {
   const { room, status } = useTogether.getState();
   if (status === "disconnected") return false;
   if (!room || status !== "connected") {
     toast("Wait for the room to connect.");
+    return true;
+  }
+  if (kind === "shuffle") {
+    toast("Choose First in, first out or Take turns in room settings.");
+    return true;
+  }
+  const reason = denied(room, kind, data);
+  if (reason) {
+    toast(reason);
+    return true;
+  }
+  if (kind === "seek") {
+    routeSeek(data.positionMs);
     return true;
   }
   let command: Record<string, unknown> = { kind, ...data };
@@ -225,10 +268,6 @@ function route(kind: string, data: Record<string, unknown> = {}) {
       repeat:
         room.repeat === "off" ? "all" : room.repeat === "all" ? "one" : "off",
     };
-  if (kind === "shuffle") {
-    toast("Choose First in, first out or Take turns in room settings.");
-    return true;
-  }
   void roomCommand(command);
   return true;
 }
@@ -236,6 +275,7 @@ export async function leaveTogether(next?: string) {
   const leavingGeneration = ++generation;
   reconnectPause = null;
   clearInterval(timer);
+  clearTimeout(seekTimer);
   const old = client;
   client = null;
   old?.leave(next);

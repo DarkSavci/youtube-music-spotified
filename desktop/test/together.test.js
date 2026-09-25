@@ -34,7 +34,8 @@ async function setup(t) {
   }));
   const video = create(() => ({ enabled: false, revision: 0 }));
   const clients = [],
-    calls = [];
+    calls = [],
+    toasts = [];
   let route, hold;
   class Client {
     constructor(options) {
@@ -94,7 +95,7 @@ async function setup(t) {
           currentPosition: (s) => s.anchor.positionMs,
         };
       if (n === "./video") return { useVideo: video };
-      if (n === "./toast") return { toast: () => {} };
+      if (n === "./toast") return { toast: (m) => toasts.push(m) };
       if (n === "./playback")
         return {
           isServerAuthoritative: () => true,
@@ -135,6 +136,7 @@ async function setup(t) {
     video,
     clients,
     calls,
+    toasts,
     route: (...args) => route(...args),
     hold: (p) => (hold = p),
     flush: () => new Promise((r) => setImmediate(r)),
@@ -271,4 +273,44 @@ test("leave waits for an in-flight local correction before unlocking playback", 
   await leaving;
   assert.equal(h.player.getState().followingRoom, false);
   assert.equal(h.player.getState().state, "paused");
+});
+test("listeners without permission are answered locally instead of sending doomed commands", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  c.onState(room(1, { mode: "listen" }));
+  await h.flush();
+  for (const kind of ["toggle", "next", "seek", "jump", "repeat"])
+    assert.equal(h.route(kind, { at: 0, positionMs: 0 }), true);
+  h.route("enqueue", { tracks: [h.player.getState().track] });
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(c.commands.length, 0);
+  assert.equal(h.toasts.length, 6);
+  c.onState(room(2, { mode: "contributions" }));
+  await h.flush();
+  h.route("enqueue", { tracks: [h.player.getState().track] });
+  h.route("remove", { at: 1 });
+  h.route("remove", { at: 0 });
+  h.route("enqueueNext", { tracks: [h.player.getState().track] });
+  assert.deepEqual(
+    c.commands.map((x) => [x.kind, x.entry]),
+    [
+      ["enqueue", undefined],
+      ["remove", "entry2"],
+    ],
+  );
+});
+test("a seek-bar drag sends only where it settles", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  c.onState(room());
+  await h.flush();
+  for (let ms = 0; ms <= 60000; ms += 1000) h.route("seek", { positionMs: ms });
+  assert.equal(c.commands.length, 0);
+  await new Promise((r) => setTimeout(r, 200));
+  assert.deepEqual(
+    c.commands.map((x) => [x.kind, x.positionMs]),
+    [["seek", 60000]],
+  );
 });

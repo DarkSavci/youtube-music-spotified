@@ -481,15 +481,16 @@ export const transport = {
   },
 
   toggle() {
-    if (routeRoom("toggle")) return;
     // A guest whose start was blocked presses Play to try again; that is
-    // the host's playback, not a choice of their own.
+    // the room's playback, not a choice of their own, so it must not become
+    // a room-wide play or pause.
     const s = usePlayer.getState();
     if (s.followingRoom && s.notice) {
       usePlayer.setState({ notice: null });
       void import("./together").then(m => m.retryTogetherPlayback());
       return;
     }
+    if (routeRoom("toggle")) return;
     if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.command({ Kind: "toggle" });
     else usePlayer.getState().toggle();
