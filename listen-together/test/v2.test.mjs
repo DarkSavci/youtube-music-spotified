@@ -11,7 +11,7 @@ import {
   cleanTrack,
   position,
 } from "../v2.mjs";
-import { createRoomServerV2 } from "../server-v2.mjs";
+import { createRoomServerV2, limitKey } from "../server-v2.mjs";
 const track = (n) => ({
   id: `abcdefghij${n}`,
   title: `Song ${n}`,
@@ -357,4 +357,48 @@ test("room names are bounded public metadata and survive leadership changes", ()
   assert.equal(makeRoom("12345678", { roomName: "x".repeat(200) }).name.length, 80);
   assert.equal(makeRoom("12345678", { roomName: {} }).name, "");
   assert.equal(makeRoom("12345678").name, "");
+});
+test("join refusals look alike, and a stale handover still lets the leader leave", async (t) => {
+  const server = createRoomServerV2({ intervalMs: 20 });
+  await new Promise((r) => server.http.listen(0, "127.0.0.1", r));
+  t.after(() => server.close());
+  const url = `ws://127.0.0.1:${server.http.address().port}`;
+  const a = await connect(url);
+  a.send({ type: "create", profile: { name: "A" } });
+  const aj = await a.wait((m) => m.type === "joined");
+  const initial = (await a.wait((m) => m.type === "state")).room;
+  const b = await connect(url);
+  b.send({ type: "join", pin: initial.pin, profile: { name: "B" } });
+  const bj = await b.wait((m) => m.type === "joined");
+  await a.wait((m) => m.type === "state" && m.room.members.length === 2);
+  a.send({
+    type: "command",
+    command: { kind: "settings", locked: true, base: a.state().revision, op: "lock" },
+  });
+  await a.wait((m) => m.type === "ack" && m.op === "lock");
+  const refusal = async (pin) => {
+    const c = await connect(url);
+    c.send({ type: "join", pin, profile: { name: "C" } });
+    const { message } = await c.wait((m) => m.type === "error");
+    c.ws.close();
+    return message;
+  };
+  const missing = initial.pin === "00000000" ? "00000001" : "00000000";
+  assert.equal(await refusal(initial.pin), await refusal(missing));
+  a.send({ type: "leave", next: "someone-who-left" });
+  await a.wait((m) => m.type === "ended");
+  const after = await b.wait(
+    (m) => m.type === "state" && m.room.members.length === 1,
+  );
+  assert.equal(after.room.owner, bj.member);
+  assert.notEqual(after.room.owner, aj.member);
+});
+test("per-source limits group IPv6 clients by /64", () => {
+  assert.equal(limitKey("203.0.113.9"), "203.0.113.9");
+  assert.equal(limitKey("::ffff:203.0.113.9"), "203.0.113.9");
+  assert.equal(
+    limitKey("2001:db8:1:2:aaaa::1"),
+    limitKey("2001:db8:1:2:bbbb:cccc:dddd:eeee"),
+  );
+  assert.notEqual(limitKey("2001:db8:1:2::1"), limitKey("2001:db8:1:3::1"));
 });

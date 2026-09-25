@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { isIPv6 } from "node:net";
 import { randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
@@ -14,6 +15,24 @@ import {
   tick,
 } from "./v2.mjs";
 
+// Per-IP limits key IPv6 clients by /64, since one host usually holds a
+// whole /64 and could otherwise take a fresh address per connection.
+export function limitKey(address) {
+  const ip = address.startsWith("::ffff:") ? address.slice(7) : address;
+  if (!isIPv6(ip)) return ip;
+  const [head, tail = ""] = ip.split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  const groups = [
+    ...left,
+    ...Array(Math.max(0, 8 - left.length - right.length)).fill("0"),
+    ...right,
+  ];
+  return `${groups
+    .slice(0, 4)
+    .map((g) => parseInt(g || "0", 16).toString(16))
+    .join(":")}::/64`;
+}
 export function createRoomServerV2({
   maxRooms = 100,
   maxMembers = 12,
@@ -48,17 +67,19 @@ export function createRoomServerV2({
       );
     },
   });
-  const send = (ws, data) => {
+  const sendRaw = (ws, text) => {
     if (ws?.readyState === WebSocket.OPEN) {
       if (ws.bufferedAmount > 2 * 1024 * 1024)
         ws.close(1008, "Slow connection");
-      else ws.send(JSON.stringify(data));
+      else ws.send(text);
     }
   };
+  const send = (ws, data) => sendRaw(ws, JSON.stringify(data));
+  // A full queue makes the snapshot large, so it is serialized once per
+  // change rather than once per listener.
   const broadcast = (room) => {
-    const state = snapshot(room);
-    for (const m of room.members.values())
-      send(m.socket, { type: "state", room: state });
+    const text = JSON.stringify({ type: "state", room: snapshot(room) });
+    for (const m of room.members.values()) sendRaw(m.socket, text);
   };
   const pin = () => {
     let value;
@@ -88,7 +109,12 @@ export function createRoomServerV2({
     const room = ws.room,
       member = ws.member;
     if (!room || !member || member.socket !== ws) return;
-    if (deliberate && room.owner === member.id && next) transfer(room, next);
+    // A handover to someone who just left falls back to a random listener
+    // below instead of leaving this member stuck in the room.
+    if (deliberate && room.owner === member.id && next)
+      try {
+        transfer(room, next);
+      } catch {}
     member.connected = false;
     member.socket = null;
     member.status = "reconnecting";
@@ -129,10 +155,11 @@ export function createRoomServerV2({
     const trusted =
       trustProxy && ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address);
     const forwarded = req.headers["x-forwarded-for"];
-    const ip =
+    const ip = limitKey(
       trusted && typeof forwarded === "string"
         ? forwarded.split(",").at(-1).trim()
-        : address;
+        : address,
+    );
     if (
       wss.clients.size > 200 ||
       [...wss.clients].filter((s) => s.ip === ip).length >= 24
@@ -217,19 +244,19 @@ export function createRoomServerV2({
             const room = rooms.get(
               pins.get(String(msg.pin).replace(/\s/g, "")),
             );
-            if (!room || room.expires <= now)
+            // One answer for every refusal, so probing PINs cannot tell a
+            // locked or full room from one that does not exist.
+            if (
+              !room ||
+              room.expires <= now ||
+              room.locked ||
+              room.members.size >= maxMembers ||
+              (room.joinApproval && room.pending.length >= maxMembers)
+            )
               throw new Error(
-                "PIN is invalid or expired. Check the selected server.",
+                "PIN is invalid or expired, or the room is not taking listeners. Check the selected server.",
               );
-            if (room.locked)
-              throw new Error(
-                "This room is locked. Ask the leader to unlock it.",
-              );
-            if (room.members.size >= maxMembers)
-              throw new Error("This room is full.");
             if (room.joinApproval) {
-              if (room.pending.length >= maxMembers)
-                throw new Error("The waiting room is full.");
               const request = {
                 id: randomUUID(),
                 ...profile(msg.profile),
