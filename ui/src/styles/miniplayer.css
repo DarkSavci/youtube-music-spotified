@@ -50,6 +50,15 @@
   mask-image: linear-gradient(to right, #000 0%, transparent 70%);
 }
 
+/* A window taller than the bar that still has to show it (too narrow for the
+   wide layout, too short for the square) keeps it centred, not stuck at the
+   top. */
+.mini[data-layout="bar"] {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
 .mini__drag {
   -webkit-app-region: drag;
 }
@@ -355,14 +364,25 @@ button.mini__title:hover {
 
 /* ---------- what fits ---------- */
 
+/*
+ * The bar is one row, so the title gets what the buttons leave. They step in
+ * as the width allows, least needed last, so the title always keeps room to
+ * be read: open-app first (the title does the same), then the heart, then
+ * speed, which is set once and left.
+ */
 @container (max-width: 400px) {
-  .mini__bar > .iconbtn {
+  .mini__bar .mini__winbtns .mini__openapp {
+    display: none;
+  }
+}
+@container (max-width: 440px) {
+  .mini__bar > .iconbtn:not(.speedbtn) {
     display: none; /* the heart; the transport stays */
   }
 }
-@container (max-width: 330px) {
-  .mini__bar .mini__winbtns .mini__openapp {
-    display: none; /* the title does the same */
+@container (max-width: 500px) {
+  .mini__bar > .speedbtn {
+    display: none;
   }
 }
 @container (max-height: 270px) {
@@ -380,10 +400,4 @@ button.mini__title:hover {
   .mini__wide .mini__volume .slider {
     display: none;
   }
-}
-
-/* A bar too narrow for the title and the transport gives speed up first:
-   it is set once and left, where the transport is used all the time. */
-@media (max-width: 380px) {
-  .mini__bar .speedbtn { display: none; }
 }

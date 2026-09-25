@@ -18,8 +18,14 @@ const path = require("node:path");
 const FRAME = "miniplayer";
 
 // Spotify's default is a square of artwork; so is this one.
-const DEFAULT_SIZE = { width: 320, height: 320 };
-const MIN_SIZE = { width: 260, height: 72 };
+const DEFAULT_SIZE = { width: 360, height: 360 };
+// The smallest window every layout still fits. Narrower than 360, the
+// one-line bar — the layout any short window falls back to — has too little
+// left for the title once the transport and the window buttons are in. At
+// 80 high the bar's tallest part, the 56px artwork, keeps 12px either side.
+// The renderer picks a layout that fits within this; see layoutFor in
+// ui/src/components/MiniPlayer.tsx.
+const MIN_SIZE = { width: 360, height: 80 };
 
 let win = null;
 let keeper = null;

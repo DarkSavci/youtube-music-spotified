@@ -47,13 +47,29 @@ type Layout = "bar" | "square" | "wide" | "tall";
 type Panel = "art" | "video" | "queue" | "lyrics";
 
 // What the queue and the lyrics need to be worth showing.
-const PANEL_SIZE = { width: 340, height: 580 };
+const PANEL_SIZE = { width: 360, height: 580 };
 
+/*
+ * What each layout needs, measured: below these the square cuts off its
+ * progress and buttons, and the wide one loses its title and squashes the
+ * transport. The wide layout's artwork is a square the window's height, so
+ * what it needs is the width left beside it.
+ */
+const SQUARE_MIN_HEIGHT = 260;
+const WIDE_MIN_SIDE = 270;
+
+/**
+ * The layout for a window size: the one its proportions suggest, or where
+ * that one would not fit, one that does — ending at the one-line bar, which
+ * fits any window the shell allows.
+ */
 function layoutFor(w: number, h: number): Layout {
   if (h < 140) return "bar";
   if (h >= 400 || (h >= 300 && w / h < 0.8)) return "tall";
-  if (w / h <= 1.35) return "square";
-  return "wide";
+  const square = h >= SQUARE_MIN_HEIGHT;
+  const wide = w - h >= WIDE_MIN_SIDE;
+  if (w / h <= 1.35) return square ? "square" : wide ? "wide" : "bar";
+  return wide ? "wide" : square ? "square" : "bar";
 }
 
 /** Mounted once by the app; draws into the mini window while it is open. */
