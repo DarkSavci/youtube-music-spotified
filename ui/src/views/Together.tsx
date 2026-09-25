@@ -1,3 +1,4 @@
+import { useSettings } from "../lib/settings";
 import { checkRoomServer } from "../../../listen-together/client-v2.mjs";
 import { useEffect, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -86,6 +87,7 @@ function Avatar({
   );
 }
 export function Together() {
+  const sharing = useSettings();
   const [serverCheck, setServerCheck] = useState("");
   const session = useTogether(),
     prefs = useRoomPreferences();
@@ -1093,6 +1095,11 @@ export function Together() {
                   })}
                 </small>
                 <h4>Your experience</h4>
+                {window.spotifier?.discordPresence && <label className="room-check">
+                  <input type="checkbox" checked={sharing.discordShareRoom} disabled={!sharing.discordEnabled} onChange={e => sharing.set("discordShareRoom", e.target.checked)} />
+                  Include room name in Discord activity
+                </label>}
+                {window.spotifier?.discordPresence && !sharing.discordEnabled && <small>Enable Discord activity in Settings to share your room name.</small>}
                 <label className="room-check">
                   <input
                     type="checkbox"

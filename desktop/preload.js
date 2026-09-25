@@ -20,6 +20,7 @@ const CORE_ORIGIN = "http://127.0.0.1:8674";
 contextBridge.exposeInMainWorld("spotifier", {
   /** Absolute origin of the Go core, read synchronously at page load. */
   coreOrigin: CORE_ORIGIN,
+  discordPresence: (value) => ipcRenderer.invoke("discord:presence", value),
   accountScope: ipcRenderer.sendSync("auth:scope"),
 
   /**
