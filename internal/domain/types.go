@@ -173,6 +173,13 @@ type Playlist struct {
 	Tracks   []Track `json:"tracks,omitempty"`
 }
 
+// PlaylistPage carries only one upstream page. Playlist's count is the
+// advertised total; its duration is omitted while more pages remain.
+type PlaylistPage struct {
+	Playlist Playlist `json:"playlist"`
+	Next     string   `json:"next,omitempty"`
+}
+
 // ---------- browse surfaces ----------
 
 // ShelfItemKind tags the heterogeneous contents of a Shelf.

@@ -133,15 +133,26 @@ func (s *Service) List(ctx context.Context, f Filter, srt Sort) ([]domain.Librar
 	// Liked Music is pinned at the top, as Spotify pins Liked Songs. It is a
 	// playlist everywhere else in the system, so it is only special here.
 	if f == FilterAll || f == FilterPlaylists {
-		if liked, err := s.id.LikedSongs(ctx); err == nil && liked.Title != "" {
-			merged = append([]domain.LibraryItem{{
-				ID:       liked.ID,
-				Kind:     domain.LibPlaylist,
-				Title:    liked.Title,
-				Subtitle: pluralSongs(liked.TrackCount),
-				Artwork:  liked.Artwork,
-				Pinned:   true,
-			}}, merged...)
+		found := false
+		for n := range merged {
+			if merged[n].Kind == domain.LibPlaylist && merged[n].ID == "LM" {
+				merged[n].Pinned = true
+				found = true
+			}
+		}
+		if !found {
+			read := s.id.LikedSongs
+			if summary, ok := s.id.(interface {
+				LikedSongsSummary(context.Context) (domain.Playlist, error)
+			}); ok {
+				read = summary.LikedSongsSummary
+			}
+			if liked, err := read(ctx); err == nil && liked.Title != "" {
+				merged = append([]domain.LibraryItem{{
+					ID: liked.ID, Kind: domain.LibPlaylist, Title: liked.Title,
+					Subtitle: pluralSongs(liked.TrackCount), Artwork: liked.Artwork, Pinned: true,
+				}}, merged...)
+			}
 		}
 	}
 
@@ -220,6 +231,9 @@ func sortItems(items []domain.LibraryItem, s Sort) {
 }
 
 func pluralSongs(n int) string {
+	if n == 0 {
+		return "Auto playlist"
+	}
 	if n == 1 {
 		return "1 song"
 	}

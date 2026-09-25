@@ -1,3 +1,4 @@
+import { EndTime } from "./EndTime";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { ArtistLinks } from "./EntityLinks";
 import { VolumeControl } from "./VolumeControl";
@@ -49,6 +50,7 @@ function useLyrics() {
       });
       if (track?.album?.name) q.set("album", track.album.name);
       if (timed) q.set("timed", "1");
+      if (track?.isVideo) q.set("video", "1");
       const res = await fetch(
         apiUrl(`/v1/tracks/${encodeURIComponent(track!.id)}/lyrics?${q}`),
         { signal },
@@ -294,7 +296,7 @@ function LyricsTransport() {
           disabled={!track}
           onChange={(v) => transport.seek(v)}
         />
-        <span className="lyricsview__time">{formatDuration(duration)}</span>
+        <EndTime className="lyricsview__time" duration={duration} position={position} />
       </div>
 
       {/* The same transport as the full-screen player: leaving a view means

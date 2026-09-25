@@ -1,3 +1,5 @@
+import { EndTime } from "./EndTime";
+import { VideoSwitch } from "./VideoPlayer";
 import { useEffect, useRef, useState } from "react";
 import { AlbumLink, ArtistLinks } from "./EntityLinks";
 import { share } from "../lib/share";
@@ -184,7 +186,7 @@ export function NowPlayingBar({
               requestAnimationFrame(() => setScrubbing(null));
             }}
           />
-          <span className="bar__time">{formatDuration(duration)}</span>
+          <EndTime className="bar__time" duration={duration} position={shown} />
         </div>
       </div>
 
@@ -208,6 +210,7 @@ export function NowPlayingBar({
         >
           <IconQueue size={18} />
         </button>
+        <VideoSwitch />
         <VolumeControl />
         {/* Where Spotify puts it: after the volume, at the far right. */}
         {miniSupported() ? (

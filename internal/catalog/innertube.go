@@ -206,3 +206,50 @@ func (c *InnerTube) Podcast(ctx context.Context, id string) (domain.Podcast, err
 	}
 	return pod, nil
 }
+
+// PlaylistPage returns as soon as one page is available. The original Playlist
+// method remains the complete-list API for queueing and bulk operations.
+func (c *InnerTube) PlaylistPage(ctx context.Context, id, token string) (domain.PlaylistPage, error) {
+	if token != "" {
+		doc, err := c.call(ctx, "browse", map[string]any{"continuation": token})
+		if err != nil {
+			return domain.PlaylistPage{}, err
+		}
+		if renderers.Find(doc, "appendContinuationItemsAction") == nil && renderers.Find(doc, "musicPlaylistShelfContinuation") == nil {
+			return domain.PlaylistPage{}, fmt.Errorf("catalog: playlist continuation did not parse")
+		}
+		tracks, next := renderers.ParsePlaylistContinuation(doc)
+		if next == token {
+			return domain.PlaylistPage{}, fmt.Errorf("catalog: repeated playlist continuation")
+		}
+		return domain.PlaylistPage{Playlist: domain.Playlist{ID: id, Tracks: tracks}, Next: next}, nil
+	}
+	browseID := id
+	if !strings.HasPrefix(id, "VL") {
+		browseID = "VL" + id
+	}
+	doc, err := c.call(ctx, "browse", map[string]any{"browseId": browseID})
+	if err != nil {
+		return domain.PlaylistPage{}, err
+	}
+	pl, ok := renderers.ParsePlaylist(doc, browseID, c.ctxFor("playlist"))
+	if !ok {
+		return domain.PlaylistPage{}, fmt.Errorf("catalog: playlist %s did not parse", id)
+	}
+	next := renderers.PlaylistNext(doc)
+	if next != "" {
+		if pl.TrackCount == len(pl.Tracks) {
+			pl.TrackCount = 0
+		}
+		pl.DurationMs = 0
+	}
+	return domain.PlaylistPage{Playlist: pl, Next: next}, nil
+}
+
+func (c *InnerTube) TrackVersions(ctx context.Context, id string) ([]domain.Track, error) {
+	doc, err := c.call(ctx, "next", map[string]any{"videoId": id})
+	if err != nil {
+		return nil, err
+	}
+	return renderers.ParseTrackVersions(doc, id), nil
+}

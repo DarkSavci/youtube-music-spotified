@@ -1,3 +1,6 @@
+import { EndTime } from "./EndTime";
+import { VideoSurface, VideoNotice, useVideoControl } from "./VideoPlayer";
+import { useVideo, setVideoEnabled } from "../lib/video";
 import { useContext, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -17,7 +20,7 @@ import { Slider } from "./Slider";
 import { VolumeControl } from "./VolumeControl";
 import {
   IconClose, IconHeart, IconLyrics, IconOpenApp, IconPause, IconPin, IconPlay,
-  IconQueue, IconRepeat, IconShuffle, IconSkipNext, IconSkipPrev,
+  IconQueue, IconRepeat, IconShuffle, IconSkipNext, IconSkipPrev, IconVideo,
 } from "./Icon";
 
 /**
@@ -40,7 +43,7 @@ import {
  */
 
 type Layout = "bar" | "square" | "wide" | "tall";
-type Panel = "art" | "queue" | "lyrics";
+type Panel = "art" | "video" | "queue" | "lyrics";
 
 // What the queue and the lyrics need to be worth showing.
 const PANEL_SIZE = { width: 340, height: 580 };
@@ -82,14 +85,19 @@ function useWindowSize(win: Window) {
 function MiniPlayer({ win }: { win: Window }) {
   const { w, h } = useWindowSize(win);
   const layout = layoutFor(w, h);
-  const [panel, setPanel] = useState<Panel>("art");
+  const video = useVideo(s => s.enabled);
+  const [panel, setPanel] = useState<Panel>(() => useVideo.getState().enabled ? "video" : "art");
   const track = usePlayer((s) => s.track);
   const color = useArtColor(artworkAtLeast(track?.artwork ?? [], 300));
 
   const choosePanel = (next: Panel) => {
-    if (layout === "tall" && panel === next) return setPanel("art");
+    // Queue and lyrics are only shown in the tall layout, so only there does
+    // a second click close them.
+    if (panel === next && (next === "video" ? video : layout === "tall")) return setPanel("art");
     setPanel(next);
-    if (layout !== "tall") ensureMiniSize(PANEL_SIZE.width, PANEL_SIZE.height);
+    if (next === "video") {
+      if (!useVideo.getState().enabled) void setVideoEnabled(true);
+    } else if (layout !== "tall") ensureMiniSize(PANEL_SIZE.width, PANEL_SIZE.height);
   };
 
   // The taskbar and Alt+Tab name the window after what is playing.
@@ -110,7 +118,8 @@ function MiniPlayer({ win }: { win: Window }) {
     return () => win.removeEventListener("keydown", onKey);
   }, [win]);
 
-  const panelProps = { panel: layout === "tall" ? panel : "art", onPanel: choosePanel };
+  const visiblePanel = panel === "video" && !video ? "art" : panel;
+  const panelProps = { panel: layout === "tall" || visiblePanel === "video" ? visiblePanel : "art", onPanel: choosePanel };
 
   return (
     <div className="mini" data-layout={layout} style={{ "--art": color } as CSSProperties}>
@@ -147,7 +156,7 @@ function Bar() {
 function Square(props: PanelProps) {
   return (
     <div className="mini__square">
-      <Cover size={544} className="mini__cover" />
+      <Cover size={544} className="mini__cover" video={props.panel === "video"} />
       <div className="mini__overlay">
         <Head />
         <div className="mini__bottom">
@@ -168,7 +177,7 @@ function Square(props: PanelProps) {
 function Wide(props: PanelProps) {
   return (
     <div className="mini__wide">
-      <Cover size={544} className="mini__cover" />
+      <Cover size={544} className="mini__cover" video={props.panel === "video"} />
       <div className="mini__side">
         <Head>
           <Meta />
@@ -191,13 +200,13 @@ function Tall({ panel, onPanel }: PanelProps) {
         </span>
       </Head>
       <div className="mini__panel scroll">
-        {panel === "art" ? <Cover size={544} className="mini__cover" /> : null}
+        {panel === "art" || panel === "video" ? <Cover size={544} className="mini__cover" video={panel === "video"} /> : null}
         {panel === "queue" ? <QueueList onNavigate={desktop.showMainWindow} /> : null}
         {panel === "lyrics" ? <LyricsBody large={false} /> : null}
       </div>
       <div className="mini__foot">
         <div className="mini__row">
-          {panel !== "art" ? <Cover size={120} className="mini__thumb" /> : null}
+          {panel !== "art" && panel !== "video" ? <Cover size={120} className="mini__thumb" /> : null}
           <Meta />
           <LikeButton />
         </div>
@@ -221,9 +230,10 @@ function Head({ children }: { children?: ReactNode }) {
   );
 }
 
-function Cover({ size, className }: { size: number; className: string }) {
+function Cover({ size, className, video = false }: { size: number; className: string; video?: boolean }) {
   const track = usePlayer((s) => s.track);
   const src = artworkAtLeast(track?.artwork ?? [], size);
+  if (video && size > 120) return <VideoSurface priority={20} className={className} />;
   if (!src) return <div className={`${className} mini__cover--none`} />;
   return <img className={className} src={src} alt="" draggable={false} />;
 }
@@ -345,7 +355,7 @@ function Progress() {
           frames.requestAnimationFrame(() => setScrub(null));
         }}
       />
-      <span className="mini__time">{formatDuration(duration)}</span>
+      <EndTime className="mini__time" duration={duration} position={shown} />
     </div>
   );
 }
@@ -363,8 +373,16 @@ function ThinProgress() {
 }
 
 function Extras({ panel, onPanel }: PanelProps) {
+  const { blocked, reason } = useVideoControl();
   return (
     <div className="mini__extras">
+      {/* The mini player has no custom tooltip layer, so title is its only tooltip. */}
+      <button className="iconbtn" aria-label={panel === "video" ? "Hide music video" : reason} title={panel === "video" ? "Hide music video" : reason}
+        aria-pressed={panel === "video"} data-active={panel === "video" || undefined}
+        aria-disabled={panel !== "video" && blocked} onClick={() => { if (panel === "video" || !blocked) onPanel("video"); }}>
+        <IconVideo size={18} />
+      </button>
+      <VideoNotice />
       <button
         className="iconbtn"
         aria-label="Queue"

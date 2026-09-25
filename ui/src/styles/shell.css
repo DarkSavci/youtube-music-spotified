@@ -222,12 +222,14 @@
 }
 .main__scroll {
   flex: 1;
+  min-height: 0;
 }
 .main__content {
   padding: 0 var(--space-5) var(--space-7);
 }
 
 .topbar {
+  flex-shrink: 0;
   position: sticky;
   top: 0;
   z-index: var(--z-panel);
@@ -655,8 +657,8 @@
   animation: ctxin var(--duration-fast) var(--ease-out);
 }
 @keyframes ctxin {
-  from { opacity: 0; transform: scale(0.97); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ctxmenu { animation: none; }
@@ -914,6 +916,10 @@
 .fsp .iconbtn:hover,
 .fsp .iconbtn[data-active] {
   color: #fff;
+}
+/* The video toggle is lit the same way everywhere: player bar, mini player, here. */
+.fsp .video-toggle[data-active] {
+  color: var(--accent);
 }
 .playbtn--lg {
   width: 56px;
@@ -1317,3 +1323,85 @@
 
 .account-menu__avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
 .account-menu__current { display: flex; align-items: center; gap: 12px; }
+
+.whats-new-button { position: relative; }
+.whats-new-button__dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.whats-new-dialog { width: min(600px, calc(100vw - 32px)); max-height: min(720px, calc(100vh - 48px)); padding: 0; margin: auto; border: 1px solid #ffffff24; border-radius: 16px; background: #181818; color: var(--text-primary); box-shadow: 0 20px 80px #0009; }
+.whats-new-dialog::backdrop { background: #0009; }
+.whats-new-dialog__body { display: flex; flex-direction: column; max-height: min(720px, calc(100vh - 48px)); }
+.whats-new-dialog__header { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid #ffffff16; }
+.whats-new-dialog__header h2 { font-size: 24px; }
+.whats-new-dialog__scroll { overflow-y: auto; min-height: 0; padding: 24px; }
+.whats-new-dialog__scroll .changelog { padding: 0; }
+.whats-new-dialog footer { padding: 16px 24px; border-top: 1px solid #ffffff16; }
+
+/* Native drag regions swallow pointer events. While a popup is open, let
+   clicks on the empty title bar dismiss it; restore dragging on close. */
+body:has(.account-menu, .whats-new-dialog[open]) .topbar,
+body:has(.account-menu, .whats-new-dialog[open]) .app-shell::before {
+  -webkit-app-region: no-drag;
+}
+
+/* Shared navigation above the library and browsing panels. */
+.app-shell {
+  grid-template-rows: var(--topbar-height) minmax(0, 1fr) var(--bar-height);
+  grid-template-areas: "topbar topbar" "sidebar main" "bar bar";
+}
+.app-shell[data-nowplaying="true"] {
+  grid-template-areas: "topbar topbar topbar" "sidebar main nowplaying" "bar bar bar";
+}
+.app-shell > .topbar { grid-area: topbar; position: relative; border-radius: var(--radius-md); padding: 0 12px; gap: 12px; background: var(--surface-base); }
+.topbar__home { width: 44px; height: 44px; border-radius: 50%; background: var(--surface-control); flex-shrink: 0; }
+.topbar .searchfield { flex: 0 1 540px; width: min(540px, 40vw); border-radius: 28px; min-width: 140px; }
+.searchfield > .iconbtn { flex-shrink: 0; }
+.end-time { cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.end-time:hover { color: var(--text-primary); }
+.end-time:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.sidebar__header { border-top: 0; min-height: 56px; }
+.sidebar__toggle { display: grid; width: 22px; height: 22px; flex-shrink: 0; }
+.sidebar__toggle svg { grid-area: 1 / 1; transition: transform 180ms ease, opacity 180ms ease; }
+.sidebar__collapse-icon { opacity: 0; transform: translateX(-7px); }
+.sidebar:hover .sidebar__collapse-icon, .sidebar:focus-within .sidebar__collapse-icon { opacity: 1; transform: none; }
+.sidebar:hover .sidebar__library-icon, .sidebar:focus-within .sidebar__library-icon { opacity: 0; transform: translateX(7px); }
+.sidebar__search { display: flex; align-items: center; gap: 8px; margin: 0 16px 8px; padding: 7px 9px; background: var(--surface-control); border-radius: 5px; color: var(--text-secondary); }
+.sidebar__search input { width: 100%; min-width: 0; background: transparent; border: 0; color: var(--text-primary); font-size: 12px; }
+.library-no-results { padding: 16px; color: var(--text-secondary); }
+.app-shell[data-library-expanded] > .sidebar { grid-column: 1 / 3; grid-row: 2; }
+.app-shell[data-library-expanded] > .main { display: none; }
+.sidebar[data-expanded] .sidebar__resizer { display: none; }
+.sidebar[data-grid] .sidebar__list > ul, .sidebar[data-grid] .libfolder__items { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; padding: 16px; }
+.sidebar[data-grid] .sidebar__list > ul > li:has(.libfolder) { grid-column: 1 / -1; }
+.sidebar[data-grid] .libitem { flex-direction: column; align-items: stretch; gap: 10px; padding: 10px; }
+.sidebar[data-grid] .libitem__art { width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; }
+.sidebar[data-grid] .libitem__text { display: flex; flex-direction: column; min-width: 0; }
+.sidebar[data-grid] .libitem__title { font-size: 15px; }
+.sidebar[data-expanded] .sidebar__search { width: min(360px, calc(100% - 32px)); }
+.ctxmenu { max-width: min(340px, calc(100vw - 16px)); }
+.ctxmenu__scroll { max-height: calc(100vh - 32px); overflow-y: auto; }
+.ctxmenu__item { display: flex; align-items: center; gap: 12px; }
+.ctxmenu__item > svg { flex-shrink: 0; color: var(--text-secondary); }
+.ctxmenu__item > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-menu button[role="menuitem"] { display: flex; align-items: center; gap: 10px; }
+@container sidebar (max-width: 170px) {
+  .sidebar__search, .sidebar__actions { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar__toggle svg { transition: none; }
+}
+
+.sidebar__title .sidebar__toggle { display: grid; }
+
+.sidebar__search:focus-within { outline: 2px solid var(--text-primary); outline-offset: -2px; }
+.sidebar__search input:focus, .sidebar__search input:focus-visible { outline: none; box-shadow: none; }
+.topbar__search-group { display: flex; align-items: center; gap: 12px; position: absolute; left: 50%; transform: translateX(-50%); width: min(40vw, 560px); }
+.topbar__search-group .searchfield { width: auto; flex: 1; }
+.searchfield { -webkit-app-region: no-drag; cursor: text; }
+.searchfield__browse { border-left: 1px solid var(--border-subtle); border-radius: 0; padding-left: 8px; width: 40px; }
+/* The divider needs square corners, so a hover fill would be a hard-edged box
+   inside the rounded field; brighten the icon instead. */
+.searchfield__browse:hover:not(:disabled) { background: transparent; }
+@media (max-width: 1100px) {
+  .topbar__search-group { position: static; transform: none; width: auto; flex: 1; min-width: 180px; }
+  .topbar__spacer { display: none; }
+  .topbar__account { max-width: 130px; }
+}

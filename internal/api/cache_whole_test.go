@@ -72,7 +72,29 @@ func newWholeServer(t *testing.T, u *wholeUpstream, res resolver.Resolver) (*Ser
 		sw.size = int64(len(u.data))
 	}
 	cache, _ := audiocache.New(t.TempDir(), 1<<30)
-	return New(Deps{Resolver: res, Audio: cache}), cache
+	s := New(Deps{Resolver: res, Audio: cache})
+	t.Cleanup(func() {
+		// Stop speculative work before TempDir cleanup removes its files.
+		// A completed next track does not imply the other queued fill ended.
+		s.PrefetchQueue(nil)
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			active := false
+			s.fills.Range(func(key, _ any) bool {
+				active = active || s.fillActive(key.(string))
+				return !active
+			})
+			if !active {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Error("cache fills did not stop before temporary directory cleanup")
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	})
+	return s, cache
 }
 
 // A track played for the first time is fetched from upstream once: played
@@ -125,9 +147,8 @@ func TestStalledDownloadResumes(t *testing.T) {
 
 // A track that leaves the queue stops downloading.
 func TestLeavingTheQueueStopsTheDownload(t *testing.T) {
-	old := stallTimeout
-	stallTimeout = time.Minute
-	defer func() { stallTimeout = old }()
+	// The default stall timeout already exceeds this test's deadline. Do not
+	// restore a global timeout while the replacement prefetch is still running.
 
 	u := &wholeUpstream{data: audioFile(4 * streamWindow), stallAfter: 1024}
 	s, _ := newWholeServer(t, u, &switchable{})

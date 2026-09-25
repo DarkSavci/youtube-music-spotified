@@ -50,6 +50,7 @@ export interface SessionDevice {
 }
 
 export interface Projection {
+  followingRoom?: boolean;
   state: SessionState;
   target: SessionTarget;
   devices: SessionDevice[];
@@ -57,6 +58,9 @@ export interface Projection {
 }
 
 export type Command =
+  | { Kind: "switch_variant"; ExpectedID: string; Tracks: Track[] }
+  | { Kind: "follow_room"; Tracks: Track[]; PositionMs: number; Playing: boolean }
+  | { Kind: "leave_room" }
   | { Kind: "play"; Tracks: Track[]; StartIndex: number; Origin: string }
   | { Kind: "toggle" }
   | { Kind: "next" }
@@ -168,14 +172,15 @@ export class SessionClient {
   }
 
   /** Sends an intent. The projection that comes back is applied immediately. */
-  async command(command: Command): Promise<void> {
+  async command(command: Command): Promise<boolean> {
     try {
       const res = await fetch(apiUrl("/v1/session/command"), {
         method: "POST",
+        signal: AbortSignal.timeout(10000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ deviceId: this.deviceID, command }),
       });
-      if (!res.ok) return;
+      if (!res.ok) return false;
       const body = (await res.json()) as { rejected: string; projection: Projection };
       if (body.rejected) {
         // A rejection is a normal outcome — an empty queue, an out-of-range
@@ -183,8 +188,9 @@ export class SessionClient {
         console.debug("[session] command rejected:", body.rejected);
       }
       this.onProjection(body.projection);
+      return !body.rejected;
     } catch {
-      /* the stream will deliver the authoritative state regardless */
+      return false;
     }
   }
 

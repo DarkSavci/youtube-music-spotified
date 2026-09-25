@@ -1,3 +1,4 @@
+import { IconEqualizerStatic, IconSettings, IconLibrary } from "./Icon";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
@@ -113,8 +114,9 @@ export function AccountMenu({ account }: { account: { name: string; handle?: str
       </div>
       <div className="account-menu__actions">
         {desktop.available && <button role="menuitem" disabled={busy || signingIn} onClick={() => void signIn()}>{signingIn ? "Finish in your browser…" : "Add Google account"}</button>}
-        <button role="menuitem" disabled={busy || signingIn} onClick={() => { close(); navigate("/settings"); }}>Accounts and channels</button>
-        <button role="menuitem" disabled={busy || signingIn} onClick={() => { close(); navigate("/settings"); }}>Settings</button>
+        <button role="menuitem" disabled={busy || signingIn} onClick={() => { close(); navigate("/settings"); }}><IconLibrary size={18} /> Accounts and channels</button>
+        <button role="menuitem" onClick={() => { close(); navigate("/stats"); }}><IconEqualizerStatic size={18} /> Your listening</button>
+        <button role="menuitem" disabled={busy || signingIn} onClick={() => { close(); navigate("/settings"); }}><IconSettings size={18} /> Settings</button>
         {desktop.available && <button role="menuitem" disabled={busy || signingIn} onClick={() => {
           close();
           void (async () => {

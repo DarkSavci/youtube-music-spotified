@@ -12,6 +12,7 @@ import { SessionClient, type Projection } from "./sessionclient";
 import type { Track } from "./types";
 import { usePlayer } from "./player";
 import { recordPlay } from "./playlog";
+import { toast } from "./toast";
 
 /**
  * Drives the engine from the player store.
@@ -203,7 +204,7 @@ function onEngineEvent(e: EngineEvent) {
       return;
     }
     if (e.kind === "failed") {
-      usePlayer.setState({ notice: null });
+      usePlayer.setState({ notice: usePlayer.getState().followingRoom ? "This track could not play on your account. Waiting for the host’s next track." : null });
       consecutiveFailures += 1;
       if (consecutiveFailures >= FALLBACK_AFTER_FAILURES && !fellBack) {
         console.warn("[playback] falling back to the embedded engine");
@@ -307,6 +308,7 @@ function applyProjection(p: Projection) {
   const items = p.state.queue.items ?? [];
   const track = items[p.state.queue.index] ?? null;
   usePlayer.setState({
+    followingRoom: Boolean(p.followingRoom),
     state: p.state.state,
     track,
     queue: items,
@@ -353,6 +355,9 @@ export function startPlayback() {
     .start(navigator.platform || "This device", engine.capabilities)
     .then((ok) => {
       serverAuthoritative = ok;
+      // A room invitation never survives a window reload or account switch.
+      // Only the playback owner may clear its stale room after a reload.
+      if (ok && usePlayer.getState().followingRoom && usePlayer.getState().devices.some(d => d.id === session?.deviceID && d.owner)) void session?.command({ Kind: "leave_room" });
       if (!ok) {
         console.debug("[playback] session core unreachable; driving playback locally");
         session = null;
@@ -391,9 +396,24 @@ export function isServerAuthoritative(): boolean {
   return serverAuthoritative;
 }
 
+function roomControlsLocked(): boolean {
+  if (!usePlayer.getState().followingRoom) return false;
+  toast("The host controls playback. Leave Listen Together to choose your own music.");
+  return true;
+}
+
+export async function syncRoomPlayback(track: Track | null, positionMs: number, playing: boolean) {
+  if (!session || !serverAuthoritative) throw new Error("The local music service is not ready.");
+  if (!await session.command({ Kind: "follow_room", Tracks: track ? [track] : [], PositionMs: Math.round(positionMs), Playing: playing })) throw new Error("Could not synchronize playback with the local music service.");
+}
+export async function leaveRoomPlayback() {
+  if (session) await session.command({ Kind: "leave_room" });
+}
+
 /** Sends an intent to the core, or falls back to the local store. */
 export const transport = {
   play(tracks: Track[], index: number, origin: string) {
+    if (roomControlsLocked()) return;
     /*
      * Clicking the song that is already playing does not restart it.
      *
@@ -424,6 +444,7 @@ export const transport = {
    * radio once it ends.
    */
   playRadio(track: Track, origin?: string) {
+    if (roomControlsLocked()) return;
     const s = usePlayer.getState();
     if (s.track?.id === track.id) {
       const playing = s.state === "playing" || s.state === "loading" || s.state === "stalled";
@@ -436,6 +457,7 @@ export const transport = {
 
   /** Plays another entry of the queue, one already played included. */
   jump(at: number) {
+    if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.command({ Kind: "jump", At: at });
     else {
       const s = usePlayer.getState();
@@ -444,18 +466,30 @@ export const transport = {
   },
 
   toggle() {
+    // A guest whose start was blocked presses Play to try again; that is
+    // the host's playback, not a choice of their own.
+    const s = usePlayer.getState();
+    if (s.followingRoom && s.notice) {
+      usePlayer.setState({ notice: null });
+      void import("./together").then(m => m.retryTogetherPlayback());
+      return;
+    }
+    if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.command({ Kind: "toggle" });
     else usePlayer.getState().toggle();
   },
   next() {
+    if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.command({ Kind: "next" });
     else usePlayer.getState().next();
   },
   prev() {
+    if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.command({ Kind: "prev" });
     else usePlayer.getState().prev();
   },
   seek(ms: number) {
+    if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.command({ Kind: "seek", PositionMs: Math.round(ms) });
     else usePlayer.getState().seek(ms);
   },
@@ -505,6 +539,7 @@ export const transport = {
     usePlayer.setState({ muted: true });
   },
   toggleShuffle() {
+    if (roomControlsLocked()) return;
     const s = usePlayer.getState();
     if (serverAuthoritative && session) void session.command({ Kind: "set_shuffle", Shuffle: !s.shuffle });
     else s.toggleShuffle();
@@ -516,6 +551,7 @@ export const transport = {
    * projection that follows is what moves the UI.
    */
   enqueue(tracks: Track[]) {
+    if (roomControlsLocked()) return;
     const s = usePlayer.getState();
     const at = s.queue.length;
     if (serverAuthoritative && session) {
@@ -527,6 +563,7 @@ export const transport = {
 
   /** Inserts tracks directly after the current one. */
   playNext(tracks: Track[]) {
+    if (roomControlsLocked()) return;
     const s = usePlayer.getState();
     const at = Math.min(s.index + 1, s.queue.length);
     if (serverAuthoritative && session) {
@@ -545,18 +582,21 @@ export const transport = {
    * ever sent them, so a queue could be built and never rearranged.
    */
   move(from: number, to: number) {
+    if (roomControlsLocked()) return;
     if (serverAuthoritative && session) {
       void session.command({ Kind: "move", From: from, To: to });
     }
   },
 
   removeAt(at: number) {
+    if (roomControlsLocked()) return;
     if (serverAuthoritative && session) {
       void session.command({ Kind: "remove", At: at });
     }
   },
 
   cycleRepeat() {
+    if (roomControlsLocked()) return;
     const s = usePlayer.getState();
     const nextMode = s.repeat === "off" ? "all" : s.repeat === "all" ? "one" : "off";
     if (serverAuthoritative && session) void session.command({ Kind: "set_repeat", Repeat: nextMode });
@@ -681,4 +721,12 @@ export async function applyPlaybackSettings(s: {
 export function installAudioDebug() {
   (window as unknown as { __audio?: () => unknown }).__audio = () =>
     engine instanceof NativeEngine ? engine.debugLevel() : null;
+}
+
+/** Change an explicitly paired edit without replacing the listener's queue. */
+export async function switchTrackVariant(track: Track, expectedID: string): Promise<boolean> {
+  if (roomControlsLocked()) return false;
+  if (usePlayer.getState().track?.id !== expectedID) return false;
+  if (serverAuthoritative && session) return session.command({ Kind: "switch_variant", ExpectedID: expectedID, Tracks: [track] });
+  return false;
 }

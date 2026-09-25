@@ -39,6 +39,11 @@ type Deps struct {
 	AccountScope string
 	Catalog      catalog.Catalog
 
+	// ClientToken, when set, is a per-launch secret the desktop shell attaches
+	// to its own requests. The video routes require it, so a web page cannot
+	// drive them through the open CORS policy.
+	ClientToken string
+
 	// Account holds the signed-in state and everything derived from it. It is
 	// read per request rather than captured here, because signing in happens
 	// while the process is running. Nil, or holding a signed-out State, leaves
@@ -99,9 +104,12 @@ type Server struct {
 	deps Deps
 	mux  *http.ServeMux
 
-	streams  *streamCache
-	prefetch *prefetcher
-	autoplay *autoplay
+	videoMu      sync.Mutex
+	videos       map[string]resolvedEntry
+	videoFlights map[string]*videoFlight
+	streams      *streamCache
+	prefetch     *prefetcher
+	autoplay     *autoplay
 	// lastFailure is each track's most recent resolution error, for
 	// diagnosing a failed track without resolving it again.
 	lastFailure sync.Map
@@ -125,6 +133,7 @@ func New(d Deps) *Server {
 		deps:     d,
 		mux:      http.NewServeMux(),
 		streams:  newStreamCache(),
+		videos:   make(map[string]resolvedEntry),
 		prefetch: newPrefetcher(),
 		autoplay: newAutoplay(),
 		// No total deadline — a three-hour mix is one transfer — but a
@@ -167,6 +176,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/albums/{id}", s.handleAlbum)
 	s.mux.HandleFunc("GET /v1/artists/{id}", s.handleArtist)
 	s.mux.HandleFunc("GET /v1/playlists/{id}", s.handlePlaylist)
+	s.mux.HandleFunc("GET /v1/video-stream/{id}", s.handleVideoStream)
+	s.mux.HandleFunc("GET /v1/tracks/{id}/versions", s.handleTrackVersions)
 	s.mux.HandleFunc("GET /v1/radio/{id}", s.handleRadio)
 	s.mux.HandleFunc("POST /v1/session/radio", s.handleStartRadio)
 	s.mux.HandleFunc("GET /v1/podcasts/{id}", s.handlePodcast)
@@ -354,6 +365,28 @@ func (s *Server) handleArtist(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePlaylist(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("paged") == "1" {
+		if pages, ok := s.deps.Catalog.(interface {
+			PlaylistPage(context.Context, string, string) (domain.PlaylistPage, error)
+		}); ok {
+			page, err := pages.PlaylistPage(r.Context(), r.PathValue("id"), r.URL.Query().Get("continuation"))
+			if err != nil {
+				s.fail(w, r, err)
+				return
+			}
+			page.Playlist = normalizePlaylist(page.Playlist)
+			s.write(w, http.StatusOK, page)
+			return
+		}
+		// Fixture adapters have a finite, already complete list.
+		pl, err := s.deps.Catalog.Playlist(r.Context(), r.PathValue("id"))
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		s.write(w, http.StatusOK, domain.PlaylistPage{Playlist: normalizePlaylist(pl)})
+		return
+	}
 	pl, err := s.deps.Catalog.Playlist(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.fail(w, r, err)
@@ -488,6 +521,11 @@ func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request) {
 	preferTimed := q.Get("timed") == "1"
 
 	got, err := s.deps.Lyrics.Lyrics(r.Context(), track, preferTimed)
+	if q.Get("video") == "1" && (errors.Is(err, lyrics.ErrNotFound) || (err == nil && preferTimed && !got.Synced)) {
+		if fallback, fallbackErr := s.videoLyrics(r.Context(), track, preferTimed); fallbackErr == nil && (err != nil || fallback.Synced) {
+			got, err = fallback, nil
+		}
+	}
 	if errors.Is(err, lyrics.ErrNotFound) {
 		s.write(w, http.StatusNotFound, apiError{Error: "no lyrics for this track"})
 		return

@@ -99,3 +99,14 @@ func (c *Chain) Resolve(ctx context.Context, videoID string) (domain.Stream, Qua
 	c.fellBack.Store(true)
 	return stream, quality, nil
 }
+
+func (c *Chain) ResolveVideo(ctx context.Context, id string) (domain.Stream, error) {
+	for _, r := range []Resolver{c.Preferred, c.Fallback} {
+		if video, ok := r.(interface {
+			ResolveVideo(context.Context, string) (domain.Stream, error)
+		}); ok {
+			return video.ResolveVideo(ctx, id)
+		}
+	}
+	return domain.Stream{}, errors.New("resolver: video is not available with this playback adapter")
+}

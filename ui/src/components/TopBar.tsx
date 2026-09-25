@@ -4,7 +4,9 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { signInLabel, useSignIn } from "../lib/signin";
-import { IconChevronLeft, IconChevronRight, IconSearch, IconSettings } from "./Icon";
+import { IconBrowse, IconHome, IconChevronLeft, IconChevronRight, IconSearch, IconSettings } from "./Icon";
+import { useTogether } from "../lib/together";
+import { WhatsNew } from "./WhatsNew";
 import { AccountMenu } from "./AccountMenu";
 
 /**
@@ -21,6 +23,7 @@ export function TopBar({
   onQueryChange?: (value: string) => void;
 }) {
   const navigate = useNavigate();
+  const roomStatus = useTogether(s => s.status);
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
   const [params] = useSearchParams();
@@ -90,10 +93,13 @@ export function TopBar({
         </button>
       </div>
 
-      <label className="searchfield">
-        <IconSearch size={18} />
-        <span className="sr-only">Search</span>
+      <div className="topbar__search-group">
+      <button className="iconbtn topbar__home" aria-label="Home" onClick={() => navigate("/")}><IconHome size={24} filled={location.pathname === "/"} /></button>
+      <div className="searchfield" onClick={() => inputRef.current?.focus()}>
+        {/* On the search page already, only focus: navigating would drop ?q=. */}
+        <button className="iconbtn" aria-label="Search" onClick={() => { if (location.pathname !== "/search") navigate("/search"); inputRef.current?.focus(); }}><IconSearch size={20} /></button>
         <input
+          aria-label="Search music"
           ref={inputRef}
           type="search"
           placeholder="What do you want to listen to?"
@@ -112,9 +118,15 @@ export function TopBar({
             }
           }}
         />
-      </label>
+        <button className="iconbtn searchfield__browse" aria-label="Browse all" onClick={e => { e.stopPropagation(); setLocal(""); navigate("/search"); }}><IconBrowse size={22} /></button>
+      </div>
+      </div>
 
       <div className="topbar__spacer" />
+      <WhatsNew />
+      <button className="iconbtn" aria-label={roomStatus === "connected" ? "Listen Together — connected" : "Listen Together"} onClick={() => navigate("/together")} data-room-active={roomStatus === "connected" || undefined}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 14v-3a9 9 0 0 1 18 0v3M3 13h3v8H3zM18 13h3v8h-3z" /></svg>
+      </button>
 
       <button
         className="iconbtn"

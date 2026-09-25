@@ -132,7 +132,7 @@ export function Search() {
           <div className="moods">
             {browse.data.moods.map((mood) => (
               <a
-                key={`${mood.id}:${mood.title}`}
+                key={`${mood.id}:${mood.params ?? ""}`}
                 className="mood"
                 href={`#${browsePath(mood.id, mood.params)}`}
                 style={{ "--tile-color": mood.color } as React.CSSProperties}

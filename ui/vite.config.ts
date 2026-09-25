@@ -24,7 +24,7 @@ const CSP = [
   // the policy blocked.
   "img-src 'self' data: blob: https://i.ytimg.com https://lh3.googleusercontent.com https://yt3.googleusercontent.com https://yt3.ggpht.com https://www.gstatic.com https://music.youtube.com",
   `media-src 'self' blob: ${CORE}`,
-  `connect-src 'self' ${CORE} https://www.youtube.com`,
+  `connect-src 'self' ${CORE} https://www.youtube.com wss: ws://127.0.0.1:* ws://localhost:* ws://[::1]:*`,
   // The embedded engine's fallback player.
   "frame-src https://www.youtube.com https://www.youtube-nocookie.com",
   "object-src 'none'",

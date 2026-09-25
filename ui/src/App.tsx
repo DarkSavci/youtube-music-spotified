@@ -1,8 +1,12 @@
+import { VideoSurface, VideoNotice } from "./components/VideoPlayer";
+import { usePlayer } from "./lib/player";
+import { useVideo, checkVideoAvailability } from "./lib/video";
 import { useEffect, useRef, useState } from "react";
+import { PageBoundary } from "./components/PageBoundary";
 import { Toast } from "./components/Toast";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { Tooltips } from "./components/Tooltip";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useLocation } from "react-router-dom";
 import { LibrarySidebar } from "./components/LibrarySidebar";
 import { NowPlayingBar } from "./components/NowPlayingBar";
 import { TopBar } from "./components/TopBar";
@@ -17,6 +21,7 @@ import { lazy, Suspense } from "react";
  * the entity pages are only fetched when navigated to, which keeps the startup
  * bundle to what is actually rendered on launch.
  */
+const Together = lazy(() => import("./views/Together").then((m) => ({ default: m.Together })));
 const Search = lazy(() => import("./views/Search").then((m) => ({ default: m.Search })));
 const Stats = lazy(() => import("./views/Stats").then((m) => ({ default: m.Stats })));
 const SettingsView = lazy(() => import("./views/Settings").then((m) => ({ default: m.SettingsView })));
@@ -40,6 +45,7 @@ import { LyricsPanel, LyricsView } from "./components/Lyrics";
 import { MenuProvider } from "./components/ContextMenu";
 import { PromptProvider } from "./components/Prompt";
 import { Shortcuts } from "./components/Shortcuts";
+import { leaveTogether } from "./lib/together";
 
 /**
  * The shell: library rail, scrolling content, optional right panel, and the
@@ -47,8 +53,20 @@ import { Shortcuts } from "./components/Shortcuts";
  * does and the bar is always reachable.
  */
 export function App() {
+  const videoEnabled = useVideo(s => s.enabled);
+  const videoTrackID = usePlayer(s => s.track?.id);
+  useEffect(() => {
+    void checkVideoAvailability();
+    // Do not replace automatically advanced songs: that restarts audio and
+    // discards gapless prefetch. Switching versions is an explicit action.
+    if (!usePlayer.getState().track?.isVideo) useVideo.setState({ enabled: false });
+    if (!videoTrackID) useVideo.setState({ enabled: false, error: null });
+  }, [videoTrackID]);
+  const location = useLocation();
+  useEffect(() => { setLibraryExpanded(false); }, [location.key, location.pathname, location.search]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [libraryExpanded, setLibraryExpanded] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
   // One side panel at a time: they occupy the same column, and showing both
   // would leave nothing for the content.
@@ -95,6 +113,7 @@ export function App() {
     const removeMediaSession = installMediaSession();
     return () => {
       removeMediaSession();
+      void leaveTogether();
       stopPlayback();
     };
   }, []);
@@ -109,7 +128,7 @@ export function App() {
   return (
     <PromptProvider>
     <MenuProvider>
-    <div className="app-shell" data-platform={window.spotifier?.platform} data-nowplaying={queueOpen || lyricsOpen || undefined}>
+    <div className="app-shell" data-platform={window.spotifier?.platform} data-library-expanded={libraryExpanded || undefined} data-nowplaying={queueOpen || lyricsOpen || undefined}>
       <SkipLink />
       <Announcer />
       {/* One listener for every icon-only control in the app. */}
@@ -132,14 +151,18 @@ export function App() {
         onToggleFullScreen={() => setFullScreen((f) => !f)}
       />
       <PlaybackNotice />
-      <LibrarySidebar />
+      <TopBar scrollRef={scrollRef} />
+      <LibrarySidebar expanded={libraryExpanded} onExpand={() => setLibraryExpanded(v => !v)} onNavigate={() => setLibraryExpanded(false)} />
 
       <main className="main panel">
-        <TopBar scrollRef={scrollRef} />
+        <VideoNotice />
+        {videoEnabled && !fullScreen ? <VideoSurface className="main-video" onExpand={() => setFullScreen(true)} /> : null}
         <div className="main__scroll scroll" ref={scrollRef}>
           <div className="main__content" id="main-content" tabIndex={-1}>
+            <PageBoundary key={location.pathname}>
             <Suspense fallback={<TrackListSkeleton />}>
             <Routes>
+              <Route path="/together" element={<Together />} />
               <Route path="/" element={<Home />} />
               <Route path="/search" element={<Search />} />
               <Route path="/stats" element={<Stats />} />
@@ -157,6 +180,7 @@ export function App() {
               />
             </Routes>
             </Suspense>
+            </PageBoundary>
           </div>
         </div>
       </main>

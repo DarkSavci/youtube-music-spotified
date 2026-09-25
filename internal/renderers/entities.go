@@ -1,6 +1,7 @@
 package renderers
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -256,7 +257,8 @@ func ParsePlaylist(doc Node, id string, pc ParseContext) (domain.Playlist, bool)
 }
 
 // maxPlaylistPages bounds the paging. YouTube caps a playlist at 5,000
-// tracks, which is 50 pages of 100.
+// tracks, which is 50 pages of 100; the margin covers empty pages. Repeated
+// tokens are caught below, but a stream of fresh ones must still end.
 const maxPlaylistPages = 60
 
 /*
@@ -269,22 +271,23 @@ playlist silently missing its tail looks complete when it is not.
 */
 func AppendPlaylistPages(pl *domain.Playlist, first Node, fetch func(token string) (Node, error)) error {
 	derivedCount := pl.TrackCount == len(pl.Tracks)
-	tok := playlistContinuation(playlistShelves(first))
+	tok := PlaylistNext(first)
+	seen := map[string]bool{}
 	for page := 0; tok != "" && page < maxPlaylistPages; page++ {
+		if seen[tok] {
+			return fmt.Errorf("repeated playlist continuation")
+		}
+		seen[tok] = true
 		doc, err := fetch(tok)
 		if err != nil {
 			return err
 		}
-		items := Find(doc, "appendContinuationItemsAction").Nodes("continuationItems")
-		tracks := listTracks(items)
-		if len(tracks) == 0 {
-			break
-		}
+		tracks, next := ParsePlaylistContinuation(doc)
 		pl.Tracks = append(pl.Tracks, tracks...)
 		for _, t := range tracks {
 			pl.DurationMs += t.DurationMs
 		}
-		tok = continuationItemToken(items)
+		tok = next
 	}
 	if derivedCount {
 		pl.TrackCount = len(pl.Tracks)
@@ -508,4 +511,56 @@ func ParseTimedLyrics(doc Node) (lines []domain.LyricLine, source string) {
 			textOf(Find(doc, "musicDescriptionShelfRenderer").Child("footer")), "Source:"))
 	}
 	return lines, source
+}
+
+// PlaylistNext reads only the playlist shelf's continuation, not suggestions.
+func PlaylistNext(doc Node) string { return playlistContinuation(playlistShelves(doc)) }
+
+// ParsePlaylistContinuation reads a single track page, retaining repeated
+// songs: duplicates can be intentional playlist entries.
+func ParsePlaylistContinuation(doc Node) ([]domain.Track, string) {
+	items := Find(doc, "appendContinuationItemsAction").Nodes("continuationItems")
+	if len(items) == 0 {
+		shelf := Find(doc, "musicPlaylistShelfContinuation")
+		items = shelf.Nodes("contents")
+		tracks := listTracks(items)
+		next := continuationItemToken(items)
+		if next == "" {
+			for _, c := range shelf.Nodes("continuations") {
+				if next = c.Child("nextContinuationData").Str("continuation"); next != "" {
+					break
+				}
+			}
+		}
+		return tracks, next
+	}
+	return listTracks(items), continuationItemToken(items)
+}
+
+// ParseTrackVersions returns only an explicit YouTube song/video pair that
+// contains the requested id. Unrelated recommendations are never matches.
+func ParseTrackVersions(doc Node, id string) []domain.Track {
+	for _, wrapper := range FindAll(doc, "playlistPanelVideoWrapperRenderer") {
+		var tracks []domain.Track
+		contains := false
+		for _, node := range FindAll(wrapper, NodeQueueItem) {
+			if tr, ok := ParseQueueTrack(node); ok {
+				tr.IsVideo = isVideoTrack(node)
+				tracks = append(tracks, tr)
+				if tr.ID == id {
+					contains = true
+				}
+			}
+		}
+		if contains {
+			return tracks
+		}
+	}
+	for _, node := range FindAll(doc, NodeQueueItem) {
+		if tr, ok := ParseQueueTrack(node); ok && tr.ID == id {
+			tr.IsVideo = isVideoTrack(node)
+			return []domain.Track{tr}
+		}
+	}
+	return nil
 }

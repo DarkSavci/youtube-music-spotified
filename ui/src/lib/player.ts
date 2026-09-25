@@ -42,6 +42,7 @@ export interface PlayerDevice {
 }
 
 interface PlayerState {
+  followingRoom: boolean;
   state: PlayState;
   track: Track | null;
   queue: Track[];
@@ -103,6 +104,7 @@ const idleCapabilities: Capabilities = {
 };
 
 export const usePlayer = create<PlayerState>((set, get) => ({
+  followingRoom: false,
   state: "idle",
   track: null,
   queue: [],
