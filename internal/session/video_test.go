@@ -59,4 +59,7 @@ func TestVariantCarriesPartialListenAndDoesNotResumeEndedTrack(t *testing.T) {
 	if c.playIntent() {
 		t.Fatal("switching an ended track resumed playback")
 	}
+	if c.playedMs != 0 {
+		t.Fatal("already logged listening time was carried into another version")
+	}
 }

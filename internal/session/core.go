@@ -842,6 +842,9 @@ func (c *Core) switchVariant(cmd Command) (Reject, []LogEntry) {
 	paused := !c.playIntent()
 	oldID := current.ID
 	carriedPlay := c.playedMs
+	if c.loggedCurrent {
+		carriedPlay = 0
+	}
 	logs := c.closeOutCurrent(false)
 	if len(logs) > 0 {
 		carriedPlay = 0
