@@ -82,9 +82,13 @@ func (s *Server) RunAutoplay(ctx context.Context) {
 }
 
 // topUp fetches more of the queue's radio when it is running low.
+//
+// Not while repeat is on: repeating means the queue loops as it is. Radio
+// appended to a repeating playlist played before it came round again, and
+// shuffle then mixed those strangers through the rest of it (#26, #28).
 func (s *Server) topUp(ctx context.Context, p session.Projection) {
 	q := p.State.Queue
-	if p.FollowingRoom || len(q.Items) == 0 || len(q.Items)-1-q.Index >= autoplayLow {
+	if p.FollowingRoom || p.State.Repeat != domain.RepeatOff || len(q.Items) == 0 || len(q.Items)-1-q.Index >= autoplayLow {
 		return
 	}
 	a := s.autoplay
