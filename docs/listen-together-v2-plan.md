@@ -133,3 +133,8 @@ The above are recommendations derived from the references, not direct copies of 
 - UI checked against an isolated Go fixture catalog and v2 relay: create/join by PIN, contributor artwork, three-member roster, leadership handover, PIN rotation without removing participants, settings, and paused shared skip.
 - Preview uses sample catalog results and explicitly labelled test participants. It does not prove real macOS-to-Windows audio synchronization, signed-in video/lyrics behavior, or production reverse-proxy compatibility. Those are rollout checks, not claims of this preview.
 - No changes to the installed application, its account/profile, or `listen.hisarops.com`. No v2 PR or relay deployment published.
+
+### Room names and Discord invitations
+Implemented: an optional room name, remembered locally for the next creation, shared as bounded public room metadata, and preserved across leadership changes.
+
+Planned with Discord Rich Presence (#39): opt-in room-name sharing plus a leader-controlled Discord join setting, with expiring/revocable invitation access respecting room moderation. No inert Discord toggle is shown before that integration exists.

@@ -1770,3 +1770,8 @@ li[data-state="active"] .lyrics__line {
 .room-servercheck { color: var(--text-secondary); font-size: 12px; }
 .room-preview-note { color: var(--text-secondary); font-size: 11px; padding: 9px 12px; margin-bottom: 16px; border-left: 2px solid #b9a8f2; background: #b9a8f208; }
 .room-localprefs > small + h4 { margin-top: 14px; }
+
+.room-namefield { display: flex; flex-direction: column; gap: 8px; margin: 20px 0 4px; font-size: 13px; }
+.room-namefield > span, .room-namefield > small { color: var(--text-secondary); font-size: 12px; }
+.room-namefield > input { width: 100%; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: #ffffff08; color: var(--text-primary); }
+.room-sessionhead h2 { overflow-wrap: anywhere; }

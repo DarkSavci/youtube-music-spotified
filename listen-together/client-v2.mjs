@@ -53,6 +53,7 @@ export class RoomClientV2 {
                 type: this.options.pin ? "join" : "create",
                 pin: this.options.pin,
                 mode: this.options.mode,
+                roomName: this.options.roomName,
                 profile: this.options.profile,
               },
         );

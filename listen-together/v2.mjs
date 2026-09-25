@@ -66,6 +66,9 @@ export function makeRoom(pin, options = {}, now = Date.now()) {
   return {
     id: id(),
     pin,
+    name: typeof options.roomName === "string"
+      ? options.roomName.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 80)
+      : "",
     members: new Map(),
     owner: "",
     mode: modes.includes(options.mode) ? options.mode : "collaborative",

@@ -154,6 +154,7 @@ export function Together() {
         server: selected.url,
         profile: { name, avatar: prefs.avatar },
         mode,
+        roomName: join ? undefined : prefs.roomName.trim(),
         ...(join ? { pin: pin.replace(/\s/g, "") } : {}),
       });
     } catch (err) {
@@ -458,6 +459,18 @@ export function Together() {
                 Pick the mood. Invite your people. Build the soundtrack
                 together.
               </p>
+              <label className="room-namefield" htmlFor="room-name">
+                Room name <span>(optional)</span>
+                <input
+                  id="room-name"
+                  maxLength={80}
+                  placeholder="Friday night together"
+                  value={prefs.roomName}
+                  onChange={(e) => prefs.update({ roomName: e.target.value })}
+                  aria-describedby="room-name-hint"
+                />
+                <small id="room-name-hint">Remembered on this device for your next room. Visible to listeners.</small>
+              </label>
               <div
                 className="room-presets"
                 role="radiogroup"
@@ -544,9 +557,7 @@ export function Together() {
                 {presets.find((p) => p.id === room.mode)?.title}
               </span>
               <h2>
-                {room.members.find((m) => m.id === room.owner)?.name ||
-                  "Your friends"}
-                ’s room
+                {room.name || `${room.members.find((m) => m.id === room.owner)?.name || "Your friends"}’s room`}
               </h2>
             </div>
             <div className="room-pinshare">

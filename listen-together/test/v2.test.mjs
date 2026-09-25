@@ -345,3 +345,16 @@ test("read-only server probe accepts v2 and rejects invalid endpoints without op
   await assert.rejects(checkRoomServer("not a URL"));
   await assert.rejects(checkRoomServer("ws://example.com"), /wss/);
 });
+
+test("room names are bounded public metadata and survive leadership changes", () => {
+  const room = makeRoom("12345678", { roomName: "  Friday\nnight  " });
+  const first = addMember(room, { name: "First" });
+  const next = addMember(room, { name: "Next" });
+  assert.equal(snapshot(room).name, "Friday night");
+  transfer(room, next.id);
+  assert.equal(room.owner, next.id);
+  assert.equal(snapshot(room).name, "Friday night");
+  assert.equal(makeRoom("12345678", { roomName: "x".repeat(200) }).name.length, 80);
+  assert.equal(makeRoom("12345678", { roomName: {} }).name, "");
+  assert.equal(makeRoom("12345678").name, "");
+});

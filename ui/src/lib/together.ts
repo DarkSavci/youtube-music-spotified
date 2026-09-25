@@ -24,6 +24,7 @@ interface Server {
 interface Preferences {
   servers: Server[];
   selected: string;
+  roomName: string;
   name: string;
   avatar: string;
   followVideo: boolean;
@@ -35,6 +36,7 @@ export const useRoomPreferences = create<Preferences>()(
     (set) => ({
       servers: [],
       selected: "",
+      roomName: "",
       name: "",
       avatar: "",
       followVideo: false,

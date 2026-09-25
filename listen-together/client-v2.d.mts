@@ -25,6 +25,7 @@ export interface Entry {
 }
 export type RoomMode = "collaborative" | "contributions" | "listen";
 export interface RoomState {
+  name: string;
   id: string;
   pin: string;
   members: Member[];
@@ -56,6 +57,7 @@ export interface RoomState {
 export interface ConnectOptions {
   server: string;
   pin?: string;
+  roomName?: string;
   mode?: RoomMode;
   profile: { name: string; avatar?: string };
 }
