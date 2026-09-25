@@ -1,98 +1,274 @@
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-const ts = require('../../ui/node_modules/typescript');
-
-// Exercise the actual UI coordinator independently of React rendering/audio.
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+const ts = require("../../ui/node_modules/typescript");
+const crypto = require("node:crypto");
 function create(initial) {
- let state;
- const listeners = new Set();
- const store = () => state;
- store.getState = () => state;
- store.setState = patch => { state = {...state, ...patch}; for (const fn of listeners) fn(state); };
- store.subscribe = fn => { listeners.add(fn); return () => listeners.delete(fn); };
- state = initial(store.setState, store.getState);
- return store;
+  if (!initial) return (initial) => create(initial);
+  let state;
+  const listeners = new Set();
+  const store = () => state;
+  store.getState = () => state;
+  store.setState = (patch) => {
+    state = { ...state, ...patch };
+    for (const fn of listeners) fn(state);
+  };
+  store.subscribe = (fn) => {
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+  };
+  state = initial(store.setState, store.getState);
+  return store;
 }
 async function setup(t) {
- const protocol = await import('../../listen-together/protocol.mjs');
- const player = create(() => ({track:null,state:'paused',followingRoom:false,notice:null,anchor:{positionMs:0,atMs:performance.now(),rate:0}}));
- const clients=[], calls=[];
- class Client {
-  constructor(options) { Object.assign(this,options); clients.push(this); }
-  serverNow() { return Date.now(); }
-  connect() { this.onStatus({status:'connected',role:'guest',members:2}); }
-  stop() { this.onStatus({status:'disconnected',role:null,members:0}); }
-  publish() {}
- }
- const source=fs.readFileSync(path.join(__dirname,'../../ui/src/lib/together.ts'),'utf8');
- const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- const module={exports:{}};
- vm.runInNewContext(code,{module,exports:module.exports,Date,Math,Promise,setInterval,clearInterval,setTimeout,clearTimeout,
-  require: name => {
-   if(name==='zustand')return {create};
-   if(name.endsWith('client.mjs'))return {RoomClient:Client};
-   if(name.endsWith('protocol.mjs'))return protocol;
-   if(name==='./player')return {usePlayer:player,currentPosition:s=>s.anchor.positionMs};
-   if(name==='./playback')return {
-    isServerAuthoritative:()=>true,
-    leaveRoomPlayback:async()=>player.setState({followingRoom:false,state:'paused'}),
-    syncRoomPlayback:async(track,positionMs,playing)=>{calls.push({track,positionMs,playing});player.setState({track,followingRoom:true,state:playing?'playing':'paused',anchor:{positionMs,atMs:performance.now(),rate:playing?1:0}});},
-   };
-   throw new Error(name);
-  },
- });
- const coordinator=module.exports;
- t.after(()=>coordinator.leaveTogether());
- return {coordinator,player,clients,calls,flush:()=>new Promise(r=>setImmediate(r))};
+  const protocol = await import("../../listen-together/protocol.mjs");
+  const player = create(() => ({
+    track: null,
+    queue: [],
+    index: 0,
+    state: "paused",
+    followingRoom: false,
+    notice: null,
+    anchor: { positionMs: 0, atMs: performance.now(), rate: 0 },
+  }));
+  const video = create(() => ({ enabled: false, revision: 0 }));
+  const clients = [],
+    calls = [];
+  let route, hold;
+  class Client {
+    constructor(options) {
+      Object.assign(this, options);
+      clients.push(this);
+      this.commands = [];
+      this.sent = [];
+    }
+    connect() {
+      this.onStatus("connecting");
+      this.onJoined("self");
+      this.onStatus("connected");
+    }
+    serverNow() {
+      return Date.now();
+    }
+    command(c) {
+      this.commands.push(c);
+      return Promise.resolve(true);
+    }
+    send(c) {
+      this.sent.push(c);
+    }
+    leave() {}
+    stop() {}
+  }
+  const module = { exports: {} };
+  const code = ts.transpileModule(
+    fs.readFileSync(require.resolve("../../ui/src/lib/together.ts"), "utf8"),
+    {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2022,
+      },
+    },
+  ).outputText;
+  vm.runInNewContext(code, {
+    module,
+    exports: module.exports,
+    Date,
+    Math,
+    Promise,
+    Error,
+    crypto,
+    setInterval,
+    clearInterval,
+    setTimeout,
+    clearTimeout,
+    require: (n) => {
+      if (n === "zustand") return { create };
+      if (n === "zustand/middleware") return { persist: (i) => i };
+      if (n.endsWith("client-v2.mjs")) return { RoomClientV2: Client };
+      if (n.endsWith("protocol.mjs")) return protocol;
+      if (n === "./player")
+        return {
+          usePlayer: player,
+          currentPosition: (s) => s.anchor.positionMs,
+        };
+      if (n === "./video") return { useVideo: video };
+      if (n === "./toast") return { toast: () => {} };
+      if (n === "./playback")
+        return {
+          isServerAuthoritative: () => true,
+          setRoomTransport: (r) => (route = r),
+          leaveRoomPlayback: async () =>
+            player.setState({ followingRoom: false, state: "paused" }),
+          syncRoomPlayback: async (
+            track,
+            positionMs,
+            playing,
+            queue,
+            index,
+          ) => {
+            calls.push({ track, positionMs, playing, queue, index });
+            if (hold) await hold;
+            player.setState({
+              track,
+              queue,
+              index,
+              followingRoom: true,
+              state: playing ? "playing" : "paused",
+              anchor: {
+                positionMs,
+                atMs: performance.now(),
+                rate: playing ? 1 : 0,
+              },
+            });
+          },
+        };
+      throw Error(n);
+    },
+  });
+  const api = module.exports;
+  t.after(() => api.leaveTogether());
+  return {
+    api,
+    player,
+    video,
+    clients,
+    calls,
+    route: (...args) => route(...args),
+    hold: (p) => (hold = p),
+    flush: () => new Promise((r) => setImmediate(r)),
+  };
 }
-const track={id:'abcdefghijk',title:'Fixture',durationMs:180000,artists:[]};
-test('guest applies host state, avoids tiny corrections, waits on failure, and unlocks on leave',async t=>{
- const h=await setup(t);await h.coordinator.connectTogether({invitation:'test'});await h.flush();
- const client=h.clients[0];
- client.onSnapshot({track,playing:false,positionMs:12000,at:Date.now(),seq:1});await h.flush();
- assert.equal(h.player.getState().track.id,track.id);assert.equal(h.player.getState().followingRoom,true);
- const count=h.calls.length;
- client.onSnapshot({track,playing:false,positionMs:12100,at:Date.now(),seq:2});await h.flush();
- assert.equal(h.calls.length,count,'tiny drift should not seek');
- h.player.setState({track:{...track,playable:false},notice:'Unavailable'});
- client.onSnapshot({track,playing:true,positionMs:12100,at:Date.now(),seq:3});await h.flush();
- assert.equal(h.calls.length,count,'failed track must not loop retries');
- h.coordinator.retryTogetherPlayback();await h.flush();assert.equal(h.calls.length,count+1);
- await h.coordinator.leaveTogether();assert.equal(h.coordinator.useTogether.getState().status,'disconnected');assert.equal(h.player.getState().followingRoom,false);assert.equal(h.player.getState().state,'paused');
+function room(revision = 1, patch = {}) {
+  return {
+    id: "room",
+    pin: "01234567",
+    owner: "other",
+    members: [{ id: "self", name: "Self", role: "listener", connected: true }],
+    mode: "collaborative",
+    revision,
+    current: "entry1",
+    queue: [
+      {
+        id: "entry1",
+        track: {
+          id: "abcdefghij0",
+          title: "Track",
+          durationMs: 180000,
+          artists: [],
+          artwork: [
+            {
+              url: "https://i.ytimg.com/vi/abcdefghij0/hqdefault.jpg",
+              width: 480,
+              height: 360,
+            },
+          ],
+          playable: true,
+          isVideo: false,
+        },
+        addedBy: { id: "other", name: "Friend" },
+      },
+      {
+        id: "entry2",
+        track: {
+          id: "abcdefghij1",
+          title: "Next",
+          durationMs: 180000,
+          artists: [],
+          artwork: [],
+          playable: true,
+          isVideo: false,
+        },
+        addedBy: { id: "self", name: "Self" },
+      },
+    ],
+    positionMs: 10000,
+    at: Date.now(),
+    playing: true,
+    activity: [],
+    video: null,
+    ...patch,
+  };
+}
+const options = {
+  server: "ws://localhost:8766",
+  pin: "01234567",
+  profile: { name: "Self" },
+};
+test("every participant follows canonical queue with artwork, and transport sends room commands", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  c.onState(room());
+  await h.flush();
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.player.getState().queue.length, 2);
+  assert.equal(h.player.getState().track.artwork.length, 1);
+  h.route("toggle");
+  h.route("enqueue", { tracks: [h.player.getState().track] });
+  h.route("remove", { at: 1 });
+  assert.equal(c.commands[0].kind, "pause");
+  assert.equal(c.commands[1].kind, "enqueue");
+  assert.equal(c.commands[2].entry, "entry2");
+  c.onState(room(2, { positionMs: 50000 }));
+  await h.flush();
+  assert.ok(h.calls.at(-1).positionMs >= 50000);
 });
-test('late messages from a departed room cannot replace a new session',async t=>{
- const h=await setup(t);await h.coordinator.connectTogether({invitation:'old'});const old=h.clients[0];
- await h.coordinator.connectTogether({invitation:'new'});await h.flush();const count=h.calls.length;
- old.onSnapshot({track,playing:true,positionMs:5000,at:Date.now(),seq:50});await h.flush();
- assert.equal(h.calls.length,count);
- h.clients[1].onStatus({status:'disconnected',error:'Host left'});await h.flush();
- assert.equal(h.coordinator.useTogether.getState().status,'disconnected');assert.equal(h.player.getState().followingRoom,false);
+test("video display opt-in never changes the selected canonical media", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  const r = room();
+  r.queue[0].track.isVideo = true;
+  r.video = { shown: true, by: "other", revision: 1 };
+  c.onState(r);
+  await h.flush();
+  assert.equal(h.video.getState().enabled, false);
+  assert.equal(h.player.getState().track.isVideo, true);
+  h.api.useRoomPreferences.getState().update({ followVideo: true });
+  c.onState({
+    ...r,
+    revision: 2,
+    video: { shown: true, by: "other", revision: 2 },
+  });
+  await h.flush();
+  assert.equal(h.video.getState().enabled, true);
+  assert.equal(c.commands.length, 0);
 });
-
-test('an explicit host seek is applied promptly even inside the drift cooldown',async t=>{
- const h=await setup(t);await h.coordinator.connectTogether({invitation:'test'});await h.flush();
- const client=h.clients[0];client.onSnapshot({track,playing:false,positionMs:10000,at:Date.now(),seq:1});await h.flush();
- client.onSnapshot({track,playing:false,positionMs:60000,at:Date.now(),seq:2});await h.flush();
- assert.equal(h.player.getState().anchor.positionMs,60000);
+test("disconnected playback pauses before a reconnect snapshot, and old sessions cannot write to new rooms", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const old = h.clients[0];
+  old.onState(room());
+  await h.flush();
+  old.onStatus("reconnecting");
+  await h.flush();
+  assert.equal(h.player.getState().state, "paused");
+  old.onStatus("connected");
+  old.onState(room(2, { positionMs: 65000 }));
+  await h.flush();
+  assert.ok(h.calls.at(-1).positionMs >= 65000);
+  await h.api.leaveTogether();
+  await h.api.connectTogether(options);
+  const next = h.clients[1];
+  next.onState(room(1, { current: "entry2" }));
+  await h.flush();
+  old.onState(room(99));
+  old.onEnded("Old error");
+  await h.flush();
+  assert.equal(h.player.getState().track.id, "abcdefghij1");
+  assert.equal(h.api.useTogether.getState().error, null);
 });
-
-test('guest pauses on reconnect and does not replay a stale snapshot',async t=>{
- const h=await setup(t);await h.coordinator.connectTogether({invitation:'test'});await h.flush();
- const client=h.clients[0];
- client.onSnapshot({track:{...track,isVideo:true},playing:true,positionMs:12000,at:Date.now(),seq:1});await h.flush();
- assert.equal(h.player.getState().track.isVideo,true);
- client.onStatus({status:'reconnecting',role:'guest'});await h.flush();
- assert.equal(h.player.getState().state,'paused');
- const count=h.calls.length;
- h.coordinator.retryTogetherPlayback();await h.flush();
- assert.equal(h.calls.length,count,'old snapshot must not resume during reconnect');
- client.onStatus({status:'connected',role:'guest'});await h.flush();
- h.coordinator.retryTogetherPlayback();await h.flush();
- assert.equal(h.calls.length,count,'wait for a fresh snapshot after reconnect');
- client.onSnapshot({track,playing:true,positionMs:30000,at:Date.now(),seq:1});await h.flush();
- assert.equal(h.player.getState().state,'playing');
- assert.ok(h.player.getState().anchor.positionMs>=30000);
+test("leave waits for an in-flight local correction before unlocking playback", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  let finish;
+  h.hold(new Promise((r) => (finish = r)));
+  h.clients[0].onState(room());
+  const leaving = h.api.leaveTogether();
+  finish();
+  await leaving;
+  assert.equal(h.player.getState().followingRoom, false);
+  assert.equal(h.player.getState().state, "paused");
 });

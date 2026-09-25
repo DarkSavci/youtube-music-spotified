@@ -204,7 +204,7 @@ function onEngineEvent(e: EngineEvent) {
       return;
     }
     if (e.kind === "failed") {
-      usePlayer.setState({ notice: usePlayer.getState().followingRoom ? "This track could not play on your account. Waiting for the host’s next track." : null });
+      usePlayer.setState({ notice: usePlayer.getState().followingRoom ? "This track could not play on your account. Waiting for the room’s next track." : null });
       consecutiveFailures += 1;
       if (consecutiveFailures >= FALLBACK_AFTER_FAILURES && !fellBack) {
         console.warn("[playback] falling back to the embedded engine");
@@ -396,15 +396,20 @@ export function isServerAuthoritative(): boolean {
   return serverAuthoritative;
 }
 
+type RoomTransport = (kind: string, data?: Record<string, unknown>) => boolean;
+let roomTransport: RoomTransport | null = null;
+export function setRoomTransport(handler: RoomTransport | null) { roomTransport = handler; }
+function routeRoom(kind: string, data?: Record<string, unknown>) { return roomTransport?.(kind, data) ?? false; }
+
 function roomControlsLocked(): boolean {
   if (!usePlayer.getState().followingRoom) return false;
   toast("The host controls playback. Leave Listen Together to choose your own music.");
   return true;
 }
 
-export async function syncRoomPlayback(track: Track | null, positionMs: number, playing: boolean) {
+export async function syncRoomPlayback(track: Track | null, positionMs: number, playing: boolean, queue?: Track[], index = 0, entry?: string) {
   if (!session || !serverAuthoritative) throw new Error("The local music service is not ready.");
-  if (!await session.command({ Kind: "follow_room", Tracks: track ? [track] : [], PositionMs: Math.round(positionMs), Playing: playing })) throw new Error("Could not synchronize playback with the local music service.");
+  if (!await session.command({ Kind: "follow_room", Tracks: queue ?? (track ? [track] : []), StartIndex: index, ExpectedID: entry, PositionMs: Math.round(positionMs), Playing: playing })) throw new Error("Could not synchronize playback with the local music service.");
 }
 export async function leaveRoomPlayback() {
   if (session) await session.command({ Kind: "leave_room" });
@@ -413,6 +418,7 @@ export async function leaveRoomPlayback() {
 /** Sends an intent to the core, or falls back to the local store. */
 export const transport = {
   play(tracks: Track[], index: number, origin: string) {
+    if (routeRoom("replace", { tracks: tracks.slice(index) })) return;
     if (roomControlsLocked()) return;
     /*
      * Clicking the song that is already playing does not restart it.
@@ -444,6 +450,7 @@ export const transport = {
    * radio once it ends.
    */
   playRadio(track: Track, origin?: string) {
+    if (routeRoom("replace", { tracks: [track] })) return;
     if (roomControlsLocked()) return;
     const s = usePlayer.getState();
     if (s.track?.id === track.id) {
@@ -457,6 +464,7 @@ export const transport = {
 
   /** Plays another entry of the queue, one already played included. */
   jump(at: number) {
+    if (routeRoom("jump", { at })) return;
     if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.command({ Kind: "jump", At: at });
     else {
@@ -466,6 +474,7 @@ export const transport = {
   },
 
   toggle() {
+    if (routeRoom("toggle")) return;
     // A guest whose start was blocked presses Play to try again; that is
     // the host's playback, not a choice of their own.
     const s = usePlayer.getState();
@@ -479,16 +488,19 @@ export const transport = {
     else usePlayer.getState().toggle();
   },
   next() {
+    if (routeRoom("next")) return;
     if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.command({ Kind: "next" });
     else usePlayer.getState().next();
   },
   prev() {
+    if (routeRoom("previous")) return;
     if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.command({ Kind: "prev" });
     else usePlayer.getState().prev();
   },
   seek(ms: number) {
+    if (routeRoom("seek", { positionMs: ms })) return;
     if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.command({ Kind: "seek", PositionMs: Math.round(ms) });
     else usePlayer.getState().seek(ms);
@@ -539,6 +551,7 @@ export const transport = {
     usePlayer.setState({ muted: true });
   },
   toggleShuffle() {
+    if (routeRoom("shuffle")) return;
     if (roomControlsLocked()) return;
     const s = usePlayer.getState();
     if (serverAuthoritative && session) void session.command({ Kind: "set_shuffle", Shuffle: !s.shuffle });
@@ -551,6 +564,7 @@ export const transport = {
    * projection that follows is what moves the UI.
    */
   enqueue(tracks: Track[]) {
+    if (routeRoom("enqueue", { tracks })) return;
     if (roomControlsLocked()) return;
     const s = usePlayer.getState();
     const at = s.queue.length;
@@ -563,6 +577,7 @@ export const transport = {
 
   /** Inserts tracks directly after the current one. */
   playNext(tracks: Track[]) {
+    if (routeRoom("enqueueNext", { tracks })) return;
     if (roomControlsLocked()) return;
     const s = usePlayer.getState();
     const at = Math.min(s.index + 1, s.queue.length);
@@ -582,6 +597,7 @@ export const transport = {
    * ever sent them, so a queue could be built and never rearranged.
    */
   move(from: number, to: number) {
+    if (routeRoom("move", { from, to })) return;
     if (roomControlsLocked()) return;
     if (serverAuthoritative && session) {
       void session.command({ Kind: "move", From: from, To: to });
@@ -589,6 +605,7 @@ export const transport = {
   },
 
   removeAt(at: number) {
+    if (routeRoom("remove", { at })) return;
     if (roomControlsLocked()) return;
     if (serverAuthoritative && session) {
       void session.command({ Kind: "remove", At: at });
@@ -596,6 +613,7 @@ export const transport = {
   },
 
   cycleRepeat() {
+    if (routeRoom("repeat")) return;
     if (roomControlsLocked()) return;
     const s = usePlayer.getState();
     const nextMode = s.repeat === "off" ? "all" : s.repeat === "all" ? "one" : "off";
