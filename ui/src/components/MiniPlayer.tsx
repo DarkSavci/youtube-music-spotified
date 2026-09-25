@@ -1,3 +1,4 @@
+import { Artwork } from "./Artwork";
 import { EndTime } from "./EndTime";
 import { VideoSurface, VideoNotice, useVideoControl } from "./VideoPlayer";
 import { useVideo, setVideoEnabled } from "../lib/video";
@@ -260,7 +261,7 @@ function Cover({ size, className, video = false }: { size: number; className: st
   const src = artworkAtLeast(track?.artwork ?? [], size);
   if (video && size > 120) return <VideoSurface priority={20} className={className} />;
   if (!src) return <div className={`${className} mini__cover--none`} />;
-  return <img className={className} src={src} alt="" draggable={false} />;
+  return <Artwork className={className} src={src} alt="" draggable={false} />;
 }
 
 function Meta() {

@@ -1,3 +1,5 @@
+import { RoomAttribution } from "./RoomAttribution";
+import { Artwork } from "./Artwork";
 import { ShareIcon } from "./ShareIcon";
 import { EndTime } from "./EndTime";
 import { VideoSwitch } from "./VideoPlayer";
@@ -95,7 +97,7 @@ export function NowPlayingBar({
               onClick={onOpenFullScreen}
               onContextMenu={openMenu}
             >
-              <img
+              <Artwork
                 className="bar__art"
                 src={artworkAtLeast(track.artwork, 120)}
                 alt=""
@@ -104,6 +106,7 @@ export function NowPlayingBar({
                 <IconExpand size={16} />
               </span>
             </button>
+            <RoomAttribution />
             <div className="bar__meta" onContextMenu={openMenu}>
               <span className="bar__title truncate">{track.title}</span>
               <span className="bar__artist truncate">

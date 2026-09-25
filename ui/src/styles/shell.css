@@ -269,9 +269,6 @@
   display: flex;
   gap: var(--space-2);
 }
-.topbar__spacer {
-  flex: 1;
-}
 
 .iconbtn {
   display: grid;
@@ -1433,23 +1430,20 @@ body:has(.account-menu, .whats-new-dialog[open]) .app-shell::before {
 
 .sidebar__search:focus-within { outline: 2px solid var(--text-primary); outline-offset: -2px; }
 .sidebar__search input:focus, .sidebar__search input:focus-visible { outline: none; box-shadow: none; }
-.topbar__search-group { display: flex; align-items: center; gap: 12px; position: absolute; left: 50%; transform: translateX(-50%); width: min(40vw, 560px); }
-.topbar__search-group .searchfield { width: auto; flex: 1; }
+.topbar__search-group { display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; }
+.topbar__search-group .searchfield { width: auto; flex: 1; min-width: 0; }
 .searchfield { -webkit-app-region: no-drag; cursor: text; padding-right: 0; }
 .searchfield__browse { position: relative; align-self: stretch; height: auto; width: 48px; padding: 0; border-radius: 0 28px 28px 0; }
 .searchfield__browse::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 1px; background: var(--border-subtle); pointer-events: none; }
 
 @media (max-width: 1100px) {
-  .topbar__search-group { position: static; transform: none; width: auto; flex: 1; min-width: 180px; }
-  .topbar__spacer { display: none; }
   .topbar__account { max-width: 130px; }
 }
 
 .wincontrols { margin-right: -12px; flex-shrink: 0; }
 @media (max-width: 1000px) {
   .topbar__account-name { display: none; }
-  .topbar__search-group { min-width: 120px; gap: 6px; }
-  .topbar__search-group .searchfield { min-width: 100px; }
+  .topbar__search-group { gap: 6px; }
   .topbar { gap: 6px; }
 }
 
@@ -1545,3 +1539,12 @@ button:is(:hover, :focus-visible) .share-icon__copy,
    between the steps, wrapping only when narrow as well. */
 .speedpanel[data-compact] { width: min(480px, calc(100vw - 16px)); padding: var(--space-2); }
 .speedpanel[data-compact] .speedpanel__presets { flex: 1; margin-top: 0; }
+
+/* Keep all three groups in layout flow so titlebar controls cannot overlap search. */
+.app-shell > .topbar { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(160px, 560px) minmax(max-content, 1fr); }
+.topbar__actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-width: 0; }
+.topbar__actions > .iconbtn { flex-shrink: 0; }
+@media (max-width: 1100px) {
+  .topbar__actions { gap: 6px; }
+  .app-shell > .topbar { grid-template-columns: max-content minmax(100px, 1fr) max-content; }
+}

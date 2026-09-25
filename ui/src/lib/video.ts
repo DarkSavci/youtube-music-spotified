@@ -55,6 +55,27 @@ export async function checkVideoAvailability() {
 export async function setVideoEnabled(enabled: boolean) {
   const track = usePlayer.getState().track;
   if (!track) return;
+  if (usePlayer.getState().followingRoom) {
+    const { roomCommand, roomCanControl, useTogether } = await import('./together');
+    if (!enabled || track.isVideo) {
+      useVideo.setState({ enabled, error: null, revision: useVideo.getState().revision + 1 });
+      if (roomCanControl()) await roomCommand({ kind: 'display', shown: enabled });
+      return;
+    }
+    if (!roomCanControl()) { useVideo.setState({ error: 'The leader chooses the media version in this room.' }); return; }
+    const generation = ++request;
+    const entry = useTogether.getState().room?.current;
+    useVideo.setState({ busy: true, error: null });
+    try {
+      const pair = await loadVersions(track);
+      if (generation !== request || usePlayer.getState().track?.id !== track.id) return;
+      const alternative = pair.find(t => t.isVideo && t.playable);
+      if (!alternative) throw new Error('No matching music video is available.');
+      if (await roomCommand({ kind: 'variant', track: alternative, expectedID: track.id, current: entry })) useVideo.setState({ enabled: true, revision: useVideo.getState().revision + 1 });
+    } catch (error) { useVideo.setState({ error: error instanceof Error ? error.message : 'Video unavailable.' }); }
+    finally { if (generation === request) useVideo.setState({ busy: false }); }
+    return;
+  }
   const generation = ++request;
   useVideo.setState({ busy: true, error: null });
   // Hiding pictures always works, including while following a room.

@@ -46,8 +46,9 @@ app.whenReady().then(async()=>{
  await waitFor(`document.body.textContent.includes('Reload app')`);
  missing=false;
  await read(`document.querySelector('.pagestate button').click()`);
- await waitFor(`document.querySelector('.together-page')?.textContent.includes('Create a room')`);
- assert.ok(await read(`document.querySelector('.together-page').textContent.includes('Join a friend')`));
+ await waitFor(`!!document.querySelector('#room-name') && !!document.querySelector('#room-pin')`);
+ assert.ok(await read(`Array.from(document.querySelectorAll('.rooms-page button')).some(b => b.textContent.trim() === 'Create room')`), 'recovered route exposes room creation');
+ assert.ok(await read(`Array.from(document.querySelectorAll('.rooms-page button')).some(b => b.textContent.trim() === 'Join room')`), 'recovered route exposes PIN joining');
  console.log('ROUTE PASS: missing chunk contained; navigation survives; reload opens Listen Together');
  win.destroy();server.close();app.exit(0);
 }).catch(err=>{console.error(err);server.close();app.exit(1);});

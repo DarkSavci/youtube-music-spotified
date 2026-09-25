@@ -106,10 +106,10 @@ export function App() {
 
   // Speed changes when chosen, and when a Listen Together room pins it to 1×.
   const playbackSpeed = useSettings((s) => s.playbackSpeed);
-  const roomRole = useTogether((s) => s.role);
+  const roomActive = useTogether((s) => s.status !== "disconnected");
   useEffect(() => {
     applySpeed();
-  }, [playbackSpeed, roomRole]);
+  }, [playbackSpeed, roomActive]);
 
   const settings = useSettings();
 

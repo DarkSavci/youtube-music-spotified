@@ -63,7 +63,7 @@ export function sliderStep(support: SpeedSupport): number {
 
 /** Whether a Listen Together room — hosted or joined — is pinning playback to 1×. */
 export function inRoom(s = useTogether.getState()): boolean {
-  return s.role !== null;
+  return s.status !== "disconnected";
 }
 
 /** The speed that should be playing now. */

@@ -71,3 +71,65 @@ func TestRoomSeekDoesNotCountAsListenedTime(t *testing.T) {
 		t.Fatalf("seek counted as listening: %d", c.playedMs)
 	}
 }
+
+func TestRoomMirrorsQueueAndRestoresPersonalSession(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 3)
+	c.Apply(Command{Kind: CmdSeek, PositionMs: 12345})
+	original := c.State().Queue.Current().ID
+	roomTracks := tracks(5)
+	r, _ := c.Apply(Command{Kind: CmdFollow, Tracks: roomTracks, StartIndex: 2, PositionMs: 4000, Playing: true})
+	if r != RejectNone || len(c.State().Queue.Items) != 5 || c.State().Queue.Index != 2 {
+		t.Fatal("room queue was not mirrored")
+	}
+	c.HandleEngine(EngineEvent{Kind: EvEnded, Epoch: c.State().Epoch})
+	if c.State().Queue.Index != 2 {
+		t.Fatal("local engine advanced a room")
+	}
+	c.Apply(Command{Kind: CmdSetVolume, Volume: .3})
+	c.Apply(Command{Kind: CmdLeaveRoom})
+	if len(c.State().Queue.Items) != 3 || c.State().Queue.Current().ID != original || c.State().PositionMs != 12345 || c.State().State != domain.StatePaused || c.State().Volume != .3 {
+		t.Fatalf("personal queue not restored safely: %+v", c.State())
+	}
+}
+
+func TestRepeatedRoomSongInvalidatesOldEngineEvents(t *testing.T) {
+	c, _ := newCore(t)
+	same := tracks(1)
+	c.Apply(Command{Kind: CmdFollow, Tracks: same, ExpectedID: "first-entry", Playing: true})
+	oldEpoch := c.State().Epoch
+	c.Apply(Command{Kind: CmdFollow, Tracks: same, ExpectedID: "second-entry", Playing: true})
+	c.HandleEngine(EngineEvent{Kind: EvEnded, Epoch: oldEpoch})
+	if c.State().Epoch == oldEpoch || c.State().State != domain.StatePlaying {
+		t.Fatal("previous occurrence stopped the new room entry")
+	}
+}
+
+func TestLeavingKeepsTheCurrentOwnerAndMovesVersionForward(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 3)
+	c.state.OwnerDeviceID = "desk"
+	c.Apply(Command{Kind: CmdFollow, Tracks: tracks(2), Playing: true})
+	// Another device took over while the room played, e.g. this one left.
+	c.state.OwnerDeviceID = "phone"
+	during := c.State().Version
+	c.Apply(Command{Kind: CmdLeaveRoom})
+	if c.State().OwnerDeviceID != "phone" {
+		t.Fatalf("leaving restored a departed owner: %q", c.State().OwnerDeviceID)
+	}
+	if c.State().Version <= during {
+		t.Fatalf("version went back from %d to %d", during, c.State().Version)
+	}
+}
+
+func TestFollowingAnEmptyRoomAgainChangesNothing(t *testing.T) {
+	c, _ := newCore(t)
+	c.Apply(Command{Kind: CmdFollow})
+	epoch, version := c.State().Epoch, c.State().Version
+	for i := 0; i < 3; i++ {
+		c.Apply(Command{Kind: CmdFollow})
+	}
+	if c.State().Epoch != epoch || c.State().Version != version {
+		t.Fatalf("empty room resync moved epoch %d->%d, version %d->%d", epoch, c.State().Epoch, version, c.State().Version)
+	}
+}

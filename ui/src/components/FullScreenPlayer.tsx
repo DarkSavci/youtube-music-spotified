@@ -1,3 +1,4 @@
+import { Artwork } from "./Artwork";
 import { ShareIcon } from "./ShareIcon";
 import { trapTab, watchFullscreenIdle } from "../lib/fullscreenIdle";
 import { useImmersiveTitleBar } from "../lib/immersive";
@@ -71,7 +72,7 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
     <div ref={rootRef} tabIndex={-1} data-controls-hidden={hidden || undefined} className="fsp" role="dialog" aria-modal="true" aria-label="Now playing"
       // Also while paused, when the idle watcher is not running.
       onKeyDown={(e) => { if (e.key === "Tab" && rootRef.current) trapTab(rootRef.current, e.nativeEvent); }}>
-      {video ? <VideoSurface priority={10} className="fsp__video" /> : <img className="fsp__bleed" src={art} alt="" aria-hidden="true" />}
+      {video ? <VideoSurface priority={10} className="fsp__video" /> : <Artwork className="fsp__bleed" src={art} alt="" aria-hidden="true" />}
       {/* A gradient only at the bottom, where the controls are: the artwork
           stays untouched everywhere the eye actually looks. */}
       <div className="fsp__scrim" aria-hidden="true" />
@@ -95,7 +96,7 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
 
       <div className="fsp__foot">
         <div className="fsp__track">
-          <img className="fsp__thumb" src={artworkAtLeast(track.artwork, 160)} alt="" />
+          <Artwork className="fsp__thumb" src={artworkAtLeast(track.artwork, 160)} alt="" />
           <div className="fsp__meta">
             <h1 className="fsp__title truncate">{track.title}</h1>
             <p className="fsp__artist truncate">

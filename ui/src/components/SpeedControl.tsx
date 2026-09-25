@@ -33,7 +33,7 @@ export function SpeedControl({ titled = false }: { titled?: boolean }) {
   // never draw it.
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const speed = usePlayer((s) => s.speed);
-  const inRoom = useTogether((s) => s.role !== null);
+  const inRoom = useTogether((s) => s.status !== "disconnected");
   const label = inRoom
     ? "Playback speed: 1× in Listen Together"
     : `Playback speed: ${formatSpeed(speed)}`;

@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 
-const CORE = "http://127.0.0.1:8674";
+const CORE = process.env.SPOTIFIER_DEV_CORE || "http://127.0.0.1:8674";
 
 /**
  * Artwork and the embedded player are the only remote origins the app needs.

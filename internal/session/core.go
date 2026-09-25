@@ -34,8 +34,11 @@ type Core struct {
 	// userChange is whether the listener chose the current track (a play, a
 	// skip, going back) rather than the last one ending. Skips cut; only an
 	// ending crossfades.
-	userChange bool
-	following  bool // Ephemeral: never restored after an application restart.
+	userChange           bool
+	following            bool // Ephemeral: never restored after an application restart.
+	roomEntry            string
+	beforeRoom           *domain.Session
+	beforeRoomUnshuffled []domain.Track
 
 	// unshuffled is the queue as it was before shuffle reordered it, so
 	// turning shuffle off puts it back. Shuffle rewrites the queue itself
@@ -150,6 +153,26 @@ func (c *Core) Apply(cmd Command) (Reject, []LogEntry) {
 	case CmdLeaveRoom:
 		if c.following {
 			c.following = false
+			c.roomEntry = ""
+			if c.beforeRoom != nil {
+				volume, epoch := c.state.Volume, c.state.Epoch
+				version, owner := c.state.Version, c.state.OwnerDeviceID
+				c.state = *c.beforeRoom
+				c.state.Volume = volume
+				c.state.Epoch = epoch + 1
+				// Only the personal session comes back. Which device makes
+				// the sound, and how far the state has advanced, belong to
+				// now: another device may have taken over during the room,
+				// and a projection must never go back in Version.
+				c.state.Version = version
+				c.state.OwnerDeviceID = owner
+				c.unshuffled = c.beforeRoomUnshuffled
+				c.beforeRoom = nil
+				c.beforeRoomUnshuffled = nil
+				c.playedMs = 0
+				c.lastPositionMs = c.state.PositionMs
+				c.loggedCurrent = false
+			}
 			// A room that never had a track leaves nothing to resume.
 			c.state.State = domain.StatePaused
 			if c.state.Queue.Current() == nil {
@@ -789,17 +812,29 @@ var _ = time.Second
 // followRoom applies a single authoritative room snapshot without changing
 // local volume, repeat/shuffle preferences, or inventing listening progress.
 func (c *Core) followRoom(cmd Command) (Reject, []LogEntry) {
-	if len(cmd.Tracks) > 1 || cmd.PositionMs < 0 || cmd.PositionMs > 86400000 {
+	if len(cmd.Tracks) > 500 || (len(cmd.Tracks) > 0 && (cmd.StartIndex < 0 || cmd.StartIndex >= len(cmd.Tracks))) || cmd.PositionMs < 0 || cmd.PositionMs > 86400000 {
 		return RejectOutOfRange, nil
 	}
 	var logs []LogEntry
 	current := c.state.Queue.Current()
 	wasFollowing := c.following
-	if len(cmd.Tracks) == 1 && cmd.Tracks[0].ID == "" {
+	if len(cmd.Tracks) > 0 && cmd.Tracks[cmd.StartIndex].ID == "" {
 		return RejectOutOfRange, nil
+	}
+	if !wasFollowing {
+		saved := c.state
+		saved.PositionMs = c.positionNow()
+		saved.Queue.Items = append([]domain.Track(nil), c.state.Queue.Items...)
+		c.beforeRoom = &saved
+		c.beforeRoomUnshuffled = append([]domain.Track(nil), c.unshuffled...)
 	}
 	c.following = true
 	if len(cmd.Tracks) == 0 {
+		// Already following an empty room: nothing to stop or restart, so
+		// no new epoch or projection either.
+		if wasFollowing && len(c.state.Queue.Items) == 0 && c.state.State == domain.StateIdle {
+			return RejectNone, nil
+		}
 		logs = c.closeOutCurrent(false)
 		c.state.Queue = domain.Queue{}
 		c.state.State = domain.StateIdle
@@ -807,15 +842,17 @@ func (c *Core) followRoom(cmd Command) (Reject, []LogEntry) {
 		c.bump()
 		return RejectNone, logs
 	}
-	track := cmd.Tracks[0]
-	if !wasFollowing || current == nil || current.ID != track.ID || !current.Playable {
+	track := cmd.Tracks[cmd.StartIndex]
+	if !wasFollowing || current == nil || current.ID != track.ID || !current.Playable || (cmd.ExpectedID != "" && c.roomEntry != cmd.ExpectedID) {
 		logs = c.closeOutCurrent(false)
-		c.state.Queue = domain.Queue{Items: []domain.Track{track}, Index: 0, Origin: "Listen Together"}
+		c.state.Queue = domain.Queue{Items: cmd.Tracks, Index: cmd.StartIndex, Origin: "Listen Together"}
 		c.unshuffled = nil
 		c.state.Degraded = nil
 		c.userChange = true
-		c.startTrack(0, cmd.PositionMs)
+		c.startTrack(cmd.StartIndex, cmd.PositionMs)
 	}
+	c.state.Queue = domain.Queue{Items: cmd.Tracks, Index: cmd.StartIndex, Origin: "Listen Together"}
+	c.roomEntry = cmd.ExpectedID
 	c.seek(cmd.PositionMs)
 	c.state.State = domain.StatePaused
 	if cmd.Playing {

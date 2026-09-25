@@ -184,3 +184,15 @@ func TestKeeperWritesOnShutdown(t *testing.T) {
 		t.Fatalf("shutdown snapshot wrong: %+v", got)
 	}
 }
+
+func TestRoomPersistenceKeepsPersonalQueue(t *testing.T) {
+	store := &memResume{}
+	keeper := &Keeper{Store: store, UserID: 1}
+	personal := sessionWith(4, 2, 91000)
+	room := sessionWith(8, 0, 1000)
+	keeper.save(context.Background(), Projection{FollowingRoom: true, State: room, PersonalResume: &personal})
+	restored := LoadSnapshot(context.Background(), store, 1)
+	if restored == nil || len(restored.Tracks) != 4 || restored.Index != 2 || restored.PositionMs != 91000 {
+		t.Fatalf("persisted room instead of personal queue: %+v", restored)
+	}
+}

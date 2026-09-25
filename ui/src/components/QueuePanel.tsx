@@ -1,3 +1,5 @@
+import { RoomAttribution } from "./RoomAttribution";
+import { Artwork } from "./Artwork";
 import { useEffect, useRef, useState } from "react";
 import { usePlayer } from "../lib/player";
 import { ArtistLinks } from "./EntityLinks";
@@ -88,8 +90,8 @@ export function QueueList({ onNavigate }: { onNavigate?: () => void } = {}) {
                         ])
                       }
                     >
-                      <img className="queuerow__art" src={artworkAtLeast(track.artwork, 80)} alt="" loading="lazy" />
-                      <span className="queuerow__text">
+                      <Artwork className="queuerow__art" src={artworkAtLeast(track.artwork, 80)} alt="" loading="lazy" />
+                      <RoomAttribution index={at} /><span className="queuerow__text">
                         <span className="queuerow__title truncate">{track.title}</span>
                         <span className="queuerow__artist truncate"><ArtistLinks artists={track.artists} onNavigate={onNavigate} /></span>
                       </span>
@@ -191,8 +193,8 @@ export function QueueList({ onNavigate }: { onNavigate?: () => void } = {}) {
                           ])
                         }
                       >
-                        <img className="queuerow__art" src={artworkAtLeast(track.artwork, 80)} alt="" loading="lazy" draggable={false} />
-                        <span className="queuerow__text">
+                        <Artwork className="queuerow__art" src={artworkAtLeast(track.artwork, 80)} alt="" loading="lazy" draggable={false} />
+                        <RoomAttribution index={at} /><span className="queuerow__text">
                           <span className="queuerow__title truncate">{track.title}</span>
                           <span className="queuerow__artist truncate"><ArtistLinks artists={track.artists} onNavigate={onNavigate} /></span>
                         </span>
@@ -234,8 +236,8 @@ function QueueRow({
 }) {
   return (
     <div className="queuerow" data-current={current || undefined}>
-      <img className="queuerow__art" src={art} alt="" />
-      <span className="queuerow__text">
+      <Artwork className="queuerow__art" src={art} alt="" />
+      <RoomAttribution /><span className="queuerow__text">
         <span className="queuerow__title truncate">{title}</span>
         <span className="queuerow__artist truncate">{artist}</span>
       </span>
