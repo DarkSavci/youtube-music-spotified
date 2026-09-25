@@ -832,10 +832,20 @@
   color: #fff;
   -webkit-app-region: no-drag;
 }
-/* Windows draws its caption buttons over the top-right of the page, so the
-   close button moves below them rather than hiding underneath. */
-.app-shell[data-native-titlebar="true"] .fsp__close {
-  top: calc(env(titlebar-area-height, 52px) + var(--space-3));
+/*
+ * Windows draws its caption buttons over the top-right of the page. Every
+ * view that fills the window puts its close button in the same place: just
+ * left of them, centred in the caption strip, so leaving any of them is the
+ * same reach.
+ */
+.app-shell[data-native-titlebar="true"] :is(.fsp__close, .lyricsview__close) {
+  position: absolute;
+  top: calc((env(titlebar-area-height, 52px) - 32px) / 2);
+  right: calc(max(150px, 100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px)) + var(--space-2));
+}
+/* The lyrics header keeps the title clear of the buttons and the close. */
+.app-shell[data-native-titlebar="true"] .lyricsview__head {
+  padding-right: calc(max(150px, 100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px)) + 32px + var(--space-4));
 }
 
 .fsp__foot {
