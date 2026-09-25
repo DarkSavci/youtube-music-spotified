@@ -26,6 +26,7 @@
  */
 
 const { app, Tray, Menu, BrowserWindow, ipcMain, nativeImage, nativeTheme, screen } = require("electron");
+const fs = require("node:fs");
 const path = require("node:path");
 const miniplayer = require("./miniplayer");
 const updater = require("./updater");
@@ -153,28 +154,62 @@ function buildMenu() {
 /* ---------- taskbar thumbnail buttons ---------- */
 
 /*
- * The icons are PNGs with @1.25x/@1.5x/@2x siblings, which nativeImage picks
- * between by display scale; see make-thumbar-icons.js for where they come
- * from. Loaded once: the thumbar is rebuilt on every play state change.
+ * The icons come in one PNG per Windows scaling step; see
+ * make-thumbar-icons.js for where they come from.
+ *
+ * Electron hands Windows only an image's 1x bitmap, so a nativeImage with @2x
+ * siblings still sends the 16px one, and Windows stretches it on a scaled
+ * display. Instead the file drawn for the window's scale is loaded as the 1x
+ * image itself, so Windows receives exactly the pixels it will draw.
  */
-let thumbIcons = null;
+const THUMB_SCALES = [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3];
+const thumbIcons = new Map();
+let thumbScale = 1;
+
+/** The smallest drawn scale that covers the display's, so Windows only ever shrinks. */
+function thumbScaleFor(win) {
+  const factor = screen.getDisplayMatching(win.getBounds()).scaleFactor || 1;
+  return THUMB_SCALES.find((s) => s >= factor - 0.01) ?? THUMB_SCALES[THUMB_SCALES.length - 1];
+}
+
 function thumbIcon(name) {
-  thumbIcons ??= {};
-  thumbIcons[name] ??= nativeImage.createFromPath(branding("thumbar", `${name}.png`));
-  return thumbIcons[name];
+  const key = `${name}@${thumbScale}`;
+  if (!thumbIcons.has(key)) {
+    const file = thumbScale === 1 ? `${name}.png` : `${name}@${thumbScale}x.png`;
+    const png = fs.readFileSync(branding("thumbar", file));
+    thumbIcons.set(key, nativeImage.createFromBuffer(png, { scaleFactor: 1 }));
+  }
+  return thumbIcons.get(key);
 }
 
 let lastThumbar = "";
 function updateThumbar(force = false) {
   const win = mainWindow();
-  if (process.platform !== "win32" || !win) return;
+  // Buttons added before the window has a taskbar button are silently
+  // dropped, and Electron only ever adds once — later calls merely update
+  // buttons that are not there. The "show" handler sets them once it exists.
+  if (process.platform !== "win32" || !win || !win.isVisible()) return;
   const hasTrack = Boolean(state?.track);
   const playing = Boolean(state?.playing);
-  const key = `${hasTrack}:${playing}`;
+  thumbScale = thumbScaleFor(win);
+  const canLike = hasTrack && Boolean(state?.canLike);
+  const liked = Boolean(state?.liked);
+  const key = `${hasTrack}:${playing}:${canLike}:${liked}:${thumbScale}`;
   if (!force && key === lastThumbar) return;
   lastThumbar = key;
+  // No "nobackground": the button background is also where Windows draws the
+  // hover and pressed states, and without it the buttons give no feedback.
   const flags = hasTrack ? [] : ["disabled"];
   win.setThumbarButtons([
+    // First, as Spotify places it. Hidden while there is nothing to like —
+    // signed out, or the liked list still loading: Windows dims a disabled
+    // button's frame and glyph together, which on a thin heart reads as broken.
+    {
+      tooltip: liked ? "Remove from Liked Music" : "Add to Liked Music",
+      icon: thumbIcon(liked ? "liked" : "like"),
+      flags: canLike ? [] : ["hidden"],
+      click: () => dispatch({ type: "like" }),
+    },
     { tooltip: "Previous", icon: thumbIcon("prev"), flags, click: () => dispatch({ type: "prev" }) },
     {
       tooltip: playing ? "Pause" : "Play",
@@ -418,6 +453,10 @@ function attach(win) {
   });
   // Windows drops thumbnail buttons when a window is hidden and shown again.
   win.on("show", () => updateThumbar(true));
+  // Dragged onto a display with other scaling, or the scaling changed under it:
+  // the icons have to be redrawn at the new size. Unchanged scale is a no-op.
+  win.on("moved", () => updateThumbar());
+  screen.on("display-metrics-changed", () => updateThumbar());
   win.once("ready-to-show", () => updateThumbar(true));
 }
 

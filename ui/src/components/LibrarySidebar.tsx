@@ -13,8 +13,10 @@ import {
 import { usePrompt } from "./Prompt";
 import {
   IconExpand, IconCollapse, IconChevronLeft, IconChevronRight, IconGrid, IconLibrary, IconList,
-  IconPlus, IconSearch,
+  IconPlay, IconPlus, IconSearch,
 } from "./Icon";
+import { playEntity } from "../lib/playback";
+import { artistPath } from "./EntityLinks";
 
 type Filter = "" | "playlists" | "artists" | "albums";
 type Sort = "alphabetical" | "creator" | "recents" | "recently_added";
@@ -61,18 +63,22 @@ export function LibrarySidebar({ expanded, onExpand, onNavigate }: { expanded: b
    * is the only place they mean anything.
    */
   const itemMenu = (item: LibraryItem): MenuItem[] => {
-    const out: MenuItem[] = [
+    const out: MenuItem[] = [];
+    if (canPlay(item)) out.push({ label: "Play", onSelect: () => void playItem(item) });
+    out.push(
       {
         label: item.pinned ? "Unpin" : "Pin to top",
+        separated: out.length === 1,
         onSelect: () =>
           organise.mutate({ kind: item.kind, itemId: item.id, pinned: !item.pinned }),
       },
-    ];
+    );
+    const pinIndex = out.length;
     for (const f of folders) {
       if (f.id === item.folderId) continue;
       out.push({
         label: `Move to ${f.name}`,
-        separated: out.length === 1,
+        separated: out.length === pinIndex,
         onSelect: () =>
           organise.mutate({ kind: item.kind, itemId: item.id, folderId: f.id }),
       });
@@ -387,54 +393,86 @@ function LibraryList({
           </div>
           <ul className="libfolder__items">
             {(byFolder.get(folder.id) ?? []).map((item) => (
-              <li key={`${item.kind}:${item.id}`}>
-                <NavLink
-                  to={routeFor(item)}
-                  className="libitem"
-                  data-pinned={item.pinned || undefined}
-                  onContextMenu={(e) => onItemMenu(e, item)}
-                >
-                  <img
-                    className={`libitem__art ${item.kind === "artist" ? "libitem__art--round" : ""}`}
-                    src={artworkAtLeast(item.artwork, artworkSize)}
-                    alt=""
-                    loading="lazy"
-                  />
-                  <span className="libitem__text">
-                    <span className="libitem__title truncate">{item.title}</span>
-                    <span className="libitem__sub truncate">{item.subtitle}</span>
-                  </span>
-                </NavLink>
-              </li>
+              <LibraryRow key={`${item.kind}:${item.id}`} item={item} sub={item.subtitle}
+                artworkSize={artworkSize} onMenu={onItemMenu} />
             ))}
           </ul>
         </li>
       ))}
       {loose.map((item) => (
-        <li key={`${item.kind}:${item.id}`}>
-          <NavLink
-            to={routeFor(item)}
-            className="libitem"
-            data-pinned={item.pinned || undefined}
-            onContextMenu={(e) => onItemMenu(e, item)}
-          >
-            <img
-              className={`libitem__art ${item.kind === "artist" ? "libitem__art--round" : ""}`}
-              src={artworkAtLeast(item.artwork, artworkSize)}
-              alt=""
-              loading="lazy"
-            />
-            <span className="libitem__text">
-              <span className="libitem__title truncate">{item.title}</span>
-              <span className="libitem__sub truncate">
-                {labelFor(item)}
-              </span>
-            </span>
-          </NavLink>
-        </li>
+        <LibraryRow key={`${item.kind}:${item.id}`} item={item} sub={labelFor(item)}
+          artworkSize={artworkSize} onMenu={onItemMenu} />
       ))}
     </ul>
   );
+}
+
+/**
+ * One saved item in the rail.
+ *
+ * A click opens it and a double-click plays it, and the artwork carries a play
+ * button on hover, so starting a playlist does not take a trip through its
+ * page. The button sits inside the link, so it swallows its own click rather
+ * than navigating; keyboard users get the same action from the row's menu.
+ */
+function LibraryRow({ item, sub, artworkSize, onMenu }: {
+  item: LibraryItem;
+  sub?: string;
+  artworkSize: number;
+  onMenu: (e: React.MouseEvent, item: LibraryItem) => void;
+}) {
+  const playable = canPlay(item);
+  return (
+    <li>
+      <NavLink
+        to={routeFor(item)}
+        className="libitem"
+        data-pinned={item.pinned || undefined}
+        onContextMenu={(e) => onMenu(e, item)}
+        onDoubleClick={playable ? () => void playItem(item) : undefined}
+      >
+        <span className={`libitem__artwrap ${item.kind === "artist" ? "libitem__art--round" : ""}`}>
+          <img
+            className={`libitem__art ${item.kind === "artist" ? "libitem__art--round" : ""}`}
+            src={artworkAtLeast(item.artwork, artworkSize)}
+            alt=""
+            loading="lazy"
+          />
+          {playable ? (
+            <span
+              className="libitem__play"
+              aria-hidden="true"
+              title={`Play ${item.title}`}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                void playItem(item);
+              }}
+              onDoubleClick={(e) => e.stopPropagation()}
+            >
+              <IconPlay size={20} />
+            </span>
+          ) : null}
+        </span>
+        <span className="libitem__text">
+          <span className="libitem__title truncate">{item.title}</span>
+          <span className="libitem__sub truncate">{sub}</span>
+        </span>
+      </NavLink>
+    </li>
+  );
+}
+
+/** Podcasts play episode by episode, so only these kinds play as a whole. */
+function canPlay(item: LibraryItem): item is LibraryItem & { kind: "album" | "playlist" | "artist" } {
+  return item.kind === "album" || item.kind === "playlist" || item.kind === "artist";
+}
+
+function playItem(item: LibraryItem) {
+  if (!canPlay(item)) return;
+  // A saved artist arrives wrapped (MPLAUC…); the artist endpoint wants the channel.
+  const id = item.kind === "artist" ? item.id.replace(/^MPLA(?=UC)/, "") : item.id;
+  return playEntity(item.kind, id, item.title);
 }
 
 /*
@@ -482,7 +520,7 @@ function routeFor(item: LibraryItem): string {
     case "album":
       return `/album/${encodeURIComponent(item.id)}`;
     case "artist":
-      return `/artist/${encodeURIComponent(item.id)}`;
+      return artistPath(item.id);
     default:
       return `/playlist/${encodeURIComponent(item.id)}`;
   }

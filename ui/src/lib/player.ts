@@ -54,6 +54,19 @@ interface PlayerState {
   volume: number;
   muted: boolean;
   anchor: PositionAnchor;
+  /**
+   * The playback speed in effect: the chosen one, or 1× in a Listen Together
+   * room. It is the anchor's rate while playing, so everything that
+   * interpolates position — the scrubber, synced lyrics, the video — moves at
+   * the speed the audio does.
+   */
+  speed: number;
+  /**
+   * Whether another device is the one producing sound, this window only
+   * controlling it. Speed is per device, and that one's is not ours to know,
+   * so position is interpolated at 1× meanwhile; see interpolationRate.
+   */
+  outputElsewhere: boolean;
   capabilities: Capabilities;
   /** Audio quality of the current stream, when known. */
   quality: string;
@@ -116,6 +129,8 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   volume: 0.5,
   muted: false,
   anchor: { positionMs: 0, atMs: 0, rate: 0 },
+  speed: 1,
+  outputElsewhere: false,
   capabilities: idleCapabilities,
   quality: "",
   notice: null,
@@ -131,7 +146,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       track,
       origin,
       state: "playing",
-      anchor: { positionMs: 0, atMs: performance.now(), rate: 1 },
+      anchor: { positionMs: 0, atMs: performance.now(), rate: interpolationRate(get()) },
     });
   },
 
@@ -144,7 +159,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
         anchor: { positionMs: currentPosition(get()), atMs: performance.now(), rate: 0 },
       });
     } else if (state === "paused") {
-      set({ state: "playing", anchor: { ...anchor, atMs: performance.now(), rate: 1 } });
+      set({ state: "playing", anchor: { ...anchor, atMs: performance.now(), rate: interpolationRate(get()) } });
     }
   },
 
@@ -176,7 +191,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
   seek: (ms) =>
     set((s) => ({
-      anchor: { positionMs: Math.max(0, ms), atMs: performance.now(), rate: s.state === "playing" ? 1 : 0 },
+      anchor: { positionMs: Math.max(0, ms), atMs: performance.now(), rate: s.state === "playing" ? interpolationRate(s) : 0 },
     })),
 
   setVolume: (v) => set({ volume: Math.min(2, Math.max(0, v)), muted: false }),
@@ -185,6 +200,15 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     set((s) => ({ repeat: s.repeat === "off" ? "all" : s.repeat === "all" ? "one" : "off" })),
   toggleShuffle: () => set((s) => ({ shuffle: !s.shuffle })),
 }));
+
+/**
+ * How fast position advances while playing: this device's speed, or 1× while
+ * another device is the one playing. Every anchor taken while playing uses
+ * this, so none of them runs the scrubber at a speed that is not being heard.
+ */
+export function interpolationRate(s: Pick<PlayerState, "speed" | "outputElsewhere">): number {
+  return s.outputElsewhere ? 1 : s.speed;
+}
 
 /**
  * Interpolate the playback position from the anchor.

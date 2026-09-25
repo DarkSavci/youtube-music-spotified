@@ -1,5 +1,7 @@
 import { ShareIcon } from "./ShareIcon";
 import { trapTab, watchFullscreenIdle } from "../lib/fullscreenIdle";
+import { useImmersiveTitleBar } from "../lib/immersive";
+import { SpeedControl } from "./SpeedControl";
 import { EndTime } from "./EndTime";
 import { VideoSurface, VideoSwitch, VideoNotice } from "./VideoPlayer";
 import { useVideo } from "../lib/video";
@@ -50,10 +52,7 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
 
   // Windows draws its caption buttons over the page; while fullscreen they sit
   // straight on the artwork or video instead of on a dark box.
-  useEffect(() => {
-    window.spotifier?.window?.setImmersiveTitleBar?.(true);
-    return () => window.spotifier?.window?.setImmersiveTitleBar?.(false);
-  }, []);
+  useImmersiveTitleBar();
 
   useEffect(() => {
     setHidden(false);
@@ -171,6 +170,7 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className="fsp__side fsp__side--end">
+            <SpeedControl />
             <VideoSwitch />
             <VolumeControl className="fsp__volume" />
           </div>

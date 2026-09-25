@@ -79,6 +79,10 @@ contextBridge.exposeInMainWorld("spotifier", {
   checkForUpdate: () => ipcRenderer.invoke("app:check-update"),
   installUpdate: () => ipcRenderer.send("app:install-update"),
 
+  /** Launch at login, as the OS currently has it. */
+  loginItem: () => ipcRenderer.invoke("app:login-item"),
+  setLoginItem: (on) => ipcRenderer.invoke("app:set-login-item", Boolean(on)),
+
   /** Hardware media keys, forwarded from the main process. */
   onMediaKey: (handler) => {
     const listener = (_event, action) => handler(action);

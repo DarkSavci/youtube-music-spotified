@@ -14,6 +14,9 @@ import {
 import { miniSupported, toggleMini, useMini } from "../lib/miniplayer";
 import { useLikedIds, useToggleLike } from "../lib/liked";
 import { VolumeControl } from "./VolumeControl";
+import { SpeedControl } from "./SpeedControl";
+import { useMenu } from "./ContextMenu";
+import { useTrackMenu } from "../lib/trackmenu";
 
 /**
  * Persistent transport bar.
@@ -75,6 +78,11 @@ export function NowPlayingBar({
   const toggleLike = useToggleLike();
   const liked = Boolean(track && likedIds.has(track.id));
   const miniOpen = useMini((s) => s.win !== null);
+  const menu = useMenu();
+  const trackMenu = useTrackMenu();
+  // The track in hand offers what it offers anywhere else — adding it to a
+  // playlist most of all — from its artwork and title.
+  const openMenu = (e: React.MouseEvent) => { if (track) menu.open(e, trackMenu(track)); };
 
   return (
     <footer className="bar panel" aria-label="Playback">
@@ -85,6 +93,7 @@ export function NowPlayingBar({
               className="bar__artbtn"
               aria-label="Open now playing"
               onClick={onOpenFullScreen}
+              onContextMenu={openMenu}
             >
               <img
                 className="bar__art"
@@ -95,7 +104,7 @@ export function NowPlayingBar({
                 <IconExpand size={16} />
               </span>
             </button>
-            <div className="bar__meta">
+            <div className="bar__meta" onContextMenu={openMenu}>
               <span className="bar__title truncate">{track.title}</span>
               <span className="bar__artist truncate">
                 <ArtistLinks artists={track.artists} />
@@ -211,6 +220,7 @@ export function NowPlayingBar({
         >
           <IconQueue size={18} />
         </button>
+        <SpeedControl />
         <VideoSwitch />
         <VolumeControl />
         {/* Where Spotify puts it: after the volume, at the far right. */}

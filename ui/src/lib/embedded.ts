@@ -1,5 +1,6 @@
 import type { Capabilities } from "./player";
 import type { Engine, EngineEvent, Target } from "./engine";
+import { MAX_SPEED, MIN_SPEED, type SpeedSupport } from "./speed";
 
 /**
  * Embedded engine: plays through YouTube's own player.
@@ -33,6 +34,9 @@ interface YTPlayer {
   setVolume(volume: number): void;
   getCurrentTime(): number;
   getDuration(): number;
+  setPlaybackRate(rate: number): void;
+  getPlaybackRate(): number;
+  getAvailablePlaybackRates(): number[];
   destroy(): void;
 }
 
@@ -96,6 +100,10 @@ export class EmbeddedEngine implements Engine {
   private ticker?: number;
   private ready = false;
   private pendingTarget: Target | null = null;
+  /** The speed asked for; applied once the player exists, and on every track. */
+  private speed = 1;
+  /** What YouTube offers for the loaded video; its usual list until it says. */
+  private available: readonly number[] = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
   constructor(emit: (e: EngineEvent) => void) {
     this.emit = emit;
@@ -140,6 +148,7 @@ export class EmbeddedEngine implements Engine {
       events: {
         onReady: () => {
           this.ready = true;
+          this.applySpeed();
           // A target may have arrived before the player existed; apply it now
           // rather than dropping it.
           if (this.pendingTarget) {
@@ -164,6 +173,8 @@ export class EmbeddedEngine implements Engine {
     const epoch = this.current?.epoch ?? 0;
     switch (state) {
       case PLAYING:
+        // YouTube can reset the rate when a new video loads.
+        this.applySpeed();
         this.emit({
           kind: "loaded",
           epoch,
@@ -240,6 +251,26 @@ export class EmbeddedEngine implements Engine {
 
   positionMs(): number {
     return Math.round((this.player?.getCurrentTime() ?? 0) * 1000);
+  }
+
+  speeds(): SpeedSupport {
+    return this.available;
+  }
+
+  setSpeed(rate: number) {
+    this.speed = rate;
+    this.applySpeed();
+  }
+
+  private applySpeed() {
+    if (!this.player || !this.ready) return;
+    try {
+      const offered = this.player.getAvailablePlaybackRates();
+      if (offered?.length) this.available = offered.filter((r) => r >= MIN_SPEED && r <= MAX_SPEED);
+      if (this.player.getPlaybackRate() !== this.speed) this.player.setPlaybackRate(this.speed);
+    } catch {
+      /* the player is between videos; the next PLAYING state applies it */
+    }
   }
 
   destroy() {

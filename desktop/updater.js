@@ -60,10 +60,6 @@ let state = { status: app.isPackaged && process.platform === "win32" ? "idle" : 
 
 function start() {
   if (!app.isPackaged || process.platform !== "win32") return;
-  // Windows shows a toast only for an app it can match to a Start menu
-  // shortcut; the installer stamps its shortcut with the appId.
-  app.setAppUserModelId("dev.darksavci.youtubemusicspotified");
-
   // Required lazily: in development it would complain about the missing
   // app-update.yml on load, and it is never used there.
   ({ autoUpdater: updater } = require("electron-updater"));

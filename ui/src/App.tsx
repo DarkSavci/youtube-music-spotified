@@ -34,7 +34,7 @@ const PlaylistView = lazy(() => import("./views/Entities").then((m) => ({ defaul
 const PodcastView = lazy(() => import("./views/Entities").then((m) => ({ default: m.PodcastView })));
 import { PageState, TrackListSkeleton } from "./components/States";
 import { Announcer, SkipLink } from "./components/Announcer";
-import { applyPlaybackSettings, installAudioDebug, startPlayback, stopPlayback } from "./lib/playback";
+import { applyPlaybackSettings, applySpeed, installAudioDebug, startPlayback, stopPlayback } from "./lib/playback";
 import { installMediaSession } from "./lib/mediasession";
 import { TrayBridge } from "./components/TrayBridge";
 import { MiniPlayerHost } from "./components/MiniPlayer";
@@ -45,7 +45,7 @@ import { LyricsPanel, LyricsView } from "./components/Lyrics";
 import { MenuProvider } from "./components/ContextMenu";
 import { PromptProvider } from "./components/Prompt";
 import { Shortcuts } from "./components/Shortcuts";
-import { leaveTogether } from "./lib/together";
+import { leaveTogether, useTogether } from "./lib/together";
 
 /**
  * The shell: library rail, scrolling content, optional right panel, and the
@@ -103,6 +103,13 @@ export function App() {
     });
     installAudioDebug();
   }, [crossfadeMs, gapless, normalization, normalizationLevel, resumeOnLaunch, reportToYouTube, cacheMaxMB, autoplay, eq]);
+
+  // Speed changes when chosen, and when a Listen Together room pins it to 1×.
+  const playbackSpeed = useSettings((s) => s.playbackSpeed);
+  const roomRole = useTogether((s) => s.role);
+  useEffect(() => {
+    applySpeed();
+  }, [playbackSpeed, roomRole]);
 
   const settings = useSettings();
 

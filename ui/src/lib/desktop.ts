@@ -27,6 +27,18 @@ export interface SavedAccounts {
  accounts: { id: string; name: string; avatarUrl?: string; channel: string; channels: { id: string; name: string; handle?: string; avatarUrl?: string }[] }[];
 }
 
+/**
+ * Launch at login, as the OS reports it. needsApproval is macOS holding a
+ * registration until it is allowed in System Settings.
+ */
+export interface LoginItemState {
+  supported: boolean;
+  enabled: boolean;
+  needsApproval: boolean;
+}
+
+const NO_LOGIN_ITEM: LoginItemState = { supported: false, enabled: false, needsApproval: false };
+
 interface DesktopBridge {
   accountScope?: string;
   platform?: string;
@@ -37,6 +49,9 @@ interface DesktopBridge {
   version?(): Promise<{ version: string; update: UpdateStatus }>;
   checkForUpdate?(): Promise<UpdateStatus>;
   installUpdate?(): void;
+  /** Absent in shells that predate launch at login. */
+  loginItem?(): Promise<LoginItemState>;
+  setLoginItem?(on: boolean): Promise<LoginItemState>;
   onMediaKey(handler: (action: string) => void): () => void;
   onCoreStatus(handler: (status: { running: boolean; code?: number }) => void): () => void;
   auth: {
@@ -124,6 +139,16 @@ export const desktop = {
   /** This copy's version and the updater's state, or null outside the desktop app. */
   async version(): Promise<{ version: string; update: UpdateStatus } | null> {
     return (await window.spotifier?.version?.()) ?? null;
+  },
+
+  /** Launch at login as the OS has it; unsupported outside a packaged desktop build. */
+  async loginItem(): Promise<LoginItemState> {
+    return (await window.spotifier?.loginItem?.()) ?? NO_LOGIN_ITEM;
+  },
+
+  /** Registers or removes the login entry, and returns what the OS now says. */
+  async setLoginItem(on: boolean): Promise<LoginItemState> {
+    return (await window.spotifier?.setLoginItem?.(on)) ?? NO_LOGIN_ITEM;
   },
 
   /** Asks the updater to look now. A found update downloads on its own. */

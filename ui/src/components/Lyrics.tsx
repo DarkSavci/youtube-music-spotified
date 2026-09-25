@@ -7,6 +7,7 @@ import { usePlayer } from "../lib/player";
 import { transport } from "../lib/playback";
 import { usePlaybackPosition } from "../lib/tick";
 import { useArtColor } from "../lib/artcolor";
+import { useImmersiveTitleBar } from "../lib/immersive";
 import { apiUrl } from "../lib/base";
 import { useSettings } from "../lib/settings";
 import { artworkAtLeast, formatDuration } from "../lib/types";
@@ -237,6 +238,10 @@ export function LyricsView({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
+  // Windows draws its caption buttons over the page; over the lyrics they
+  // should sit on the lyrics' colour, not on the app's dark title strip.
+  useImmersiveTitleBar();
+
   return (
     <div
       className="lyricsview"
@@ -257,7 +262,7 @@ export function LyricsView({ onClose }: { onClose: () => void }) {
             <ArtistLinks artists={track?.artists} onNavigate={onClose} />
           </span>
         </div>
-        <button ref={closeRef} className="iconbtn" aria-label="Close lyrics" onClick={onClose}>
+        <button ref={closeRef} className="iconbtn lyricsview__close" aria-label="Close lyrics" onClick={onClose}>
           <IconClose size={20} />
         </button>
       </header>

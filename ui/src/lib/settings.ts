@@ -89,6 +89,16 @@ export interface Settings {
   showQualityBadge: boolean;
 
   /**
+   * How fast playback runs, as a multiple of normal.
+   *
+   * Kept across tracks and launches rather than reset per track: it is chosen
+   * for a kind of listening — a podcast sped up, a passage slowed to learn —
+   * and resetting it on every track would undo that. Pitch is preserved.
+   * Listen Together always plays at 1×, whatever this says.
+   */
+  playbackSpeed: number;
+
+  /**
    * Look up timed lyrics from LRCLIB when YouTube Music has none, or has only
    * untimed words.
    *
@@ -158,6 +168,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showQualityBadge: true,
   timedLyrics: true,
   remainingTime: false,
+  playbackSpeed: 1,
   eq: [0, 0, 0, 0, 0],
 };
 

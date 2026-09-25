@@ -23,6 +23,7 @@ const accounts = require("./accounts");
 const tray = require("./tray");
 const miniplayer = require("./miniplayer");
 const updater = require("./updater");
+const { LoginItem } = require("./loginitem");
 const logs = require("./logs");
 const { vendorDirectory } = require("./platform");
 const { stopChild } = require("./child-process");
@@ -49,6 +50,10 @@ const appContents = new Set();
 const DEV_URL = "http://127.0.0.1:5219/";
 
 let mainWindow = null;
+const loginItem = new LoginItem(app);
+// Set once at startup: a launch the OS made at login stays in the tray until
+// the person opens the window. Only the first window honours it.
+let startHidden = false;
 let core = null;
 let shuttingDown = false;
 let devServerUp = false;
@@ -220,6 +225,14 @@ const DATA_DIR_NAME = "Spotifier";
 // the lock file, Local State — the moment it starts, under whatever name it
 // has then. Setting the path later left a stray folder behind on every launch.
 app.setPath("userData", path.join(app.getPath("appData"), DATA_DIR_NAME));
+
+// The taskbar identity has to be settled before the first window exists.
+// Changed later, Windows regroups the window under a new taskbar button, and
+// the thumbnail buttons already attached to the old one are lost. The
+// installer stamps its shortcut with the same id, which toasts also need.
+if (app.isPackaged && process.platform === "win32") {
+  app.setAppUserModelId("dev.darksavci.youtubemusicspotified");
+}
 
 // The log opens next, before anything below has a chance to say something.
 logs.init(dataDir());
@@ -437,7 +450,13 @@ function createWindow() {
   }
 
   // Avoid a white flash before the dark UI paints.
-  mainWindow.once("ready-to-show", () => mainWindow.show());
+  mainWindow.once("ready-to-show", () => {
+    if (startHidden) {
+      startHidden = false;
+      return;
+    }
+    mainWindow.show();
+  });
 
   // Windows can maximise the window without us: snap layouts, a drag to the
   // top edge, Win+Up. The restore icon has to follow those too, not just our
@@ -584,6 +603,8 @@ if (!app.requestSingleInstanceLock()) {
     setTimeout(() => void updateYtdlp(), 60_000).unref?.();
     await core.ready;
     devServerUp = isDev && (await probe(5219, 400));
+    startHidden = loginItem.launchedAtLogin();
+    loginItem.refresh();
     createWindow();
     tray.create(() => mainWindow, uiSource());
     registerMediaKeys();
@@ -658,6 +679,9 @@ ipcMain.handle("data-dir", () => dataDir());
 // The version this copy is, and one downloaded and waiting to install.
 ipcMain.handle("app:version", () => ({ version: app.getVersion(), update: updater.status() }));
 ipcMain.handle("app:check-update", () => updater.checkNow());
+// Launch at login. The OS holds the answer; see loginitem.js.
+ipcMain.handle("app:login-item", () => loginItem.state());
+ipcMain.handle("app:set-login-item", (_e, on) => loginItem.set(Boolean(on)));
 ipcMain.on("app:install-update", () => updater.install());
 
 /* ---------- diagnostics ---------- */

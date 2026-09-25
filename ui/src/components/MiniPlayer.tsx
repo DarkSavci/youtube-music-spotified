@@ -18,6 +18,7 @@ import { QueueList } from "./QueuePanel";
 import { LyricsBody } from "./Lyrics";
 import { Slider } from "./Slider";
 import { VolumeControl } from "./VolumeControl";
+import { SpeedControl } from "./SpeedControl";
 import {
   IconClose, IconHeart, IconLyrics, IconOpenApp, IconPause, IconPin, IconPlay,
   IconQueue, IconRepeat, IconShuffle, IconSkipNext, IconSkipPrev, IconVideo,
@@ -46,13 +47,29 @@ type Layout = "bar" | "square" | "wide" | "tall";
 type Panel = "art" | "video" | "queue" | "lyrics";
 
 // What the queue and the lyrics need to be worth showing.
-const PANEL_SIZE = { width: 340, height: 580 };
+const PANEL_SIZE = { width: 360, height: 580 };
 
+/*
+ * What each layout needs, measured: below these the square cuts off its
+ * progress and buttons, and the wide one loses its title and squashes the
+ * transport. The wide layout's artwork is a square the window's height, so
+ * what it needs is the width left beside it.
+ */
+const SQUARE_MIN_HEIGHT = 260;
+const WIDE_MIN_SIDE = 270;
+
+/**
+ * The layout for a window size: the one its proportions suggest, or where
+ * that one would not fit, one that does — ending at the one-line bar, which
+ * fits any window the shell allows.
+ */
 function layoutFor(w: number, h: number): Layout {
   if (h < 140) return "bar";
   if (h >= 400 || (h >= 300 && w / h < 0.8)) return "tall";
-  if (w / h <= 1.35) return "square";
-  return "wide";
+  const square = h >= SQUARE_MIN_HEIGHT;
+  const wide = w - h >= WIDE_MIN_SIDE;
+  if (w / h <= 1.35) return square ? "square" : wide ? "wide" : "bar";
+  return wide ? "wide" : square ? "square" : "bar";
 }
 
 /** Mounted once by the app; draws into the mini window while it is open. */
@@ -146,6 +163,7 @@ function Bar() {
         <Meta />
         <LikeButton />
         <Transport compact />
+        <SpeedControl titled />
         <WindowButtons />
       </div>
       <ThinProgress />
@@ -220,11 +238,18 @@ function Tall({ panel, onPanel }: PanelProps) {
 
 /* ---------- pieces ---------- */
 
-/** The strip the window is dragged by, with its buttons on the right. */
+/**
+ * The strip the window is dragged by, with its buttons on the right.
+ *
+ * Playback speed sits here rather than with the controls at the bottom, which
+ * already hold as much as a window this narrow can: it is set once and left,
+ * so it can live out of the way beside the window's own buttons.
+ */
 function Head({ children }: { children?: ReactNode }) {
   return (
     <div className="mini__head mini__drag">
       <div className="mini__headmain">{children}</div>
+      <SpeedControl titled />
       <WindowButtons />
     </div>
   );

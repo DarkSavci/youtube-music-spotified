@@ -150,6 +150,27 @@
 .libitem__art--round {
   border-radius: var(--radius-circle);
 }
+.libitem__artwrap {
+  position: relative;
+  flex: none;
+  display: block;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.libitem__artwrap > .libitem__art { display: block; }
+/* Plays without opening the page; shown over the artwork on hover. */
+.libitem__play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgb(0 0 0 / 0.5);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.libitem:hover .libitem__play { opacity: 1; }
 .libitem__text {
   min-width: 0;
   display: flex;
@@ -811,10 +832,20 @@
   color: #fff;
   -webkit-app-region: no-drag;
 }
-/* Windows draws its caption buttons over the top-right of the page, so the
-   close button moves below them rather than hiding underneath. */
-.app-shell[data-native-titlebar="true"] .fsp__close {
-  top: calc(env(titlebar-area-height, 52px) + var(--space-3));
+/*
+ * Windows draws its caption buttons over the top-right of the page. Every
+ * view that fills the window puts its close button in the same place: just
+ * left of them, centred in the caption strip, so leaving any of them is the
+ * same reach.
+ */
+.app-shell[data-native-titlebar="true"] :is(.fsp__close, .lyricsview__close) {
+  position: absolute;
+  top: calc((env(titlebar-area-height, 52px) - 32px) / 2);
+  right: calc(max(150px, 100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px)) + var(--space-2));
+}
+/* The lyrics header keeps the title clear of the buttons and the close. */
+.app-shell[data-native-titlebar="true"] .lyricsview__head {
+  padding-right: calc(max(150px, 100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px)) + 32px + var(--space-4));
 }
 
 .fsp__foot {
@@ -1378,6 +1409,7 @@ body:has(.account-menu, .whats-new-dialog[open]) .app-shell::before {
 .sidebar[data-grid] .sidebar__list > ul, .sidebar[data-grid] .libfolder__items { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; padding: 16px; }
 .sidebar[data-grid] .sidebar__list > ul > li:has(.libfolder) { grid-column: 1 / -1; }
 .sidebar[data-grid] .libitem { flex-direction: column; align-items: stretch; gap: 10px; padding: 10px; }
+.sidebar[data-grid] .libitem__artwrap { width: 100%; }
 .sidebar[data-grid] .libitem__art { width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; }
 .sidebar[data-grid] .libitem__text { display: flex; flex-direction: column; min-width: 0; }
 .sidebar[data-grid] .libitem__title { font-size: 15px; }
@@ -1387,6 +1419,8 @@ body:has(.account-menu, .whats-new-dialog[open]) .app-shell::before {
 .ctxmenu__item { display: flex; align-items: center; gap: 12px; }
 .ctxmenu__item > svg { flex-shrink: 0; color: var(--text-secondary); }
 .ctxmenu__item > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The share icon is a span too; without this it takes the label's share of the row. */
+.ctxmenu__item > .share-icon { flex: none; overflow: visible; color: var(--text-secondary); }
 .account-menu button[role="menuitem"] { display: flex; align-items: center; gap: 10px; }
 @container sidebar (max-width: 170px) {
   .sidebar__search, .sidebar__actions { display: none; }
@@ -1430,3 +1464,84 @@ button:is(:hover, :focus-visible) .share-icon__copy,
 [role="menuitem"]:is(:hover, :focus-visible) .share-icon__copy { visibility: visible; }
 
 .topbar__history, .topbar__history:hover:not(:disabled) { width: 36px; height: 40px; background: transparent; }
+
+/* Playback speed: the number is the state, so it is the label. */
+.speedbtn {
+  width: auto;
+  min-width: 32px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill, 999px);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.speedbtn[aria-disabled="true"] { opacity: 0.5; }
+
+/* The speed panel, after YouTube's: the value large, a slider flanked by a
+   step either way, presets below. Opens above its button, which sits at the
+   bottom of the window. */
+.speedpanel {
+  position: fixed;
+  z-index: 1000;
+  width: min(360px, calc(100vw - 16px));
+  padding: var(--space-4);
+  border: 1px solid var(--text-subdued, #444);
+  border-radius: var(--radius-lg);
+  background: var(--surface-elevated, #282828);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-dialog);
+  -webkit-app-region: no-drag;
+}
+.speedpanel__title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-secondary);
+}
+.speedpanel__value {
+  margin: var(--space-3) 0;
+  text-align: center;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.speedpanel__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.speedpanel__row .iconbtn { flex: none; font-size: var(--text-lg, 18px); color: var(--text-primary); }
+.speedpanel__row .iconbtn:disabled { opacity: 0.4; }
+.speedpanel__slider { flex: 1; }
+/* One row where there is room; in the narrow mini player, a second. */
+.speedpanel__presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.speedpanel__preset {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+}
+.speedpanel__pill {
+  width: 100%;
+  min-width: 44px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.speedpanel__pill:hover:not(:disabled) { background: var(--surface-hover); }
+.speedpanel__pill[data-active="true"] { background: var(--text-primary); color: var(--surface-base, #121212); }
+.speedpanel__pill:disabled { opacity: 0.35; }
+.speedpanel__note { font-size: var(--text-xs); color: var(--text-secondary); }
+/* Compact, for windows too short for the whole panel: one row of presets
+   between the steps, wrapping only when narrow as well. */
+.speedpanel[data-compact] { width: min(480px, calc(100vw - 16px)); padding: var(--space-2); }
+.speedpanel[data-compact] .speedpanel__presets { flex: 1; margin-top: 0; }
