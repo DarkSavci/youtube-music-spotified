@@ -41,6 +41,7 @@ const NO_LOGIN_ITEM: LoginItemState = { supported: false, enabled: false, needsA
 
 interface DesktopBridge {
   discordPresence?(value: Record<string, unknown>): Promise<string>;
+  onDiscordStatus?(handler: (status: string) => void): () => void;
   accountScope?: string;
   platform?: string;
   nativeTitleBar?: boolean;

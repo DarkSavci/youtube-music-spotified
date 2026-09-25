@@ -27,7 +27,7 @@ function endpoints(platform = process.platform, env = process.env) {
   return Array.from({ length: 10 }, (_, i) =>
     platform === "win32"
       ? [`\\\\?\\pipe\\discord-ipc-${i}`]
-      : roots.map((root) => path.join(root, `discord-ipc-${i}`)),
+      : roots.map((root) => path.posix.join(root, `discord-ipc-${i}`)),
   ).flat();
 }
 const text = (value) =>
@@ -96,21 +96,31 @@ class DiscordPresence {
   constructor({
     connect = (p) => net.createConnection(p),
     paths = endpoints(),
+    onStatus = () => {},
   } = {}) {
+    this.onStatus = onStatus;
     this.connect = connect;
     this.paths = paths;
-    this.status = "disabled";
+    this._status = "disabled";
     this.clientId = "";
     this.desired = null;
     this.ready = false;
     this.generation = 0;
   }
+  // Connecting finishes after update() has answered, so changes are also
+  // pushed; otherwise Settings would show a stale state until the next send.
+  get status() {
+    return this._status;
+  }
+  set status(value) {
+    if (value === this._status) return;
+    this._status = value;
+    this.onStatus(value);
+  }
   update(value = {}) {
     const id = typeof value.clientId === "string" ? value.clientId.trim() : "";
     if (value.enabled !== true || !/^\d{17,20}$/.test(id)) {
-      this.stop();
-      this.status =
-        value.enabled === true ? "needs-application-id" : "disabled";
+      this.stop(value.enabled === true ? "needs-application-id" : "disabled");
       return;
     }
     if (this.clientId !== id) {
@@ -118,7 +128,7 @@ class DiscordPresence {
       this.clientId = id;
     }
     this.desired = activity(value);
-    if (!this.socket && !this.retry) this.open();
+    if (!this.socket && !this.retry && this.rejected !== id) this.open();
     if (this.ready) this.flush();
   }
   open(index = 0) {
@@ -165,7 +175,11 @@ class DiscordPresence {
         }
         buffer = buffer.subarray(8 + length);
         if (op === 3) socket.write(frame(4, payload));
+        // Discord refuses the handshake itself, e.g. "Invalid Client ID".
+        // Retrying the same ID cannot succeed, so say so instead of waiting.
         if (op === 2) {
+          this.rejected = this.clientId;
+          this.status = "error";
           socket.destroy();
           return;
         }
@@ -186,6 +200,7 @@ class DiscordPresence {
       this.ready = false;
       this.lastSent = "";
       this.sentAt = 0;
+      if (this.rejected === this.clientId) return;
       if (!connected) this.open(index + 1);
       else {
         this.status = "waiting-for-discord";
@@ -225,7 +240,8 @@ class DiscordPresence {
       }),
     );
   }
-  stop() {
+  stop(status = "disabled") {
+    this.rejected = "";
     clearTimeout(this.pending);
     this.pending = null;
     this.sentAt = 0;
@@ -241,7 +257,7 @@ class DiscordPresence {
     this.ready = false;
     this.clientId = "";
     this.lastSent = "";
-    this.status = "disabled";
+    this.status = status;
   }
 }
 module.exports = { DiscordPresence, activity, endpoints, frame };

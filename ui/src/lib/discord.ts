@@ -55,6 +55,10 @@ export function installDiscordPresence() {
   const room = useTogether.subscribe((next, previous) => {
     if (next.room?.name !== previous.room?.name) send();
   });
+  const status =
+    window.spotifier?.onDiscordStatus?.((next) => {
+      if (!disposed) useDiscord.setState({ status: next });
+    }) ?? (() => {});
   const timer = setInterval(send, 15000);
   send();
   return () => {
@@ -62,6 +66,7 @@ export function installDiscordPresence() {
     settings();
     player();
     room();
+    status();
     clearInterval(timer);
     void bridge({ enabled: false }).catch(() => {});
   };

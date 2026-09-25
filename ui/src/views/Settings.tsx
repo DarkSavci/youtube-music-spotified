@@ -36,14 +36,6 @@ export function SettingsView() {
     <div className="settings">
       <h1 className="settings__title">Settings</h1>
 
-      {desktop.available && <Section title="Discord">
-        <Toggle label="Share listening activity on Discord" hint="Show your current song, artist, artwork and progress. Clears when paused or stopped. Discord must be running on this computer." checked={prefs.discordEnabled} onChange={on => prefs.set("discordEnabled", on)} />
-        <Row label="Discord application ID" hint="Public application ID from the Discord Developer Portal. No token or client secret is needed.">
-          <input aria-label="Discord application ID" inputMode="numeric" maxLength={20} value={prefs.discordApplicationId} onChange={e => prefs.set("discordApplicationId", e.target.value.replace(/\D/g, ""))} />
-        </Row>
-        <Toggle label="Include Listen Together room name" hint="Also share the room name with people who can see your Discord activity. Room PINs and server addresses are never published." checked={prefs.discordShareRoom} disabled={!prefs.discordEnabled} onChange={on => prefs.set("discordShareRoom", on)} />
-        <p role="status">{({ disabled: "Activity sharing is off.", "needs-application-id": "Enter an application ID to connect.", connected: "Connected to Discord.", "waiting-for-discord": "Waiting for the Discord desktop app…", error: "Discord rejected the activity. Check the application ID.", unavailable: "Discord presence is unavailable in this app build." } as Record<string, string>)[discordStatus] || "Connecting to Discord…"}</p>
-      </Section>}
       <Section title="Playback">
         <Row
           label="Crossfade"
@@ -208,6 +200,15 @@ export function SettingsView() {
       <Section title="Accounts and channels">
         <Accounts />
       </Section>
+
+      {desktop.available && <Section title="Discord">
+        <Toggle label="Share listening activity on Discord" hint="Show your current song, artist, artwork and progress. Clears when paused or stopped. Discord must be running on this computer." checked={prefs.discordEnabled} onChange={on => prefs.set("discordEnabled", on)} />
+        <Row label="Discord application ID" hint="Public application ID from the Discord Developer Portal. No token or client secret is needed.">
+          <input className="settings__select" aria-label="Discord application ID" inputMode="numeric" maxLength={20} value={prefs.discordApplicationId} onChange={e => prefs.set("discordApplicationId", e.target.value.replace(/\D/g, ""))} />
+        </Row>
+        <Toggle label="Include Listen Together room name" hint="Also share the room name with people who can see your Discord activity. Room PINs and server addresses are never published." checked={prefs.discordShareRoom} disabled={!prefs.discordEnabled} onChange={on => prefs.set("discordShareRoom", on)} />
+        <p role="status">{({ disabled: "Activity sharing is off.", "needs-application-id": "Enter an application ID to connect.", connected: "Connected to Discord.", "waiting-for-discord": "Waiting for the Discord desktop app…", error: "Discord rejected the activity. Check the application ID.", unavailable: "Discord presence is unavailable in this app build." } as Record<string, string>)[discordStatus] || "Connecting to Discord…"}</p>
+      </Section>}
 
       <Section title="Keyboard shortcuts">
         {["Playback", "Navigation", "Interface"].map((group) => (

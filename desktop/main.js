@@ -25,7 +25,13 @@ const miniplayer = require("./miniplayer");
 const updater = require("./updater");
 const { LoginItem } = require("./loginitem");
 const { DiscordPresence } = require("./discord-presence");
-const discordPresence = new DiscordPresence();
+const discordPresence = new DiscordPresence({
+  // stop() also runs at shutdown, when the window may already be gone.
+  onStatus: (status) => {
+    if (mainWindow && !mainWindow.isDestroyed())
+      mainWindow.webContents.send("discord:status", status);
+  },
+});
 const logs = require("./logs");
 const { vendorDirectory } = require("./platform");
 const { stopChild } = require("./child-process");
