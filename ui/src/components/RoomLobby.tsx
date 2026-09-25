@@ -45,7 +45,8 @@ export function RoomLobby({
   const [pin, setPin] = useState(""),
     [mode, setMode] = useState<RoomMode>("collaborative");
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: () => api.me() });
-  const name = prefs.name || me?.account?.name || "Listener";
+  const accountName = me?.account?.name || "Listener";
+  const name = prefs.name.trim() || accountName;
   const connect = async (join: boolean) => {
     const selected = prefs.servers.find((s) => s.id === prefs.selected);
     if (!selected) {
@@ -73,7 +74,8 @@ export function RoomLobby({
           Joining as
           <input
             maxLength={50}
-            value={name}
+            value={prefs.name}
+            placeholder={accountName}
             onChange={(e) => prefs.update({ name: e.target.value })}
           />
         </label>
@@ -118,14 +120,13 @@ export function RoomLobby({
           </label>
           <div
             className="room-presets"
-            role="radiogroup"
+            role="group"
             aria-label="Room permissions"
           >
             {roomPresets.map((p) => (
               <button
                 key={p.id}
-                role="radio"
-                aria-checked={mode === p.id}
+                aria-pressed={mode === p.id}
                 className={`room-preset ${mode === p.id ? "is-selected" : ""}`}
                 onClick={() => setMode(p.id)}
               >
@@ -172,7 +173,11 @@ export function RoomLobby({
               );
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && pin.replace(/\s/g, "").length === 8)
+              if (
+                e.key === "Enter" &&
+                status === "disconnected" &&
+                pin.replace(/\s/g, "").length === 8
+              )
                 void connect(true);
             }}
           />

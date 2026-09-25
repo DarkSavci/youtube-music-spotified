@@ -41,7 +41,15 @@ export function RoomSettings({ room }: { room: RoomState }) {
             min={1}
             max={100}
             defaultValue={room.limit}
-            onBlur={(e) => settings({ limit: Number(e.target.value) })}
+            key={room.limit}
+            // Only a real change is sent: tabbing through must not post
+            // "updated room settings" or make others' pending commands stale.
+            onBlur={(e) => {
+              const limit = Number(e.target.value);
+              if (Number.isInteger(limit) && limit >= 1 && limit <= 100) {
+                if (limit !== room.limit) settings({ limit });
+              } else e.target.value = String(room.limit);
+            }}
           />
         </label>
       </div>

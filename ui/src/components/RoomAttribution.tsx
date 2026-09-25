@@ -13,6 +13,7 @@ export function RoomAttribution({ index }: { index?: number }) {
     <span
       className="room-attribution"
       title={`Added by ${entry.addedBy.name}`}
+      role="img"
       aria-label={`Added by ${entry.addedBy.name}`}
     >
       <Artwork

@@ -6,6 +6,7 @@ import {
   useTogether,
 } from "../lib/together";
 import { IconSettings } from "./Icon";
+import { usePrompt } from "./Prompt";
 
 /** The saved-server picker, and the form to add or edit one. */
 export function RoomServers({
@@ -28,6 +29,7 @@ export function RoomServers({
     [serverURL, setServerURL] = useState(""),
     [serverCheck, setServerCheck] = useState("");
   const selected = servers.find((s) => s.id === selectedId);
+  const prompt = usePrompt();
   const saveServer = (e: FormEvent) => {
     e.preventDefault();
     try {
@@ -140,7 +142,17 @@ export function RoomServers({
               <button
                 type="button"
                 className="room-textbtn"
-                onClick={() => {
+                onClick={async () => {
+                  const name = servers.find((s) => s.id === editing)?.name;
+                  if (
+                    !(await prompt.confirm({
+                      title: `Remove ${name || "this server"}?`,
+                      body: "You can add it again later with its address.",
+                      confirmLabel: "Remove",
+                      danger: true,
+                    }))
+                  )
+                    return;
                   update({
                     servers: servers.filter((s) => s.id !== editing),
                     selected: "",

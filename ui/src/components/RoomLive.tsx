@@ -1,6 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RoomState } from "../../../listen-together/client-v2.mjs";
-import { leaveTogether, roomCanControl, roomCommand } from "../lib/together";
+import {
+  leaveTogether,
+  roomCanControl,
+  roomCommand,
+  roomNow,
+} from "../lib/together";
 import { toast } from "../lib/toast";
 import { artistNames, artworkAtLeast } from "../lib/types";
 import { Artwork } from "./Artwork";
@@ -29,13 +34,15 @@ function LeaveDialog({
 }) {
   const owner = room.owner === member;
   const [nextLeader, setNextLeader] = useState("");
+  // An inline panel rather than a modal: focus moves to it so keyboard and
+  // screen-reader users land on the choice they just asked for.
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => heading.current?.focus(), []);
   return (
-    <section
-      className="room-panel room-leave"
-      role="dialog"
-      aria-label="Leave room"
-    >
-      <h2>{owner ? "Keep the music going." : "Leave this room?"}</h2>
+    <section className="room-panel room-leave" aria-label="Leave room">
+      <h2 ref={heading} tabIndex={-1}>
+        {owner ? "Keep the music going." : "Leave this room?"}
+      </h2>
       <p>
         {owner
           ? "Choose the next leader, or let us pick a connected listener. The room and queue stay together."
@@ -90,12 +97,19 @@ function LeaveDialog({
 
 function ReadyCheck({ room, owner }: { room: RoomState; owner: boolean }) {
   const countdown = room.countdown;
+  const [, setClock] = useState(0);
+  const startAt = countdown?.startAt;
+  useEffect(() => {
+    if (!startAt) return;
+    const timer = setInterval(() => setClock((n) => n + 1), 250);
+    return () => clearInterval(timer);
+  }, [startAt]);
   if (!countdown) return null;
   return (
     <div className="room-ready room-panel" role="status">
       <strong>
         {countdown.startAt
-          ? `Starting in ${Math.max(0, Math.ceil((countdown.startAt - Date.now()) / 1000))}…`
+          ? `Starting in ${Math.max(0, Math.ceil((countdown.startAt - roomNow()) / 1000))}…`
           : "Ready for a shared start?"}
       </strong>
       <span>
@@ -121,6 +135,7 @@ function ReadyCheck({ room, owner }: { room: RoomState; owner: boolean }) {
 }
 
 function NowPlaying({ room, control }: { room: RoomState; control: boolean }) {
+  const canAdd = control || room.mode === "contributions";
   const current = room.queue.find((e) => e.id === room.current);
   return (
     <section className="room-now">
@@ -137,7 +152,9 @@ function NowPlaying({ room, control }: { room: RoomState; control: boolean }) {
         <p>
           {current
             ? artistNames(current.track.artists)
-            : "Add a song below, or use search anywhere in the app."}
+            : canAdd
+              ? "Add a song below, or use search anywhere in the app."
+              : "The leader will pick the first song."}
         </p>
         {current && (
           <span className="room-added">

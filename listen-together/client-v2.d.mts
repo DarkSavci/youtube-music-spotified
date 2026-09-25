@@ -52,7 +52,7 @@ export interface RoomState {
   video: { shown: boolean; by: string; revision: number } | null;
   votes: string[];
   voteSkip: boolean;
-  undo: { revision: number; expires: number } | null;
+  undo: { revision: number; expires: number; by: string } | null;
 }
 export interface ConnectOptions {
   server: string;

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Entry, RoomState } from "../../../listen-together/client-v2.mjs";
 import { api } from "../lib/api";
 import { useCreatePlaylist } from "../lib/playlists";
-import { roomCommand } from "../lib/together";
+import { roomCommand, roomNow } from "../lib/together";
 import { toast } from "../lib/toast";
 import {
   artistNames,
@@ -21,6 +21,7 @@ function EntryRow({
   room,
   member,
   control,
+  canAdd,
   history = false,
 }: {
   entry: Entry;
@@ -28,6 +29,7 @@ function EntryRow({
   room: RoomState;
   member: string;
   control: boolean;
+  canAdd: boolean;
   history?: boolean;
 }) {
   return (
@@ -51,16 +53,18 @@ function EntryRow({
         {formatDuration(entry.track.durationMs)}
       </span>
       {history ? (
-        <button
-          className="iconbtn"
-          title="Add to queue"
-          aria-label={`Add ${entry.track.title} to queue`}
-          onClick={() =>
-            void roomCommand({ kind: "enqueue", tracks: [entry.track] })
-          }
-        >
-          <IconPlus />
-        </button>
+        canAdd && (
+          <button
+            className="iconbtn"
+            title="Add to queue"
+            aria-label={`Add ${entry.track.title} to queue`}
+            onClick={() =>
+              void roomCommand({ kind: "enqueue", tracks: [entry.track] })
+            }
+          >
+            <IconPlus />
+          </button>
+        )
       ) : (
         <>
           {control && (
@@ -155,6 +159,25 @@ export function RoomQueue({
     0,
     room.queue.findIndex((e) => e.id === room.current),
   );
+  // Same rule as the relay: in a listen-only room only controllers add.
+  const canAdd = control || room.mode === "contributions";
+  // The relay lets the person who made an edit, or the leader, undo it for
+  // ten seconds; the offer disappears when it would be refused.
+  const undo = room.undo;
+  const [, setClock] = useState(0);
+  const canUndo =
+    !!undo &&
+    undo.revision === room.revision &&
+    (undo.by === member || room.owner === member) &&
+    roomNow() < undo.expires;
+  useEffect(() => {
+    if (!canUndo || !undo) return;
+    const timer = setTimeout(
+      () => setClock((n) => n + 1),
+      Math.max(0, undo.expires - roomNow()) + 50,
+    );
+    return () => clearTimeout(timer);
+  }, [canUndo, undo]);
   const row = (entry: Entry, index: number, history = false) => (
     <EntryRow
       key={`${entry.id}:${index}`}
@@ -163,6 +186,7 @@ export function RoomQueue({
       room={room}
       member={member}
       control={control}
+      canAdd={canAdd}
       history={history}
     />
   );
@@ -193,17 +217,18 @@ export function RoomQueue({
             <button
               key={t}
               className={tab === t ? "is-selected" : ""}
+              aria-pressed={tab === t}
               onClick={() => setTab(t)}
             >
               {t === "queue"
-                ? `Queue · ${room.queue.length}`
+                ? `Queue · ${room.queue.length - activeIndex}`
                 : t === "history"
                   ? "History"
                   : "Activity"}
             </button>
           ))}
         </nav>
-        {room.undo && room.undo.revision === room.revision && (
+        {canUndo && (
           <button
             className="room-textbtn"
             onClick={() => void roomCommand({ kind: "undo" })}
@@ -214,25 +239,27 @@ export function RoomQueue({
       </div>
       {tab === "queue" && (
         <>
-          <label className="room-search">
-            <IconSearch size={20} />
-            <input
-              aria-label="Find songs to add"
-              placeholder="Find a song to add to the room"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            {query && (
-              <button
-                className="iconbtn"
-                aria-label="Clear search"
-                onClick={() => setQuery("")}
-              >
-                <IconClose size={18} />
-              </button>
-            )}
-          </label>
-          {query ? (
+          {canAdd && (
+            <label className="room-search">
+              <IconSearch size={20} />
+              <input
+                aria-label="Find songs to add"
+                placeholder="Find a song to add to the room"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              {query && (
+                <button
+                  className="iconbtn"
+                  aria-label="Clear search"
+                  onClick={() => setQuery("")}
+                >
+                  <IconClose size={18} />
+                </button>
+              )}
+            </label>
+          )}
+          {query && canAdd ? (
             <ul className="room-tracklist">
               {!searching && results.length === 0 && (
                 <li className="room-empty">

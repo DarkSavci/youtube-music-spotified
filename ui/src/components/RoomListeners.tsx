@@ -4,6 +4,7 @@ import {
   roomCommand,
   useRoomPreferences,
 } from "../lib/together";
+import { usePrompt } from "./Prompt";
 import { RoomAvatar } from "./RoomAvatar";
 import { IconClose, IconSettings } from "./Icon";
 
@@ -19,6 +20,18 @@ export function RoomListeners({
   const followVideo = useRoomPreferences((s) => s.followVideo),
     notifications = useRoomPreferences((s) => s.notifications),
     update = useRoomPreferences((s) => s.update);
+  const prompt = usePrompt();
+  const kick = async (id: string, name: string) => {
+    if (
+      await prompt.confirm({
+        title: `Remove ${name}?`,
+        body: "They leave the room and the PIN changes, so share the new PIN with everyone who is still joining.",
+        confirmLabel: "Remove",
+        danger: true,
+      })
+    )
+      void roomCommand({ kind: "kick", member: id });
+  };
   return (
     <aside className="room-panel room-listeners">
       {owner && room.pending.length > 0 && (
@@ -95,11 +108,7 @@ export function RoomListeners({
                   >
                     Make leader
                   </button>
-                  <button
-                    onClick={() =>
-                      void roomCommand({ kind: "kick", member: m.id })
-                    }
-                  >
+                  <button onClick={() => void kick(m.id, m.name)}>
                     Remove & rotate PIN
                   </button>
                 </div>

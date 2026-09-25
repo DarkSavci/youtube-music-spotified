@@ -14,6 +14,7 @@ export function RoomAvatar({
     <span
       className={`room-avatar ${small ? "room-avatar--small" : ""}`}
       title={member.name}
+      role="img"
       aria-label={member.name}
     >
       <Artwork src={member.avatar} alt="" fallback={initial(member.name)} />

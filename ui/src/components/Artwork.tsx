@@ -11,18 +11,22 @@ export function Artwork({
   fallback?: ReactNode;
 }) {
   const [failed, setFailed] = useState<string>();
-  if (!src || failed === src)
-    return fallback !== undefined ? (
-      <>{fallback}</>
-    ) : (
+  if (!src || failed === src) {
+    if (fallback !== undefined) return <>{fallback}</>;
+    // Decorative artwork (alt="" or hidden) stays silent when it is missing
+    // too; otherwise the placeholder says what is missing.
+    const decorative = props.alt === "" || props["aria-hidden"] === true || props["aria-hidden"] === "true";
+    return (
       <span
         className={`${className || ""} artwork-fallback`}
-        role="img"
-        aria-label="Artwork unavailable"
+        {...(decorative
+          ? { "aria-hidden": true }
+          : { role: "img", "aria-label": props.alt || "Artwork unavailable" })}
       >
         <IconAlbum size={24} />
       </span>
     );
+  }
   return (
     <img
       {...props}
