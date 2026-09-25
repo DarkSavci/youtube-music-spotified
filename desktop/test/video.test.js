@@ -71,3 +71,15 @@ test('slow seeks and buffering are not repeatedly restarted',async()=>{
  h.player.track=h.song;h.tick();assert.equal(el.src,'','next song must not resolve a static art-track video');
  detach();await Promise.resolve();
 });
+
+test('a restored video version without its isVideo flag still shows the picture', async () => {
+ const h=setup();
+ // A queue saved by an older version: the clip's id, but no video flag.
+ h.player.track={...h.clip,isVideo:false};
+ await h.setVideoEnabled(true);
+ assert.equal(h.switches.length,0,'already the video version; nothing to switch');
+ assert.equal(h.isVideoTrack(h.player.track),true);
+ 
+ h.attachVideo(h.host(),0);h.tick();
+ assert.match(h.videoElements[0].src,/\/v1\/video-stream\/clip1234567$/);
+});
