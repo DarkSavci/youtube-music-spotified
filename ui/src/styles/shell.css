@@ -1409,6 +1409,8 @@ body:has(.account-menu, .whats-new-dialog[open]) .app-shell::before {
   .topbar__search-group { position: static; transform: none; width: auto; flex: 1; min-width: 180px; }
   .topbar__spacer { display: none; }
   .topbar__account { max-width: 130px; }
+/* The share icon is a span too; without this it takes the label's share of the row. */
+.ctxmenu__item > .share-icon { flex: none; overflow: visible; color: var(--text-secondary); }
 }
 
 .wincontrols { margin-right: -12px; flex-shrink: 0; }
