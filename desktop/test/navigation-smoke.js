@@ -105,7 +105,7 @@ app.whenReady().then(async()=>{
  assert.equal(await read(`document.activeElement.getAttribute('aria-label')`),'Search music');
  await read(`window.location.hash='/'`);
  await waitFor(`document.querySelector('.mixcard')`);
- for (const width of [1600, 1150, 1034, 900]) {
+ for (const width of [1600, 1150, 1034, 900, 720]) {
   win.setSize(width, 900);
   await read(`document.querySelector('.app-shell').setAttribute('data-native-titlebar', 'true')`);
   await read(`new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))`);
