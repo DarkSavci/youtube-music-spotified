@@ -1,3 +1,5 @@
+import { ShareIcon } from "./ShareIcon";
+import { trapTab, watchFullscreenIdle } from "../lib/fullscreenIdle";
 import { EndTime } from "./EndTime";
 import { VideoSurface, VideoSwitch, VideoNotice } from "./VideoPlayer";
 import { useVideo } from "../lib/video";
@@ -11,7 +13,6 @@ import { usePlaybackPosition } from "../lib/tick";
 import { Slider } from "./Slider";
 import {
   IconClose, IconPause, IconPlay, IconRepeat, IconShuffle, IconSkipNext, IconSkipPrev,
-  IconShare,
 } from "./Icon";
 import { artworkAtLeast, formatDuration } from "../lib/types";
 
@@ -26,6 +27,10 @@ import { artworkAtLeast, formatDuration } from "../lib/types";
  */
 export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
   const video = useVideo(s => s.enabled);
+  const videoError = useVideo(s => s.error);
+  const notice = usePlayer(s => s.notice);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [hidden, setHidden] = useState(false);
   const { track, state, repeat, shuffle, origin } = usePlayer();
   const position = usePlaybackPosition();
   const [scrubbing, setScrubbing] = useState<number | null>(null);
@@ -39,9 +44,22 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
       }
     };
     window.addEventListener("keydown", onKey, true);
-    closeRef.current?.focus();
+    rootRef.current?.focus();
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
+
+  // Windows draws its caption buttons over the page; while fullscreen they sit
+  // straight on the artwork or video instead of on a dark box.
+  useEffect(() => {
+    window.spotifier?.window?.setImmersiveTitleBar?.(true);
+    return () => window.spotifier?.window?.setImmersiveTitleBar?.(false);
+  }, []);
+
+  useEffect(() => {
+    setHidden(false);
+    if (state !== "playing" || videoError || notice || !rootRef.current) return;
+    return watchFullscreenIdle(rootRef.current, setHidden);
+  }, [state, track?.id, videoError, notice]);
 
   if (!track) return null;
 
@@ -51,7 +69,9 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
   const art = artworkAtLeast(track.artwork, 1000);
 
   return (
-    <div className="fsp" role="dialog" aria-modal="true" aria-label="Now playing">
+    <div ref={rootRef} tabIndex={-1} data-controls-hidden={hidden || undefined} className="fsp" role="dialog" aria-modal="true" aria-label="Now playing"
+      // Also while paused, when the idle watcher is not running.
+      onKeyDown={(e) => { if (e.key === "Tab" && rootRef.current) trapTab(rootRef.current, e.nativeEvent); }}>
       {video ? <VideoSurface priority={10} className="fsp__video" /> : <img className="fsp__bleed" src={art} alt="" aria-hidden="true" />}
       {/* A gradient only at the bottom, where the controls are: the artwork
           stays untouched everywhere the eye actually looks. */}
@@ -110,7 +130,7 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
         <div className="fsp__controls">
           <div className="fsp__side">
             <button className="iconbtn" aria-label="Share" onClick={() => void share("track", track.id)}>
-              <IconShare size={18} />
+              <ShareIcon size={18} />
             </button>
           </div>
           <div className="fsp__transport">

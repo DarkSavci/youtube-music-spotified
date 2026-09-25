@@ -81,7 +81,7 @@ export function AccountMenu({ account }: { account: { name: string; handle?: str
       aria-haspopup="menu" aria-expanded={open} aria-controls={open ? "account-menu" : undefined}
       title={account.handle ?? ""} onClick={() => setOpen(!open)}>
       {account.avatarUrl && <img className="topbar__avatar" src={account.avatarUrl} alt="" />}
-      <span className="truncate">{account.name}</span>
+      <span className="truncate topbar__account-name">{account.name}</span>
     </button>
     {open && createPortal(<div ref={panel} id="account-menu" className="account-menu" role="menu" aria-label="Accounts and settings"
       tabIndex={-1} style={{ ...position, maxHeight: `calc(100vh - ${position.top + 8}px)` }}

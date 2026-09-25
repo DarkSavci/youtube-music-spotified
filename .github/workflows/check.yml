@@ -58,4 +58,6 @@ jobs:
         working-directory: desktop
       - run: npx --no-install electron test/navigation-smoke.js
         working-directory: desktop
+      - run: npx --no-install electron test/fullscreen-smoke.js
+        working-directory: desktop
       - run: node desktop/test/package-smoke.js

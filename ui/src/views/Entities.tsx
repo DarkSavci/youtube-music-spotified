@@ -157,7 +157,11 @@ export function PlaylistView() {
             {/* Owner is shown only when upstream supplies it, rather than
                 printing an empty byline. */}
             {data.owner ? <strong>{data.owner}</strong> : null}
-            <span>{`${data.owner ? "· " : ""}${Math.max(data.trackCount, tracks.length)}${hasUnloadedTracks && data.trackCount <= tracks.length ? "+" : ""} songs`}</span>
+            <span title={data.trackCount === 5000 ? "YouTube reports this playlist’s total. Some playlists are limited to 5,000 songs; this is not the number loaded so far." : undefined}>{`${data.owner ? "· " : ""}${Math.max(data.trackCount, tracks.length).toLocaleString()}${hasUnloadedTracks && data.trackCount <= tracks.length ? "+" : ""} songs`}</span>
+            {/* Exactly 5,000 is YouTube's cap; a larger total is not capped. The
+                explanation is also in text, since a title reaches neither
+                keyboard nor touch users. */}
+            {data.trackCount === 5000 && <span className="playlist-limit-note">YouTube-reported count · <span title="YouTube may cap playlists at 5,000 songs. Additional songs are shown only when the service returns them.">Playlist limit may apply</span><span className="sr-only"> YouTube may cap playlists at 5,000 songs. Additional songs are shown only when the service returns them.</span></span>}
             {data.durationMs ? <span>{`· ${formatDuration(data.durationMs)}`}</span> : null}
           </>
         }

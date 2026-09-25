@@ -81,15 +81,15 @@ export function TopBar({
   return (
     <header className="topbar" data-scrolled={scrolled || undefined}>
       <div className="topbar__nav">
-        <button className="iconbtn iconbtn--round" aria-label="Go back" onClick={() => navigate(-1)}>
-          <IconChevronLeft size={20} />
+        <button className="iconbtn topbar__history" aria-label="Go back" onClick={() => navigate(-1)}>
+          <IconChevronLeft size={30} />
         </button>
         <button
-          className="iconbtn iconbtn--round"
+          className="iconbtn topbar__history"
           aria-label="Go forward"
           onClick={() => navigate(1)}
         >
-          <IconChevronRight size={20} />
+          <IconChevronRight size={30} />
         </button>
       </div>
 

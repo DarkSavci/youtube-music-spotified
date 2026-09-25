@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld("spotifier", {
     toggleMaximize: () => ipcRenderer.send("window:toggle-maximize"),
     close: () => ipcRenderer.send("window:close"),
     isMaximized: () => ipcRenderer.invoke("window:is-maximized"),
+    /** Windows: caption buttons drawn straight over fullscreen content. */
+    setImmersiveTitleBar: (on) => ipcRenderer.send("window:immersive-title-bar", on === true),
     /** Shows and focuses the main window, from wherever it was hidden. */
     showMain: () => ipcRenderer.send("window:show-main"),
     onMaximizeChange: (fn) => {
@@ -118,5 +120,6 @@ contextBridge.exposeInMainWorld("spotifier", {
   },
 
   platform: process.platform,
+  nativeTitleBar: process.platform === "win32",
   isDesktop: true,
 });

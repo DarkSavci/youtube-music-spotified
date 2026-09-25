@@ -1,47 +1,26 @@
-# Builds the Windows installer and publishes it as a GitHub release, which the
-# app's updater (desktop/updater.js) picks up.
-#
-# Releases are made by hand, never by a push: Actions → Release → Run workflow,
-# on master, with the new version number. The release contains every commit on
-# master at that moment.
-#
-# The version is checked (x.y.z, higher than the current one, not released
-# yet), then the tests run and the installer is built. Only once all of that
-# has worked is the version commit pushed and the release published from it,
-# so a failed run leaves master and the releases untouched.
-#
-# The release notes, and CHANGELOG.md (which the app shows under What's new),
-# are written by git-cliff from the commit messages since the last release;
-# cliff.toml says how.
-
+# Build one prepared commit on all platforms before publishing anything.
 name: Release
-
-# The run is named for the version it is releasing, so the Actions list reads
-# as a release history rather than a column of identical "Release" rows.
 run-name: Release ${{ inputs.version }}
-
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: New version number (e.g. 0.1.5)
+        description: New version number (e.g. 0.1.9)
         type: string
         required: true
-
+# Read-only by default: the build jobs install and run third-party packages.
+# Only publish, which pushes the release commit and creates the release,
+# gets write access.
 permissions:
-  contents: write
-
-# One release at a time; a second run waits instead of racing for the tag.
+  contents: read
 concurrency:
   group: release
   cancel-in-progress: false
-
 jobs:
-  release:
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: bash
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     env:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ inputs.version }}
@@ -49,19 +28,14 @@ jobs:
       - name: Release from master only
         if: github.ref_name != 'master'
         run: |
-          echo "::error::Run the release from master, not ${{ github.ref_name }}."
+          echo "::error::Releases are made from master only."
           exit 1
-
       - uses: actions/checkout@v4
         with:
-          # The whole history and its tags: the changelog is everything since
-          # the last release tag, which a shallow clone does not have.
           fetch-depth: 0
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - name: Check the version
         run: |
           VERSION="${VERSION#v}"
@@ -97,32 +71,128 @@ jobs:
           git add CHANGELOG.md desktop/package.json desktop/package-lock.json
           git commit -m "chore: release v$VERSION"
 
+      - name: Save the prepared commit
+        id: version
+        run: |
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          mkdir prepared
+          git bundle create prepared/source.bundle HEAD
+          cp "$RUNNER_TEMP/notes.md" prepared/notes.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prepared-source
+          path: prepared/
+          retention-days: 3
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+            platform: win32
+          - os: macos-15
+            arch: arm64
+            platform: darwin
+          - os: macos-15-intel
+            arch: x64
+            platform: darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      BUILD_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Nothing here pushes; keep the token away from install scripts.
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: prepared-source
+          path: prepared
+      - name: Check out the exact prepared version
+        run: |
+          git fetch prepared/source.bundle HEAD
+          git checkout --detach FETCH_HEAD
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache-dependency-path: go.sum
-
-      - name: Test
-        run: go test ./...
-
-      - name: Install dependencies
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          architecture: ${{ matrix.arch }}
+      - name: Install and test
         run: |
           npm ci --prefix ui
           npm ci --prefix desktop
-
-      - name: Build installer
-        working-directory: desktop
-        run: npm run installer
-
-      - name: Publish release
+          npm ci --prefix listen-together
+          go test ./...
+          npm test --prefix desktop
+          npm test --prefix listen-together
+      - name: Build Windows installer
+        if: matrix.platform == 'win32'
+        run: npm run installer --prefix desktop
+      - name: Build macOS application
+        if: matrix.platform == 'darwin'
         run: |
-          # The version commit goes to master only now that the build worked.
+          npm run package --prefix desktop
+          mkdir -p dist-installer
+          ditto -c -k --sequesterRsrc --keepParent "dist-desktop/Youtube Music Spotified-darwin-$BUILD_ARCH/Youtube Music Spotified.app" "dist-installer/Youtube-Music-Spotified-$VERSION-macOS-$BUILD_ARCH.zip"
+      - name: Verify bundled helpers
+        run: node desktop/test/package-smoke.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            dist-installer/*.exe
+            dist-installer/*.blockmap
+            dist-installer/latest.yml
+            dist-installer/*.zip
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: prepared-source
+          path: prepared
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish all platforms together
+        run: |
+          git fetch prepared/source.bundle HEAD
+          git checkout --detach FETCH_HEAD
+          # Reject a stale release if master advanced during the builds.
           git push origin HEAD:master
-          setup="dist-installer/Youtube-Music-Spotified-Setup-$VERSION.exe"
-          # latest.yml and the blockmap are what the updater reads; the
-          # installer is what both it and new users download.
-          gh release create "v$VERSION" \
-            "$setup" "$setup.blockmap" dist-installer/latest.yml \
-            --target "$(git rev-parse HEAD)" \
-            --title "v$VERSION" \
-            --notes-file "$RUNNER_TEMP/notes.md"
+          cd release-assets
+          sha256sum *.exe *.zip > SHA256SUMS.txt
+          cd ..
+          cat >> prepared/notes.md <<'NOTES'
+
+          macOS: download the arm64 archive for Apple Silicon, or x64 for Intel.
+          These builds are ad-hoc signed, not Developer ID signed or notarized.
+          On first launch macOS blocks the app: open System Settings → Privacy & Security and choose Open Anyway
+          (or run `xattr -dr com.apple.quarantine "/Applications/Youtube Music Spotified.app"`).
+          macOS updates require downloading the new archive; automatic updates remain Windows-only.
+          NOTES
+          gh release create "v$VERSION" release-assets/* --target "$(git rev-parse HEAD)" --title "v$VERSION" --notes-file prepared/notes.md

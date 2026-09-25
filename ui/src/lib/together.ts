@@ -11,15 +11,16 @@ let interval: ReturnType<typeof setInterval> | undefined;
 let unsubscribe: (() => void) | undefined;
 let pendingPublish: ReturnType<typeof setTimeout> | undefined;
 let applying = false;
+let reconnectPause: Promise<void> | null = null;
 let generation = 0;
 let lastCorrection = 0;
 let task: Promise<void> = Promise.resolve();
 
 async function applyLatest(force = false) {
-  if (applying || !latest || !client || useTogether.getState().role !== "guest") return;
+  if (applying || reconnectPause || !latest || !client || useTogether.getState().role !== "guest" || useTogether.getState().status !== "connected") return;
   const snapshot = latest;
   const state = usePlayer.getState();
-  const track = snapshot.track ? { ...snapshot.track, artwork: [], explicit: false, isVideo: false, playable: true } : null;
+  const track = snapshot.track ? { ...snapshot.track, artwork: [], explicit: false, isVideo: snapshot.track.isVideo === true, playable: true } : null;
   const changed = track?.id !== state.track?.id;
   // A failed/unavailable track waits for a new selection or explicit retry.
   if (!changed && state.track?.playable === false && !force) return;
@@ -46,6 +47,8 @@ async function applyLatest(force = false) {
 
 export async function leaveTogether() {
   generation++;
+  // A pause still in flight belongs to the room being left.
+  reconnectPause = null;
   useTogether.setState({ status: "disconnected", role: null, members: 0 });
   const old = client; client = null; latest = null;
   clearInterval(interval); clearTimeout(pendingPublish); unsubscribe?.(); unsubscribe = undefined;
@@ -62,7 +65,25 @@ export async function connectTogether(options: { server?: string; invitation?: s
     onStatus: status => {
       if (revision !== generation) return;
       useTogether.setState(status);
-      if (status.status === "disconnected") {
+      if (status.status === "reconnecting") {
+        latest = null;
+        // Finish any in-flight correction before pausing. Hold fresh snapshots
+        // until the pause completes so a reconnect cannot race an old request.
+        if (!reconnectPause) {
+          const paused = task.then(async () => {
+            if (revision !== generation) return;
+            const current = usePlayer.getState();
+            await syncRoomPlayback(current.track, currentPosition(current), false);
+          }).catch(error => {
+            if (revision === generation) useTogether.setState({ error: error instanceof Error ? error.message : "Could not pause playback." });
+          }).finally(() => {
+            reconnectPause = null;
+            if (revision === generation) void applyLatest(true);
+          });
+          reconnectPause = paused;
+          task = paused;
+        }
+      } else if (status.status === "disconnected") {
         void leaveTogether().then(() => {
           if (generation === revision + 1) useTogether.setState({ error: status.error ?? null });
         });

@@ -30,6 +30,7 @@ export interface SavedAccounts {
 interface DesktopBridge {
   accountScope?: string;
   platform?: string;
+  nativeTitleBar?: boolean;
   corePort(): Promise<number>;
   dataDir(): Promise<string>;
   /** Absent in shells older than 0.1.2. */
@@ -74,6 +75,8 @@ interface DesktopBridge {
     toggleMaximize(): void;
     close(): void;
     isMaximized(): Promise<boolean>;
+    /** Windows: caption buttons drawn straight over fullscreen content. */
+    setImmersiveTitleBar?(on: boolean): void;
     showMain?(): void;
     /** Returns an unsubscribe function. */
     onMaximizeChange(fn: (maximized: boolean) => void): () => void;

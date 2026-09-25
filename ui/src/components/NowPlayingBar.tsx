@@ -1,3 +1,4 @@
+import { ShareIcon } from "./ShareIcon";
 import { EndTime } from "./EndTime";
 import { VideoSwitch } from "./VideoPlayer";
 import { useEffect, useRef, useState } from "react";
@@ -9,7 +10,7 @@ import { artworkAtLeast, formatDuration } from "../lib/types";
 import { Slider } from "./Slider";
 import {
   IconExpand, IconHeart, IconLyrics, IconMiniPlayer, IconPause, IconPlay, IconQueue,
-  IconRepeat, IconShuffle, IconSkipNext, IconSkipPrev, IconShare } from "./Icon";
+  IconRepeat, IconShuffle, IconSkipNext, IconSkipPrev } from "./Icon";
 import { miniSupported, toggleMini, useMini } from "../lib/miniplayer";
 import { useLikedIds, useToggleLike } from "../lib/liked";
 import { VolumeControl } from "./VolumeControl";
@@ -120,7 +121,7 @@ export function NowPlayingBar({
               aria-label="Share"
               onClick={() => void share("track", track.id)}
             >
-              <IconShare size={18} />
+              <ShareIcon size={18} />
             </button>
           </>
         ) : (

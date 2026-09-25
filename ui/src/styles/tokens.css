@@ -86,7 +86,7 @@
   --sidebar-max: 420px;
   --nowplaying-width: 340px;
   --bar-height: 80px;
-  --topbar-height: 64px;
+  --topbar-height: 44px;
   --gutter: 8px;
 
   /* Motion. Every transition references these so reduced-motion can zero

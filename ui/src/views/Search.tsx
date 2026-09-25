@@ -1,7 +1,8 @@
+import { MoodTile } from "../components/MoodTile";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { api, browsePath } from "../lib/api";
+import { api } from "../lib/api";
 import { Card, Shelf } from "../components/Shelf";
 import { TrackTable } from "../components/TrackTable";
 import { PageState, ShelfSkeleton } from "../components/States";
@@ -130,15 +131,11 @@ export function Search() {
           <ShelfSkeleton />
         ) : browse.data?.moods?.length ? (
           <div className="moods">
-            {browse.data.moods.map((mood) => (
-              <a
-                key={`${mood.id}:${mood.params ?? ""}`}
-                className="mood"
-                href={`#${browsePath(mood.id, mood.params)}`}
-                style={{ "--tile-color": mood.color } as React.CSSProperties}
-              >
-                <span>{mood.title}</span>
-              </a>
+            {[{ id: "FEmusic_explore", params: undefined, title: "Discover", color: "#185a74" },
+              { id: "FEmusic_charts", params: undefined, title: "Charts", color: "#78468c" },
+              { id: "FEmusic_new_releases", params: undefined, title: "New releases", color: "#315e46" },
+              ...browse.data.moods].map((mood) => (
+              <MoodTile key={`${mood.id}:${mood.params ?? ""}`} mood={mood} />
             ))}
           </div>
         ) : (

@@ -1,4 +1,5 @@
-import { IconChevronRight, IconPlus, IconQueue, IconPlay, IconShare, IconHeart, IconLibrary, IconFolder, IconDelete, IconArtist, IconAlbum, IconRadio, IconPin } from "./Icon";
+import { ShareIcon } from "./ShareIcon";
+import { IconChevronRight, IconPlus, IconQueue, IconPlay, IconHeart, IconLibrary, IconFolder, IconDelete, IconArtist, IconAlbum, IconRadio, IconPin } from "./Icon";
 import {
   createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState,
 } from "react";
@@ -70,7 +71,7 @@ function itemIcon(item: MenuItem) {
     : label.includes("radio") ? IconRadio : label.includes("album") ? IconAlbum
     : label.includes("folder") || label.startsWith("move to") ? IconFolder
     : label.includes("queue") ? IconQueue : label.startsWith("play") ? IconPlay
-    : label.includes("share") || label.includes("copy") ? IconShare
+    : label.includes("share") || label.includes("copy") ? ShareIcon
     : label.includes("pin") ? IconPin : label.includes("save") || label.includes("liked") ? IconHeart
     : label.startsWith("go to") ? IconArtist : label.includes("playlist") || label.startsWith("create") ? IconPlus : IconLibrary;
   return <Icon size={18} />;

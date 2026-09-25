@@ -6,7 +6,7 @@ export function cleanSnapshot(value) {
   if (value.track !== null) {
     const t = value.track;
     if (!t || !/^[A-Za-z0-9_-]{11}$/.test(t.id) || typeof t.title !== 'string' || t.title.length > 300 || !Number.isFinite(t.durationMs) || t.durationMs < 0 || t.durationMs > 86400000) throw new Error('Invalid track');
-    track = { id: t.id, title: t.title, durationMs: t.durationMs, artists: Array.isArray(t.artists) ? t.artists.slice(0, 10).map(a => ({ name: String(a.name || '').slice(0, 100) })) : [] };
+    track = { isVideo: t.isVideo === true, id: t.id, title: t.title, durationMs: t.durationMs, artists: Array.isArray(t.artists) ? t.artists.slice(0, 10).map(a => ({ name: String(a.name || '').slice(0, 100) })) : [] };
   }
   return { track, playing: track !== null && value.playing, positionMs: value.positionMs };
 }

@@ -78,3 +78,21 @@ test('an explicit host seek is applied promptly even inside the drift cooldown',
  client.onSnapshot({track,playing:false,positionMs:60000,at:Date.now(),seq:2});await h.flush();
  assert.equal(h.player.getState().anchor.positionMs,60000);
 });
+
+test('guest pauses on reconnect and does not replay a stale snapshot',async t=>{
+ const h=await setup(t);await h.coordinator.connectTogether({invitation:'test'});await h.flush();
+ const client=h.clients[0];
+ client.onSnapshot({track:{...track,isVideo:true},playing:true,positionMs:12000,at:Date.now(),seq:1});await h.flush();
+ assert.equal(h.player.getState().track.isVideo,true);
+ client.onStatus({status:'reconnecting',role:'guest'});await h.flush();
+ assert.equal(h.player.getState().state,'paused');
+ const count=h.calls.length;
+ h.coordinator.retryTogetherPlayback();await h.flush();
+ assert.equal(h.calls.length,count,'old snapshot must not resume during reconnect');
+ client.onStatus({status:'connected',role:'guest'});await h.flush();
+ h.coordinator.retryTogetherPlayback();await h.flush();
+ assert.equal(h.calls.length,count,'wait for a fresh snapshot after reconnect');
+ client.onSnapshot({track,playing:true,positionMs:30000,at:Date.now(),seq:1});await h.flush();
+ assert.equal(h.player.getState().state,'playing');
+ assert.ok(h.player.getState().anchor.positionMs>=30000);
+});

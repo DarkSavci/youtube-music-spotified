@@ -31,6 +31,15 @@ const { waitForOwnedCore } = require("./core-ready");
 const isDev = !app.isPackaged;
 const CORE_PORT = 8674;
 const CORE_HOST = "127.0.0.1";
+/*
+ * Windows caption buttons over the app. Normally they sit on the top bar's
+ * colour; over fullscreen artwork or video a solid box looks pasted on, so
+ * "immersive" draws them straight onto the picture in white.
+ */
+const TITLE_BAR = {
+  normal: { color: "#0f0f0f", symbolColor: "#b3b3b3" },
+  immersive: { color: "#00000000", symbolColor: "#ffffff" },
+};
 // A per-launch secret the core requires on routes that start yt-dlp work, so
 // web pages cannot drive them through its open CORS policy.
 const CLIENT_TOKEN = crypto.randomBytes(32).toString("hex");
@@ -387,12 +396,12 @@ function createWindow() {
     backgroundColor: "#0f0f0f",
     show: false,
     autoHideMenuBar: true,
-    // The app draws its own title bar. The default Windows one is a light
-    // strip above a dark app with a menu we do not use, and it cannot be
-    // themed — so the frame goes and the controls move into the top bar,
-    // where the rest of the chrome already lives.
-    frame: process.platform === "darwin",
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
+    // The navigation row shares the native caption area. Windows uses the
+    // native overlay (including maximize/Snap); macOS retains traffic lights.
+    frame: true,
+    titleBarStyle: "hidden",
+    ...(process.platform === "win32" ? { titleBarOverlay: { ...TITLE_BAR.normal, height: 52 } } : {}),
+    ...(process.platform === "darwin" ? { trafficLightPosition: { x: 16, y: 23 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -403,6 +412,29 @@ function createWindow() {
       backgroundThrottling: false,
     },
   });
+
+  // AppKit can restore the default caption position after showing/restoring
+  // a window or leaving fullscreen. Reapply the inset after those transitions.
+  // 8px shell gutter + half the 44px navigation row - half a 14px button.
+  if (process.platform === "darwin") {
+    const window = mainWindow;
+    const alignWindowButtons = () => {
+      if (!window.isDestroyed() && !window.isFullScreen()) {
+        window.setWindowButtonPosition({ x: 16, y: 23 });
+      }
+    };
+    let alignmentTimer;
+    const scheduleAlignment = () => {
+      alignWindowButtons();
+      // AppKit also lays out the caption after delivering the window event.
+      clearTimeout(alignmentTimer);
+      alignmentTimer = setTimeout(alignWindowButtons, 100);
+    };
+    for (const event of ["show", "focus", "restore", "resize", "leave-full-screen"]) {
+      window.on(event, scheduleAlignment);
+    }
+    window.once("closed", () => clearTimeout(alignmentTimer));
+  }
 
   // Avoid a white flash before the dark UI paints.
   mainWindow.once("ready-to-show", () => mainWindow.show());
@@ -600,6 +632,13 @@ process.on("uncaughtException", (err) => {
 ipcMain.handle("core-port", () => CORE_PORT);
 
 /* ---------- window controls ---------- */
+
+ipcMain.on("window:immersive-title-bar", (e, on) => {
+  if (process.platform !== "win32") return;
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (win !== mainWindow || win.isDestroyed()) return;
+  win.setTitleBarOverlay({ ...(on === true ? TITLE_BAR.immersive : TITLE_BAR.normal), height: 52 });
+});
 
 // Drawing our own title bar means owning what the frame used to do. Each of
 // these is addressed to the window the request came from, so a second window
