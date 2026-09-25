@@ -10,7 +10,7 @@ import { EmbeddedEngine } from "./embedded";
 import { maxVolume, useSettings } from "./settings";
 import { SessionClient, type Projection } from "./sessionclient";
 import type { Track } from "./types";
-import { currentPosition, usePlayer } from "./player";
+import { currentPosition, interpolationRate, usePlayer } from "./player";
 import { effectiveSpeed, playableSpeed, type SpeedSupport } from "./speed";
 import { recordPlay } from "./playlog";
 import { toast } from "./toast";
@@ -244,7 +244,7 @@ function onEngineEvent(e: EngineEvent) {
       // one-per-second correction is enough to stay accurate without
       // re-rendering at frame rate.
       usePlayer.setState((s) => ({
-        anchor: { positionMs: e.positionMs, atMs: performance.now(), rate: s.speed },
+        anchor: { positionMs: e.positionMs, atMs: performance.now(), rate: interpolationRate(s) },
         track:
           s.track && e.durationMs > 0 && !s.track.durationMs
             ? { ...s.track, durationMs: e.durationMs }
@@ -314,6 +314,7 @@ function applyProjection(p: Projection) {
   // at 1× and let the core's projections correct it.
   const remote = (p.devices ?? []).some((d) => d.owner && d.id !== session?.deviceID);
   usePlayer.setState({
+    outputElsewhere: remote,
     followingRoom: Boolean(p.followingRoom),
     state: p.state.state,
     track,
@@ -328,7 +329,7 @@ function applyProjection(p: Projection) {
     anchor: {
       positionMs: p.state.positionMs,
       atMs: performance.now(),
-      rate: p.state.state !== "playing" ? 0 : remote ? 1 : usePlayer.getState().speed,
+      rate: p.state.state !== "playing" ? 0 : interpolationRate({ speed: usePlayer.getState().speed, outputElsewhere: remote }),
     },
   });
 
@@ -644,7 +645,11 @@ export function applySpeed() {
   if (s.speed === rate) return;
   usePlayer.setState({
     speed: rate,
-    anchor: { positionMs: currentPosition(s), atMs: performance.now(), rate: s.state === "playing" ? rate : 0 },
+    anchor: {
+      positionMs: currentPosition(s),
+      atMs: performance.now(),
+      rate: s.state === "playing" ? interpolationRate({ speed: rate, outputElsewhere: s.outputElsewhere }) : 0,
+    },
   });
 }
 

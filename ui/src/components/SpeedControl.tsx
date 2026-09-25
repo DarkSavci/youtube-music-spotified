@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Slider } from "./Slider";
 import { usePlayer } from "../lib/player";
@@ -6,7 +6,7 @@ import { useSettings } from "../lib/settings";
 import { useTogether } from "../lib/together";
 import { availableSpeeds } from "../lib/playback";
 import {
-  MAX_SPEED, MIN_SPEED, SPEED_PRESETS, SPEED_STEP, clampSpeed, formatSpeed, playableSpeed,
+  MAX_SPEED, MIN_SPEED, SPEED_PRESETS, clampSpeed, formatSpeed, playableSpeed, sliderStep, stepSpeed,
 } from "../lib/speed";
 import { toast } from "../lib/toast";
 
@@ -114,7 +114,6 @@ function SpeedPanel({ anchor, onClose }: { anchor: HTMLButtonElement; onClose: (
       else setPosition({ left, top: Math.max(8, (view.innerHeight - height) / 2) });
     };
     place();
-    panel.current?.querySelector<HTMLElement>("input[type=range], .speedpanel__pill[data-active], .speedpanel__pill")?.focus();
     const outside = (e: PointerEvent) => {
       const target = e.target as Node;
       if (!panel.current?.contains(target) && !anchor.contains(target)) close.current();
@@ -134,21 +133,34 @@ function SpeedPanel({ anchor, onClose }: { anchor: HTMLButtonElement; onClose: (
     };
   }, [anchor, doc, view]);
 
+  // Into the panel once it is shown: it starts hidden until placed, and a
+  // hidden element cannot take focus, so focusing it any earlier did nothing
+  // and left keyboard users on the button.
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!position || focused.current) return;
+    focused.current = true;
+    panel.current?.querySelector<HTMLElement>("input[type=range], .speedpanel__pill[data-active], .speedpanel__pill")?.focus();
+  }, [position]);
+
   const presetPlayable = (rate: number) => support === "any" || support.includes(rate);
   // A window too short for the full panel — the mini player as a one-line
   // bar — gets the presets alone, with a step either side: the part used most.
   const compact = view.innerHeight < 260;
 
-  const step = (dir: -1 | 1) => (
-    <button
-      className="iconbtn iconbtn--round"
-      aria-label={dir < 0 ? "Slower" : "Faster"}
-      disabled={dir < 0 ? chosen <= MIN_SPEED : chosen >= MAX_SPEED}
-      onClick={() => choose(clampSpeed(chosen + dir * SPEED_STEP))}
-    >
-      {dir < 0 ? "−" : "+"}
-    </button>
-  );
+  const step = (dir: -1 | 1) => {
+    const to = stepSpeed(chosen, dir, support);
+    return (
+      <button
+        className="iconbtn iconbtn--round"
+        aria-label={dir < 0 ? "Slower" : "Faster"}
+        disabled={to === chosen}
+        onClick={() => choose(to)}
+      >
+        {dir < 0 ? "−" : "+"}
+      </button>
+    );
+  };
 
   const presets = SPEED_PRESETS.map((rate) => (
     <div key={rate} className="speedpanel__preset">
@@ -191,7 +203,7 @@ function SpeedPanel({ anchor, onClose }: { anchor: HTMLButtonElement; onClose: (
               label="Playback speed"
               value={chosen - MIN_SPEED}
               max={MAX_SPEED - MIN_SPEED}
-              step={SPEED_STEP}
+              step={sliderStep(support)}
               onChange={(v) => choose(clampSpeed(v + MIN_SPEED))}
             />
             {step(1)}

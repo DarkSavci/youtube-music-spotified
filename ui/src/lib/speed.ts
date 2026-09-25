@@ -40,6 +40,27 @@ export function playableSpeed(rate: number, support: SpeedSupport): number {
   return support.reduce((best, r) => (Math.abs(r - wanted) < Math.abs(best - wanted) ? r : best), support[0]!);
 }
 
+/**
+ * One step slower or faster from a speed: 0.05 where any speed plays, the
+ * neighbouring speed where the engine offers a list. Adding 0.05 and snapping
+ * would land back where it started, and the step would do nothing.
+ */
+export function stepSpeed(rate: number, dir: -1 | 1, support: SpeedSupport): number {
+  if (support === "any" || support.length === 0) return clampSpeed(rate + dir * SPEED_STEP);
+  const sorted = [...support].sort((a, b) => a - b);
+  const next = dir > 0 ? sorted.find((r) => r > rate + 1e-9) : sorted.reverse().find((r) => r < rate - 1e-9);
+  return next ?? rate;
+}
+
+/** The slider's step: 0.05, or the spacing of the engine's list, so arrow keys always move. */
+export function sliderStep(support: SpeedSupport): number {
+  if (support === "any" || support.length < 2) return SPEED_STEP;
+  const sorted = [...support].sort((a, b) => a - b);
+  let gap = Infinity;
+  for (let i = 1; i < sorted.length; i++) gap = Math.min(gap, sorted[i]! - sorted[i - 1]!);
+  return Number.isFinite(gap) && gap > 0 ? gap : SPEED_STEP;
+}
+
 /** Whether a Listen Together room — hosted or joined — is pinning playback to 1×. */
 export function inRoom(s = useTogether.getState()): boolean {
   return s.role !== null;
