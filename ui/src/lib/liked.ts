@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "./api";
+import { api, ApiError } from "./api";
 import { apiUrl } from "./base";
 import type { Track } from "./types";
 
@@ -19,7 +19,11 @@ export function useLikedIds(): Set<string> {
     queryKey: ["liked"],
     queryFn: ({ signal }) => api.liked(signal),
     staleTime: 5 * 60 * 1000,
-    retry: false,
+    // Retried with backoff: a single failed fetch at startup — a rate limit,
+    // a response that did not parse — otherwise left every heart empty and the
+    // taskbar's like button hidden for the session, since nothing refetches it.
+    // Signed out is the one failure a retry cannot fix.
+    retry: (count, err) => !(err instanceof ApiError && err.reauth) && count < 4,
   });
   return new Set((data?.tracks ?? []).map((t) => t.id));
 }
