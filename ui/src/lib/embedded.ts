@@ -77,6 +77,9 @@ function loadAPI(): Promise<void> {
   return apiPromise;
 }
 
+/** How long a track asked to play may take to start; generous for slow links. */
+const START_TIMEOUT_MS = 20_000;
+
 export class EmbeddedEngine implements Engine {
   readonly name = "embedded";
 
@@ -98,8 +101,20 @@ export class EmbeddedEngine implements Engine {
   private current: Target | null = null;
   private emit: (e: EngineEvent) => void;
   private ticker?: number;
+  /** Fires when a track asked to play has not started; see armStart(). */
+  private startTimer?: number;
+  /** The epoch a failure was last reported for, so each is reported once. */
+  private failedEpoch = -1;
   private ready = false;
   private pendingTarget: Target | null = null;
+  /*
+   * The video actually loaded into the player. Compared against rather than
+   * the previous target: a target that arrived before the player was ready
+   * became the previous target too, so when it was applied on ready it looked
+   * already loaded, nothing was loaded, and playVideo() on the empty player
+   * failed with error 2. Every track after a fallback started that way.
+   */
+  private cued: string | null = null;
   /** The speed asked for; applied once the player exists, and on every track. */
   private speed = 1;
   /** What YouTube offers for the loaded video; its usual list until it says. */
@@ -129,11 +144,7 @@ export class EmbeddedEngine implements Engine {
     try {
       await loadAPI();
     } catch (err) {
-      this.emit({
-        kind: "failed",
-        epoch: this.current?.epoch ?? 0,
-        reason: err instanceof Error ? err.message : "api_unavailable",
-      });
+      this.fail(this.current?.epoch ?? 0, err instanceof Error ? err.message : "api_unavailable");
       return;
     }
     if (!window.YT?.Player) return;
@@ -159,11 +170,10 @@ export class EmbeddedEngine implements Engine {
         },
         onStateChange: (e: { data: number }) => this.onState(e.data),
         onError: (e: { data: number }) => {
-          this.emit({
-            kind: "failed",
-            epoch: this.current?.epoch ?? 0,
-            reason: `player_error_${e.data}`,
-          });
+          // Load it afresh if it is asked for again, rather than replaying a
+          // player that already refused it.
+          this.cued = null;
+          this.fail(this.current?.epoch ?? 0, `player_error_${e.data}`);
         },
       },
     });
@@ -173,6 +183,7 @@ export class EmbeddedEngine implements Engine {
     const epoch = this.current?.epoch ?? 0;
     switch (state) {
       case PLAYING:
+        this.disarmStart();
         // YouTube can reset the rate when a new video loads.
         this.applySpeed();
         this.emit({
@@ -196,13 +207,17 @@ export class EmbeddedEngine implements Engine {
   }
 
   apply(target: Target) {
+    const prev = this.current;
+    if (prev && target.playing && !prev.playing) this.failedEpoch = -1;
+    if (!target.playing || !target.videoId) this.disarmStart();
+    else if (!prev || !prev.playing || prev.videoId !== target.videoId) this.armStart(target.epoch);
+
     if (!this.ready || !this.player) {
       this.pendingTarget = target;
       this.current = target;
       return;
     }
 
-    const prev = this.current;
     this.current = target;
 
     if (!target.videoId) {
@@ -211,7 +226,8 @@ export class EmbeddedEngine implements Engine {
       return;
     }
 
-    if (!prev || prev.videoId !== target.videoId) {
+    if (this.cued !== target.videoId) {
+      this.cued = target.videoId;
       const opts = { videoId: target.videoId, startSeconds: target.startAtMs / 1000 };
       if (target.playing) this.player.loadVideoById(opts);
       else this.player.cueVideoById(opts);
@@ -227,6 +243,35 @@ export class EmbeddedEngine implements Engine {
 
     if (target.playing) this.player.playVideo();
     else this.player.pauseVideo();
+  }
+
+  /*
+   * A track asked to play must start within a while, or it counts as failed.
+   *
+   * The YouTube player does not always say when it cannot play: the API can
+   * fail to become ready, or a frame can sit refusing to start. With nothing
+   * reported, the core kept showing "playing" with no sound and no progress
+   * until the app was restarted. A failure moves the queue on instead.
+   */
+  private armStart(epoch: number) {
+    this.disarmStart();
+    this.startTimer = window.setTimeout(() => {
+      this.startTimer = undefined;
+      this.fail(epoch, "embedded_no_start");
+    }, START_TIMEOUT_MS);
+  }
+
+  private disarmStart() {
+    if (this.startTimer === undefined) return;
+    clearTimeout(this.startTimer);
+    this.startTimer = undefined;
+  }
+
+  private fail(epoch: number, reason: string) {
+    this.disarmStart();
+    if (this.failedEpoch === epoch) return;
+    this.failedEpoch = epoch;
+    this.emit({ kind: "failed", epoch, reason });
   }
 
   private startTicker() {
@@ -275,6 +320,7 @@ export class EmbeddedEngine implements Engine {
 
   destroy() {
     this.stopTicker();
+    this.disarmStart();
     try {
       this.player?.destroy();
     } catch {
