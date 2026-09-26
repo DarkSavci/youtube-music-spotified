@@ -443,6 +443,10 @@ a.artistsongs__grouptitle:hover {
 .artistsongs__status {
   margin: var(--space-3) 0;
 }
+.artistsongs__more {
+  margin-left: var(--space-3);
+  vertical-align: middle;
+}
 
 /* ---------- track table ---------- */
 

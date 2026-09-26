@@ -233,3 +233,38 @@ export function byAlbum(tracks: Track[], years: Map<string, number>, canon?: Map
     .sort((a, b) => rank(a) - rank(b) || (b.year ?? 0) - (a.year ?? 0) || a.first - b.first)
     .map(({ first: _first, ...g }) => g);
 }
+
+export interface ReleasePlan {
+  /** Every release worth opening, most useful first. */
+  order: string[];
+  /** Of those, singles whose song is already known: opened last, if at all. */
+  covered: Set<string>;
+}
+
+/**
+ * The order to open an artist's releases in, for the dated orders.
+ *
+ * First the releases listed songs are on whose year nothing else gives, so
+ * the list itself can be placed. Then the artist's albums and EPs, which hold
+ * most of the songs the list lacks. Then singles, except those whose song is
+ * already known — from the list or an opened album — which go last: a single
+ * is usually one song, and opening it would only repeat what is there.
+ * Compilations are left out; their songs are on the releases they came from.
+ *
+ * `known` is the songs found so far, so the plan sharpens as albums open.
+ */
+export function releasePlan(
+  undatedListed: string[],
+  albums: Album[],
+  singles: Album[],
+  known: Track[],
+): ReleasePlan {
+  const songs = new Set(known.map(songKey));
+  const own = (list: Album[]) => list.filter((a) => a.id && !isCompilation(a.title));
+  const open: string[] = [];
+  const last: string[] = [];
+  for (const s of own(singles)) (songs.has(norm(s.title)) ? last : open).push(s.id);
+  const order = [...new Set([...undatedListed, ...own(albums).map((a) => a.id), ...open, ...last])];
+  const early = new Set([...undatedListed, ...own(albums).map((a) => a.id), ...open]);
+  return { order, covered: new Set(last.filter((id) => !early.has(id))) };
+}

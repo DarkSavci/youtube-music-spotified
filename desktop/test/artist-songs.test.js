@@ -160,3 +160,36 @@ test('a song the list carries twice keeps its place, on its original release', (
   const out = withReleases([on('1', 'Wicked Games', 'The Highlights'), on('2', 'Other', 'X'), on('3', 'Wicked Games', 'House of Balloons')], [], me);
   assert.deepEqual(Array.from(out, (t) => `${t.id}@${t.album.name}`), ['3@House of Balloons', '2@X']);
 });
+
+test('releases open albums first, then singles, and a single whose song is known last', () => {
+  const { releasePlan } = load();
+  const rel = (id, title) => ({ id, title, artists: by('Me') });
+  const albums = [rel('a1', 'After Hours'), rel('comp', 'The Highlights'), rel('a2', 'Starboy (Deluxe)')];
+  const singles = [
+    rel('s1', 'Blinding Lights'),
+    rel('s2', 'Save Your Tears (feat. Someone)'),
+    rel('s3', 'Brand New Song'),
+    rel('s4', 'Earned It [Remastered]'),
+  ];
+  const known = [{ id: 'x', title: 'blinding  lights' }, { id: 'y', title: 'Save Your Tears' }, { id: 'z', title: 'Earned It' }];
+  const plan = releasePlan(['undated'], albums, singles, known);
+  // Only an exact title counts as known: a featured or other version may be
+  // a recording the list lacks, so those singles are opened.
+  assert.deepEqual(Array.from(plan.order), ['undated', 'a1', 'a2', 's2', 's3', 's4', 's1']);
+  assert.deepEqual([...plan.covered], ['s1']);
+});
+
+test('a release listed as both album and single, or needed for a year, is planned once and not deferred', () => {
+  const { releasePlan } = load();
+  const rel = (id, title) => ({ id, title, artists: by('Me') });
+  const plan = releasePlan(['s1'], [rel('a1', 'One')], [rel('s1', 'Hit'), rel('a1', 'One')], [{ id: 'h', title: 'Hit' }, { id: 'o', title: 'One' }]);
+  assert.deepEqual(Array.from(plan.order), ['s1', 'a1']);
+  assert.equal(plan.covered.size, 0);
+});
+
+test('singles named with a featured artist or a version are not taken as known', () => {
+  const { releasePlan } = load();
+  const rel = (id, title) => ({ id, title, artists: by('Me') });
+  const plan = releasePlan([], [], [rel('bb', 'Bad Blood (feat. Kendrick Lamar)'), rel('w', 'willow (lonely witch version)')], [{ id: 'a', title: 'Bad Blood' }, { id: 'b', title: 'willow' }]);
+  assert.equal(plan.covered.size, 0);
+});
