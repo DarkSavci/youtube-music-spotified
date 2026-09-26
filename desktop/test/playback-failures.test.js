@@ -501,3 +501,20 @@ test('a seek forward during retries does not count as playing on', async () => {
   assert.equal(reloads, 1);
   assert.equal(h.failures().length, 1);
 });
+
+test('a track that plays from a warmed deck ends the run of failures too', () => {
+  const { failureLadder } = load('fallback.ts', {});
+  const ladder = failureLadder(2, 60_000, () => 0);
+  assert.equal(ladder.failed(1), 'counted');
+  // Track 2 starts gaplessly from the preloaded deck: no "loaded", only
+  // position reports, and it plays on.
+  ladder.progress(2, 0);
+  ladder.progress(2, 400);
+  ladder.progress(2, 5000);
+  assert.equal(ladder.failed(3), 'counted', 'a success in between resets the run');
+  assert.equal(ladder.fellBack, false);
+  // Reports of a stuck position are not progress.
+  ladder.progress(4, 59000);
+  ladder.progress(4, 59000);
+  assert.equal(ladder.failed(5), 'fallback');
+});

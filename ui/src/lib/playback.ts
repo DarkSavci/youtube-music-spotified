@@ -248,6 +248,9 @@ function onEngineEvent(e: EngineEvent) {
       }
     } else if (e.kind === "loaded") {
       ladder.loaded();
+    } else if (e.kind === "position" && (targetEpoch === null || e.epoch === targetEpoch)) {
+      // A gapless or crossfaded track never reports "loaded"; playing on counts.
+      ladder.progress(e.epoch, e.positionMs);
     }
     return;
   }
@@ -268,6 +271,7 @@ function onEngineEvent(e: EngineEvent) {
       break;
 
     case "position":
+      ladder.progress(e.epoch, e.positionMs);
       if (e.positionMs > lastPositionMs) {
         playedMs += e.positionMs - lastPositionMs;
       }
