@@ -15,7 +15,7 @@ const { contextBridge, ipcRenderer } = require("electron");
  * to the drive root rather than to a server. An absolute URL is the only thing
  * that works in both the packaged app and the dev server.
  */
-const CORE_ORIGIN = "http://127.0.0.1:8674";
+const CORE_ORIGIN = ipcRenderer.sendSync("core-origin");
 
 contextBridge.exposeInMainWorld("spotifier", {
   /** Absolute origin of the Go core, read synchronously at page load. */

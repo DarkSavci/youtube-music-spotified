@@ -69,7 +69,7 @@ export default defineConfig({
   // than next to the HTML — so the page renders nothing at all.
   base: "./",
   server: {
-    port: 5219,
+    port: Number(process.env.SPOTIFIER_DEV_PORT) || 5219,
     host: "127.0.0.1",
     // The Go sidecar. Proxying it keeps development same-origin, which is why
     // `lib/base.ts` can fall back to a relative path here; the packaged app

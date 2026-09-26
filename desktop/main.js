@@ -30,7 +30,10 @@ const { stopChild } = require("./child-process");
 const { waitForOwnedCore } = require("./core-ready");
 
 const isDev = !app.isPackaged;
-const CORE_PORT = 8674;
+// Development can move both ports so several builds (or a build beside the
+// installed app) run side by side. Packaged builds always use the defaults.
+const CORE_PORT = (isDev && Number(process.env.SPOTIFIER_CORE_PORT)) || 8674;
+const DEV_PORT = (isDev && Number(process.env.SPOTIFIER_DEV_PORT)) || 5219;
 const CORE_HOST = "127.0.0.1";
 /*
  * Windows caption buttons over the app. Normally they sit on the top bar's
@@ -47,7 +50,7 @@ const CLIENT_TOKEN = crypto.randomBytes(32).toString("hex");
 // webContents ids of the app's own windows: the main window and its mini
 // player. Only their top-level documents get CLIENT_TOKEN.
 const appContents = new Set();
-const DEV_URL = "http://127.0.0.1:5219/";
+const DEV_URL = `http://127.0.0.1:${DEV_PORT}/`;
 
 let mainWindow = null;
 const loginItem = new LoginItem(app);
@@ -602,7 +605,7 @@ if (!app.requestSingleInstanceLock()) {
     // And the next one is looked for in the background, well clear of startup.
     setTimeout(() => void updateYtdlp(), 60_000).unref?.();
     await core.ready;
-    devServerUp = isDev && (await probe(5219, 400));
+    devServerUp = isDev && (await probe(DEV_PORT, 400));
     startHidden = loginItem.launchedAtLogin();
     loginItem.refresh();
     createWindow();
@@ -651,6 +654,8 @@ process.on("uncaughtException", (err) => {
 });
 
 ipcMain.handle("core-port", () => CORE_PORT);
+// The preload needs the core's origin synchronously, before the page runs.
+ipcMain.on("core-origin", (e) => { e.returnValue = `http://${CORE_HOST}:${CORE_PORT}`; });
 
 /* ---------- window controls ---------- */
 
