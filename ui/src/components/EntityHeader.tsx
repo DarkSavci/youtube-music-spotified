@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import type { Artwork } from "../lib/types";
 import { artworkAtLeast } from "../lib/types";
 import { useArtColor } from "../lib/artcolor";
@@ -63,9 +63,45 @@ export function EntityHeader({ kind, title, artwork, dominantColor, meta, round 
       ) : null}
       <div className="entityheader__text">
         <span className="entityheader__kind">{kind}</span>
-        <h1 className="entityheader__title">{title}</h1>
+        <h1 className="entityheader__title" data-length={titleLength(title)} title={title}>{title}</h1>
         {meta ? <div className="entityheader__meta">{meta}</div> : null}
       </div>
     </header>
+  );
+}
+
+/**
+ * How long a title is, in the buckets the stylesheet sizes it by.
+ *
+ * A hero-sized title only works for a few words. A compilation called
+ * "Norske Ballader: 30 Ballader Om Drap Og Elskov, …" at 72px ran to six lines
+ * and pushed the artwork off the bottom of the header, so longer titles step
+ * down in size, as Spotify's do, and are clamped to three lines past that.
+ */
+export function titleLength(title: string): "short" | "medium" | "long" | "xlong" {
+  const n = [...title].length;
+  if (n <= 24) return "short";
+  if (n <= 45) return "medium";
+  if (n <= 80) return "long";
+  return "xlong";
+}
+
+/**
+ * The header's byline: each present part, with a dot between neighbours.
+ *
+ * Callers used to write the dot into every part after the first, which left a
+ * line starting "· 2010" whenever the first part was missing.
+ */
+export function MetaLine({ parts }: { parts: React.ReactNode[] }) {
+  const shown = parts.filter((p) => p !== null && p !== undefined && p !== false && p !== "");
+  return (
+    <>
+      {shown.map((part, i) => (
+        <Fragment key={i}>
+          {i > 0 ? <span className="entityheader__dot" aria-hidden="true">·</span> : null}
+          {part}
+        </Fragment>
+      ))}
+    </>
   );
 }
