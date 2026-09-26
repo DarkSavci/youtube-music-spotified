@@ -28,13 +28,18 @@ func TestLoadingAPausedTrackDoesNotPlayIt(t *testing.T) {
 	}
 }
 
-// A playing track that loads is still playing, and a stall still recovers.
+// A playing track that loads still means to play, and a stall recovers once
+// the sound moves: loading alone is not sound.
 func TestLoadingAPlayingTrackKeepsPlaying(t *testing.T) {
 	c, _ := newCore(t)
 	playN(t, c, 3)
 	epoch := c.State().Epoch
 	c.HandleEngine(EngineEvent{Kind: EvStalled, Epoch: epoch})
 	c.HandleEngine(EngineEvent{Kind: EvLoaded, Epoch: epoch, DurationMs: 200_000})
+	if c.State().State != domain.StateStalled || !c.Target().Playing {
+		t.Fatalf("got %s, playing target %v", c.State().State, c.Target().Playing)
+	}
+	c.HandleEngine(EngineEvent{Kind: EvPosition, Epoch: epoch, PositionMs: 300})
 	if c.State().State != domain.StatePlaying {
 		t.Fatalf("got %s", c.State().State)
 	}

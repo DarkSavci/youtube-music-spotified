@@ -235,7 +235,11 @@ function onEngineEvent(e: EngineEvent) {
       return;
     }
     if (e.kind === "failed") {
-      const step = ladder.failed(e.epoch);
+      // A report for a track already moved past (a preload, or a load the
+      // queue has left) is stale to the core, so it is not counted here
+      // either: only the track now playing can tip the engine into fallback.
+      const step = ladder.failed(e.epoch, targetEpoch);
+      if (step === "stale") return;
       if (step === "fallback") fallBack();
       else if (usePlayer.getState().followingRoom) {
         usePlayer.setState({ notice: "This track could not play on your account. Waiting for the room’s next track." });
@@ -244,6 +248,9 @@ function onEngineEvent(e: EngineEvent) {
       }
     } else if (e.kind === "loaded") {
       ladder.loaded();
+    } else if (e.kind === "position" && (targetEpoch === null || e.epoch === targetEpoch)) {
+      // A gapless or crossfaded track never reports "loaded"; playing on counts.
+      ladder.progress(e.epoch, e.positionMs);
     }
     return;
   }
@@ -264,6 +271,7 @@ function onEngineEvent(e: EngineEvent) {
       break;
 
     case "position":
+      ladder.progress(e.epoch, e.positionMs);
       if (e.positionMs > lastPositionMs) {
         playedMs += e.positionMs - lastPositionMs;
       }

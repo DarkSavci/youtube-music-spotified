@@ -412,6 +412,7 @@ export class Mixer {
     replayGain: number[];
     fades: number[];
     routed: boolean[];
+    context: { state: string; currentTime: number; sampleRate: number; baseLatency: number } | null;
   } | null {
     if (!this.analyser || !this.master) return null;
     const buf = new Float32Array(this.analyser.fftSize);
@@ -428,6 +429,16 @@ export class Mixer {
       fades: decks.map((el) => this.gains.get(el)?.gain.value ?? 0),
       // Whether each deck plays through the graph, where volume reaches it.
       routed: decks.map((el) => this.gains.has(el)),
+      // The graph's own clock: a context running slow, or suspended, makes
+      // every deck through it play slow or not at all.
+      context: this.ctx
+        ? {
+            state: this.ctx.state,
+            currentTime: this.ctx.currentTime,
+            sampleRate: this.ctx.sampleRate,
+            baseLatency: this.ctx.baseLatency ?? 0,
+          }
+        : null,
     };
   }
 

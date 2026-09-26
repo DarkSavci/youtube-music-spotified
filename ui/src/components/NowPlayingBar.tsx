@@ -183,7 +183,12 @@ export function NowPlayingBar({
           </button>
         </div>
 
-        <div className="bar__progress" data-buffering={buffering || undefined}>
+        <div
+          className="bar__progress"
+          data-buffering={buffering || undefined}
+          aria-busy={buffering || undefined}
+          title={buffering ? "Buffering…" : undefined}
+        >
           <span className="bar__time">{formatDuration(shown)}</span>
           <Slider
             label="Seek"
