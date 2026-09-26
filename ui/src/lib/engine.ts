@@ -98,6 +98,8 @@ function gainDb(trackLkfs: number, targetLkfs: number): number {
 /** The track a deck is pointed at, read back out of its source URL. */
 /** How long a playing track may make no progress before it is recovered. */
 const STALL_MS = 20_000;
+/** How long a NotSupportedError from play() waits for the element's own error event. */
+const UNANSWERED_REJECTION_MS = 3_000;
 
 function currentVideoId(el: HTMLAudioElement): string | null {
   const m = /\/v1\/stream\/([^/?#]+)/.exec(el.src || "");
@@ -188,6 +190,8 @@ export class NativeEngine implements Engine {
   private recoveries = 0;
   /** The epoch a failure was last reported for; see fail(). */
   private failedEpoch = -1;
+  /** Error events seen on any deck, so a rejected play() can tell if one followed. */
+  private errorEvents = 0;
   /** The last position the playing deck was known to be at, in seconds. */
   private lastGoodAt = 0;
   /** When the playing deck last moved forward, for the stall watchdog. */
@@ -252,6 +256,7 @@ export class NativeEngine implements Engine {
       this.emit({ kind: "stalled", epoch: this.current?.epoch ?? 0 });
     });
     el.addEventListener("error", () => {
+      this.errorEvents += 1;
       if (el !== this.deck) {
         // A preload that failed. Left alone it still looks ready, and a skip
         // to it then plays a dead element that never starts or errors again.
@@ -557,7 +562,18 @@ export class NativeEngine implements Engine {
         // error listener owns that failure: it retries, or asks why, first.
         // By the time this runs a retry may already have cleared deck.error,
         // so the rejection's name is what identifies it.
-        if (err?.name === "NotSupportedError" || deck.error) return;
+        if (err?.name === "NotSupportedError" || deck.error) {
+          // Usually an error event follows and is handled there. When none
+          // does (a deck with no usable source), report it after a moment,
+          // or the track would sit on "playing" with nothing said.
+          const seen = this.errorEvents;
+          window.setTimeout(() => {
+            if (this.errorEvents === seen && this.current?.epoch === target.epoch) {
+              this.fail(target.epoch, String(err?.name ?? "play_rejected"));
+            }
+          }, UNANSWERED_REJECTION_MS);
+          return;
+        }
         this.fail(target.epoch, String(err?.name ?? "play_rejected"));
       });
       this.startTicker();

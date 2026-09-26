@@ -210,7 +210,11 @@ export class EmbeddedEngine implements Engine {
     const prev = this.current;
     if (prev && target.playing && !prev.playing) this.failedEpoch = -1;
     if (!target.playing || !target.videoId) this.disarmStart();
-    else if (!prev || !prev.playing || prev.videoId !== target.videoId) this.armStart(target.epoch);
+    // A new epoch for the same video (a retry, a reload) re-arms too: a timer
+    // left on the old epoch would report a failure the core discards.
+    else if (!prev || !prev.playing || prev.videoId !== target.videoId || prev.epoch !== target.epoch) {
+      this.armStart(target.epoch);
+    }
 
     if (!this.ready || !this.player) {
       this.pendingTarget = target;

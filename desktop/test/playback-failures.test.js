@@ -40,6 +40,7 @@ test('the failure ladder counts distinct tracks, falls back at the threshold, an
 
 function nativeHarness() {
   const clock = { now: 0 };
+  const timeouts = [];
   const events = [];
   const decks = [];
   class FakeAudio {
@@ -66,7 +67,7 @@ function nativeHarness() {
     Audio: FakeAudio,
     MediaError: { MEDIA_ERR_ABORTED: 1 },
     performance: { now: () => clock.now },
-    window: { setInterval: () => 1, clearInterval: noop, setTimeout: () => 1, clearTimeout: noop },
+    window: { setInterval: () => 1, clearInterval: noop, setTimeout: (fn) => timeouts.push(fn), clearTimeout: noop },
     setInterval: () => 1, clearInterval: noop, setTimeout: () => 1, clearTimeout: noop,
     fetch: async () => ({ ok: true, json: async () => ({ rateLimited: false }) }),
     console: { info: noop, warn: noop, debug: noop },
@@ -79,7 +80,8 @@ function nativeHarness() {
   });
   const native = new engine.NativeEngine((e) => events.push(e));
   const target = (over = {}) => ({ epoch: 1, videoId: 'dead1234567', startAtMs: 0, playing: true, preloadVideoId: null, volume: 1, transition: { kind: 'gapless' }, ...over });
-  return { native, decks, events, target, clock, failures: () => events.filter((e) => e.kind === 'failed') };
+  const runTimeouts = () => { for (const fn of timeouts.splice(0)) fn(); };
+  return { native, decks, events, target, clock, runTimeouts, failures: () => events.filter((e) => e.kind === 'failed') };
 }
 
 test('a dead track is reported once, however many reconciles reject play()', async () => {
@@ -101,6 +103,34 @@ test('a dead track is reported once, however many reconciles reject play()', asy
   await flush();
   assert.equal(h.failures().length, 1);
   assert.equal(h.failures()[0].epoch, 1);
+});
+
+test('a NotSupportedError with no error event after it is still reported, once', async () => {
+  const h = nativeHarness();
+  h.native.apply(h.target());
+  const deck = h.decks.find((d) => d.src.includes('dead1234567'));
+  deck.rejectWith = 'NotSupportedError';
+  for (let i = 0; i < 5; i++) h.native.apply(h.target({ volume: 0.5 + i / 10 }));
+  await flush();
+  assert.equal(h.failures().length, 0, 'waits for the element first');
+  h.runTimeouts();
+  await flush();
+  assert.deepEqual(h.failures().map((e) => [e.epoch, e.reason]), [[1, 'NotSupportedError']]);
+});
+
+test('a NotSupportedError that the error listener answers is not reported twice', async () => {
+  const h = nativeHarness();
+  h.native.apply(h.target());
+  const deck = h.decks.find((d) => d.src.includes('dead1234567'));
+  deck.rejectWith = 'NotSupportedError';
+  h.native.apply(h.target({ volume: 0.4 }));
+  await flush();
+  deck.error = { code: 4 };
+  for (let i = 0; i < 3; i++) deck.fire('error');
+  await flush();
+  h.runTimeouts();
+  await flush();
+  assert.equal(h.failures().length, 1);
 });
 
 test('pressing play again on a failed track loads it afresh and can report again', async () => {
@@ -224,8 +254,12 @@ test('embedded: errors are reported once per track, and a track that never start
   assert.equal(h.calls.at(-2)[1], 'silent12345');
   for (const [id, fn] of [...h.timers]) { h.timers.delete(id); fn(); }
   assert.deepEqual(h.failures().map((e) => [e.epoch, e.reason]), [[1, 'player_error_150'], [2, 'embedded_no_start']]);
+  // The same video again under a new epoch (a retry) is watched under that epoch.
+  h.engine.apply(h.target({ epoch: 3, videoId: 'silent12345' }));
+  for (const [id, fn] of [...h.timers]) { h.timers.delete(id); fn(); }
+  assert.deepEqual([h.failures().at(-1).epoch, h.failures().at(-1).reason], [3, 'embedded_no_start']);
   // One that starts disarms it.
-  h.engine.apply(h.target({ epoch: 3, videoId: 'plays123456' }));
+  h.engine.apply(h.target({ epoch: 4, videoId: 'plays123456' }));
   h.handlers().onStateChange({ data: 1 });
   assert.equal(h.timers.size, 0);
 });
