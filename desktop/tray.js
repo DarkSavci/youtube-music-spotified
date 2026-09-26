@@ -28,6 +28,7 @@
 const { app, Tray, Menu, BrowserWindow, ipcMain, nativeImage, nativeTheme, screen } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
+const { closeAction } = require("./close-action");
 const miniplayer = require("./miniplayer");
 const updater = require("./updater");
 
@@ -440,16 +441,11 @@ function create(windowGetter, source) {
  */
 function attach(win) {
   win.on("close", (e) => {
-    if (quitting) return;
-    if (!closeToTray) {
-      if (process.platform === "darwin") {
-        e.preventDefault();
-        app.quit();
-      }
-      return;
-    }
+    const action = closeAction({ quitting, closeToTray });
+    if (action === "close") return;
     e.preventDefault();
-    win.hide();
+    if (action === "hide") win.hide();
+    else app.quit();
   });
   // Windows drops thumbnail buttons when a window is hidden and shown again.
   win.on("show", () => updateThumbar(true));
