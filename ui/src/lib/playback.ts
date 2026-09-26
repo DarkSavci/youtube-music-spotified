@@ -364,7 +364,7 @@ export function startPlayback() {
       serverAuthoritative = ok;
       // A room invitation never survives a window reload or account switch.
       // Only the playback owner may clear its stale room after a reload.
-      if (ok && usePlayer.getState().followingRoom && usePlayer.getState().devices.some(d => d.id === session?.deviceID && d.owner)) void session?.command({ Kind: "leave_room" });
+      if (ok && usePlayer.getState().followingRoom && usePlayer.getState().devices.some(d => d.id === session?.deviceID && d.owner)) void session?.command({ Kind: "leave_room", KeepQueue: true });
       if (!ok) {
         console.debug("[playback] session core unreachable; driving playback locally");
         session = null;
@@ -418,8 +418,12 @@ export async function syncRoomPlayback(track: Track | null, positionMs: number, 
   if (!session || !serverAuthoritative) throw new Error("The local music service is not ready.");
   if (!await session.command({ Kind: "follow_room", Tracks: queue ?? (track ? [track] : []), StartIndex: index, ExpectedID: entry, PositionMs: Math.round(positionMs), Playing: playing })) throw new Error("Could not synchronize playback with the local music service.");
 }
-export async function leaveRoomPlayback() {
-  if (session) await session.command({ Kind: "leave_room" });
+/**
+ * Stops following a room. By default playback carries on with the room's
+ * queue; `keepQueue: false` brings back the queue from before the room.
+ */
+export async function leaveRoomPlayback(keepQueue = true) {
+  if (session) await session.command({ Kind: "leave_room", KeepQueue: keepQueue });
 }
 
 /** Sends an intent to the core, or falls back to the local store. */

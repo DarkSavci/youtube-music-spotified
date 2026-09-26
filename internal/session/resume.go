@@ -163,15 +163,9 @@ func (k *Keeper) save(ctx context.Context, p Projection) {
 	if k.off.Load() {
 		return
 	}
-	state := p.State
-	if p.FollowingRoom {
-		// A room is temporary. Crashes must not replace the personal queue.
-		if p.PersonalResume == nil {
-			return
-		}
-		state = *p.PersonalResume
-	}
-	snap := snapshotOf(state)
+	// A room's queue is saved like any other: leaving a room carries on with
+	// its queue, so quitting mid-room reopens where the room was, too.
+	snap := snapshotOf(p.State)
 	if snap == nil {
 		// Nothing queued. Forget rather than leave a stale queue to come back
 		// after the listener has cleared it.

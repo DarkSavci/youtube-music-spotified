@@ -185,14 +185,15 @@ func TestKeeperWritesOnShutdown(t *testing.T) {
 	}
 }
 
-func TestRoomPersistenceKeepsPersonalQueue(t *testing.T) {
+func TestRoomQueueIsTheResumePoint(t *testing.T) {
+	// Leaving a room carries on with its queue, so quitting mid-room must
+	// reopen where the room was rather than on the queue from before it.
 	store := &memResume{}
 	keeper := &Keeper{Store: store, UserID: 1}
-	personal := sessionWith(4, 2, 91000)
-	room := sessionWith(8, 0, 1000)
-	keeper.save(context.Background(), Projection{FollowingRoom: true, State: room, PersonalResume: &personal})
+	room := sessionWith(8, 3, 41000)
+	keeper.save(context.Background(), Projection{FollowingRoom: true, State: room})
 	restored := LoadSnapshot(context.Background(), store, 1)
-	if restored == nil || len(restored.Tracks) != 4 || restored.Index != 2 || restored.PositionMs != 91000 {
-		t.Fatalf("persisted room instead of personal queue: %+v", restored)
+	if restored == nil || len(restored.Tracks) != 8 || restored.Index != 3 || restored.PositionMs != 41000 {
+		t.Fatalf("room queue not persisted: %+v", restored)
 	}
 }

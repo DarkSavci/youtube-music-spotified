@@ -49,7 +49,7 @@ The relay owns the canonical queue, current queue-entry ID, repeat/shuffle polic
 - The server advances the room once when the shared timeline reaches the current entry's validated duration. Member end notifications are observations, not unconditional skip commands. Do not wait for every listener to buffer: a late listener catches up; a locally unavailable track shows a clear state and waits for the next room item.
 - Collaborative mode allows members to control playback and add/remove/reorder the shared queue. Host-controls mode permits only the owner to mutate playback/queue. Ownership/moderation is owner-only in both modes. Room-mode changes are validated and take effect at a revision boundary.
 - Route all command entry points through this permission layer: player, queue, mini player, context menus, keyboard shortcuts and native media controls. Applying a room snapshot must not emit another outgoing command.
-- Extend the local playback integration to mirror room queue metadata while keeping room advancement authoritative. Preserve each listener's pre-room queue/preferences separately; leaving pauses room playback and restores the personal queue without unexpectedly starting it.
+- Extend the local playback integration to mirror room queue metadata while keeping room advancement authoritative. Preserve each listener's pre-room queue/preferences separately. Leaving (or the room ending) carries on with the room's queue where it was; the pre-room queue is restored only when switching rooms or when the room queue is empty. The room's queue is the resume point while in a room.
 
 ## Disconnects and owner absence
 
@@ -92,7 +92,7 @@ Connection checks distinguish malformed URL, DNS/network failure, TLS failure wh
 1. Saved servers, versioned handshake/diagnostics, artwork hydration and graceful image fallbacks.
 2. PIN admission, independent member credentials, roster, owner controls, lock, rotation, kick and reconnect lifecycle.
 3. Canonical room queue/timeline, permissions and deduplicated collaborative commands; all transport entry points follow the same rules.
-4. Contributor avatars, participant states, leaving/restoring personal queues, owner transfer and UX polish.
+4. Contributor avatars, participant states, leaving with the room's queue kept, owner transfer and UX polish.
 5. Isolated Mac/Windows end-to-end tests and coordinated relay rollout. Install into the user's normal app only after explicit permission.
 
 Acceptance tests should cover concurrent skips/seeks/additions/reorders, duplicate command delivery, one advancement at track end, owner disconnect/return/transfer, leaving during an in-flight request, PIN rotation without playback interruption, old-PIN rejection, kick plus credential revocation, guessed-code throttling, full rooms, unavailable media, artwork failures, old/new protocol mismatch and zero outgoing credentials/media URLs. Testing is now authorized by the user. Start with isolated unit/fixture and integration tests; do not replace the current installed app or deploy a relay redesign as part of a test.

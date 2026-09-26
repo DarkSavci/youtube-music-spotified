@@ -154,6 +154,15 @@ func (c *Core) Apply(cmd Command) (Reject, []LogEntry) {
 		if c.following {
 			c.following = false
 			c.roomEntry = ""
+			if cmd.KeepQueue && c.state.Queue.Current() != nil {
+				// Carry on with the room's queue: same song, same position,
+				// still playing if it was. Nothing restarts, so the epoch
+				// stays and the engine keeps its audio.
+				c.beforeRoom = nil
+				c.beforeRoomUnshuffled = nil
+				c.bump()
+				return RejectNone, nil
+			}
 			if c.beforeRoom != nil {
 				volume, epoch := c.state.Volume, c.state.Epoch
 				version, owner := c.state.Version, c.state.OwnerDeviceID
