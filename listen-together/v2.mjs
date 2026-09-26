@@ -204,14 +204,20 @@ function advance(room, direction = 1, now = Date.now()) {
 function fair(room) {
   if (room.policy !== "turns") return;
   const at = room.queue.findIndex((e) => e.id === room.current);
-  const rest = room.queue.slice(at + 1),
+  // Radio fills in after everyone's picks; it takes no one's turn.
+  const upcoming = room.queue.slice(at + 1);
+  const rest = upcoming.filter((e) => !e.radio),
+    radio = upcoming.filter((e) => e.radio),
     groups = new Map();
   for (const entry of rest) {
     if (!groups.has(entry.addedBy.id)) groups.set(entry.addedBy.id, []);
     groups.get(entry.addedBy.id).push(entry);
   }
   const keys = [...groups.keys()];
-  const last = currentEntry(room)?.addedBy.id;
+  // Whose pick played last decides the next turn; radio is nobody's turn.
+  const last = room.queue
+    .slice(0, at + 1)
+    .findLast((e) => !e.radio)?.addedBy.id;
   if (keys.includes(last)) keys.push(...keys.splice(keys.indexOf(last), 1));
   const result = [];
   while (result.length < rest.length)
@@ -219,7 +225,24 @@ function fair(room) {
       const entry = groups.get(key).shift();
       if (entry) result.push(entry);
     }
-  room.queue = [...room.queue.slice(0, at + 1), ...result];
+  room.queue = [...room.queue.slice(0, at + 1), ...result, ...radio];
+}
+// Radio a room adds to keep its music going: at most this many songs of it
+// wait at once. It is not anyone's contribution, so it does not count toward
+// a guest's limit, and what people add or accept goes ahead of it.
+const RADIO_UPCOMING = 50;
+/** Where a song someone added goes: after the other picks, before the radio. */
+function pickSlot(room) {
+  const at = room.queue.findIndex((e) => e.id === room.current);
+  const radio = room.queue.findIndex((e, i) => i > at && e.radio);
+  return radio === -1 ? room.queue.length : radio;
+}
+/** Drops upcoming radio copies of songs someone just chose themselves. */
+function dropRadioCopies(room, trackIds) {
+  const at = room.queue.findIndex((e) => e.id === room.current);
+  room.queue = room.queue.filter(
+    (e, i) => i <= at || !e.radio || !trackIds.has(e.track.id),
+  );
 }
 // Waiting requests: at most 50 per room, and no one guest may hold more than
 // 10 of them, so one guest cannot crowd everyone else out of the leader's
@@ -257,7 +280,9 @@ function acceptRequests(room, ids, placement, member, now) {
     }
     if (
       !room.duplicates &&
-      room.queue.slice(at + 1).some((e) => e.track.id === request.track.id)
+      room.queue
+        .slice(at + 1)
+        .some((e) => !e.radio && e.track.id === request.track.id)
     ) {
       refusal ??= "That song is already in the queue.";
       continue;
@@ -265,10 +290,12 @@ function acceptRequests(room, ids, placement, member, now) {
     const entry = {
       id: id(),
       track: request.track,
+      catalogueMs: request.track.durationMs,
       addedBy: request.by,
       addedAt: now,
       request: request.id,
     };
+    dropRadioCopies(room, new Set([request.track.id]));
     if (placement === "next") {
       // Accepted together, "next" keeps them in the order they were chosen.
       const previous = accepted.at(-1);
@@ -277,7 +304,7 @@ function acceptRequests(room, ids, placement, member, now) {
         0,
         entry,
       );
-    } else room.queue.push(entry);
+    } else room.queue.splice(pickSlot(room), 0, entry);
     room.requests = room.requests.filter((r) => r.id !== request.id);
     accepted.push(entry);
   }
@@ -321,6 +348,10 @@ export function command(room, member, cmd, now = Date.now()) {
   // Older apps add songs directly; in a room that takes requests the relay
   // turns a guest's addition into a request instead of refusing it. And a
   // request from someone who may add directly is simply an addition.
+  // Radio is outside anyone's contribution limit, so only those who control
+  // playback may add it (the app offers it to no one else).
+  if (cmd.kind === "enqueue" && cmd.radio === true && !control)
+    throw new Error("Only playback controllers can add radio.");
   if (cmd.kind === "enqueue" && requesting(room, member))
     cmd = { ...cmd, kind: "request" };
   else if (cmd.kind === "request" && !requesting(room, member))
@@ -499,14 +530,14 @@ export function command(room, member, cmd, now = Date.now()) {
         cmd.tracks.length > 100
       )
         throw new Error("Add between 1 and 100 songs at a time.");
-      const tracks = cmd.tracks.map(cleanTrack);
+      let tracks = cmd.tracks.map(cleanTrack);
+      const radio = cmd.kind === "enqueue" && cmd.radio === true;
+      if (radio && cmd.before) throw new Error("Radio goes after the queue.");
       // Played songs stay in the queue for "previous", but only a few: the
       // history keeps the rest, and the cap is for what is still to come.
       const at = room.queue.findIndex((e) => e.id === room.current);
       if (cmd.kind !== "replace" && at > 20)
         room.queue = room.queue.slice(at - 20);
-      if (room.queue.length + tracks.length > 500 && cmd.kind !== "replace")
-        throw new Error("The room queue is full (500 songs).");
       // A replaced queue no longer holds anyone's upcoming songs.
       const future =
         cmd.kind === "replace"
@@ -514,17 +545,38 @@ export function command(room, member, cmd, now = Date.now()) {
           : room.queue.slice(
               room.queue.findIndex((e) => e.id === room.current) + 1,
             );
+      if (radio) {
+        // Radio never repeats what is already coming up, and only so much
+        // of it waits at once; what does not fit is simply not added.
+        const seen = new Set([
+          ...future.map((e) => e.track.id),
+          ...room.queue
+            .slice(0, room.queue.length - future.length)
+            .map((e) => e.track.id),
+          ...room.history.slice(-50).map((e) => e.track.id),
+        ]);
+        tracks = tracks.filter((t) => !seen.has(t.id) && seen.add(t.id));
+        const waiting = future.filter((e) => e.radio).length;
+        tracks = tracks.slice(0, Math.max(0, RADIO_UPCOMING - waiting));
+        if (!tracks.length) throw new Error("The room already has radio queued.");
+      }
+      if (room.queue.length + tracks.length > 500 && cmd.kind !== "replace")
+        throw new Error("The room queue is full (500 songs).");
       if (
         !owner &&
-        future.filter((e) => e.addedBy.id === member.id).length +
+        !radio &&
+        future.filter((e) => e.addedBy.id === member.id && !e.radio).length +
           tracks.length >
           room.limit
       )
         throw new Error("Your queue contribution limit has been reached.");
       // Only the new songs are judged: a duplicate queued before the
-      // setting was turned off must not block every later addition.
-      if (!room.duplicates) {
-        const seen = new Set(future.map((e) => e.track.id));
+      // setting was turned off must not block every later addition. Radio
+      // is nobody's choice, so its copy gives way instead.
+      if (!room.duplicates && !radio) {
+        const seen = new Set(
+          future.filter((e) => !e.radio).map((e) => e.track.id),
+        );
         for (const track of tracks) {
           if (seen.has(track.id))
             throw new Error("Duplicate songs are disabled in this room.");
@@ -537,6 +589,7 @@ export function command(room, member, cmd, now = Date.now()) {
         catalogueMs: track.durationMs,
         addedBy: { id: member.id, name: member.name, avatar: member.avatar },
         addedAt: now,
+        ...(radio ? { radio: true } : {}),
       }));
       if (cmd.kind === "replace") {
         room.finished = false;
@@ -554,9 +607,12 @@ export function command(room, member, cmd, now = Date.now()) {
           throw new Error(
             "Only playback controllers may insert ahead of others.",
           );
+        if (!radio) dropRadioCopies(room, new Set(added.map((e) => e.track.id)));
         const index = cmd.before
           ? room.queue.findIndex((e) => e.id === cmd.before)
-          : room.queue.length;
+          : radio
+            ? room.queue.length
+            : pickSlot(room);
         room.queue.splice(index, 0, ...added);
         if (!room.current) {
           room.current = added[0].id;
@@ -579,7 +635,9 @@ export function command(room, member, cmd, now = Date.now()) {
       }
       event(
         room,
-        `${member.name} added ${added.length === 1 ? added[0].track.title : `${added.length} songs`}.`,
+        radio
+          ? `${member.name} added ${added.length} radio ${added.length === 1 ? "song" : "songs"}.`
+          : `${member.name} added ${added.length === 1 ? added[0].track.title : `${added.length} songs`}.`,
         now,
       );
       break;
@@ -615,15 +673,17 @@ export function command(room, member, cmd, now = Date.now()) {
       // Waiting requests count toward the same limit as queued songs, or
       // the limit would only apply to what the leader already accepted.
       if (
-        future.filter((e) => e.addedBy.id === member.id).length +
+        future.filter((e) => e.addedBy.id === member.id && !e.radio).length +
           room.requests.filter((r) => r.by.id === member.id).length +
           tracks.length >
         room.limit
       )
         throw new Error("Your queue contribution limit has been reached.");
       if (!room.duplicates) {
+        // A song only the radio would play can still be asked for; accepting
+        // it replaces the radio's copy.
         const seen = new Set([
-          ...future.map((e) => e.track.id),
+          ...future.filter((e) => !e.radio).map((e) => e.track.id),
           ...room.requests.map((r) => r.track.id),
         ]);
         for (const track of tracks) {

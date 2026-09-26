@@ -447,9 +447,15 @@ function route(kind: string, data: Record<string, unknown> = {}) {
     return true;
   }
   // A guest who may only add songs asks for the one they picked, rather than
-  // being told they cannot start it.
-  if (kind === "radio" && !roomCanControl() && room.mode === "contributions") {
-    void roomAddTracks([data.track]);
+  // being told they cannot start it: from search (radio) or from an album or
+  // playlist row (replace, whose first track is the one clicked).
+  if (
+    (kind === "radio" || kind === "replace") &&
+    !roomCanControl() &&
+    room.mode === "contributions"
+  ) {
+    const picked = kind === "radio" ? data.track : (data.tracks as unknown[] | undefined)?.[0];
+    if (picked) void roomAddTracks([picked]);
     return true;
   }
   const reason = denied(room, kind, data);
@@ -513,18 +519,15 @@ function roomTrackIds(room: RoomState) {
   ]);
 }
 /**
- * How many songs this member may still add: the leader is only held to the
- * room's size, everyone else also to their contribution limit.
+ * How many radio songs the room will still take. Radio is nobody's pick, so
+ * it is held to the room's size and to how much radio may wait at once
+ * (the relay's RADIO_UPCOMING), not to anyone's contribution limit.
  */
-function roomAllowance(room: RoomState) {
-  const { member } = useTogether.getState();
+function radioAllowance(room: RoomState) {
   const space = Math.min(100, 500 - room.queue.length);
-  if (room.owner === member) return space;
   const at = room.queue.findIndex((e) => e.id === room.current);
-  const mine = room.queue
-    .slice(at + 1)
-    .filter((e) => e.addedBy.id === member).length;
-  return Math.min(space, room.limit - mine);
+  const waiting = room.queue.slice(at + 1).filter((e) => e.radio).length;
+  return Math.min(space, 50 - waiting);
 }
 /** Radio songs worth adding after `seed`: playable, and not in the room already. */
 async function radioFor(seed: string, room: RoomState) {
@@ -559,9 +562,10 @@ export async function startRoomRadio(track: Track) {
       now.queue.find((e) => e.id === now.current)?.track.id !== track.id
     )
       return;
-    const allowed = roomAllowance(now);
+    const allowed = radioAllowance(now);
+    // Marked as radio: what people add later goes ahead of it.
     if (tracks.length && allowed > 0)
-      await roomCommand({ kind: "enqueue", tracks: tracks.slice(0, allowed) });
+      await roomCommand({ kind: "enqueue", tracks: tracks.slice(0, allowed), radio: true });
   } catch {
     if (version === generation) toast("Couldn't load this song's radio.");
   } finally {
@@ -607,9 +611,9 @@ async function topUpRoomRadio(room: RoomState) {
     )
       return;
     radioSeed = last.track.id;
-    const allowed = Math.min(50, roomAllowance(now));
+    const allowed = radioAllowance(now);
     if (tracks.length && allowed > 0)
-      await roomCommand({ kind: "enqueue", tracks: tracks.slice(0, allowed) });
+      await roomCommand({ kind: "enqueue", tracks: tracks.slice(0, allowed), radio: true });
   } catch {
     radioRetryAt = Date.now() + 30000;
   } finally {

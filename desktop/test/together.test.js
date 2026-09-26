@@ -896,3 +896,36 @@ test("a guest in a room that takes requests requests the song they click", async
   );
   assert.equal(h.radio.calls.length, 0);
 });
+test("radio a room adds is marked as radio", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  const old = Date.now() - 60000;
+  h.radio.tracks = [{ ...room().queue[0].track, id: "radio000001" }];
+  c.onState(
+    room(1, {
+      owner: "self",
+      repeat: "off",
+      history: [],
+      queue: room().queue.map((e) => ({ ...e, addedAt: old })),
+    }),
+  );
+  for (let i = 0; i < 5; i++) await h.flush();
+  const added = c.commands.filter((x) => x.kind === "enqueue");
+  assert.equal(added.at(-1).radio, true);
+});
+test("a guest in a room that takes requests requests an album song they double-click", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  c.onState(room(1, { mode: "contributions", requests: [] }));
+  await h.flush();
+  const track = h.player.getState().track;
+  const other = { ...track, id: "othertrack0" };
+  assert.equal(h.route("replace", { tracks: [track, other] }), true);
+  for (let i = 0; i < 3; i++) await h.flush();
+  assert.equal(
+    JSON.stringify(c.commands.map((x) => [x.kind, x.tracks?.map((t) => t.id)])),
+    JSON.stringify([["request", [track.id]]]),
+  );
+});

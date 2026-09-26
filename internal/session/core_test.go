@@ -235,6 +235,31 @@ func TestFailureSkipsAndRecords(t *testing.T) {
 	}
 }
 
+// A paused session is not waiting on its track: a background load that fails
+// (a restored session, a refused stream) must not move on and start playing.
+func TestFailureWhilePausedStaysPut(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 5)
+	c.Apply(Command{Kind: CmdToggle})
+	epoch := c.State().Epoch
+
+	logs := c.HandleEngine(EngineEvent{Kind: EvFailed, Epoch: epoch, Reason: "403"})
+
+	s := c.State()
+	if currentID(c) != "a" || s.State != domain.StatePaused || s.Epoch != epoch {
+		t.Fatalf("paused failure moved on: current %q state %s epoch %d/%d", currentID(c), s.State, s.Epoch, epoch)
+	}
+	if len(logs) != 0 || len(s.Degraded) != 0 || !s.Queue.Items[0].Playable {
+		t.Fatalf("paused failure was recorded as a skip: logs %v degraded %v", logs, s.Degraded)
+	}
+	// Pressing play tries it again, and a failure then skips as usual.
+	c.Apply(Command{Kind: CmdToggle})
+	c.HandleEngine(EngineEvent{Kind: EvFailed, Epoch: c.State().Epoch, Reason: "403"})
+	if currentID(c) != "b" {
+		t.Fatalf("failure while playing should advance, got %q", currentID(c))
+	}
+}
+
 // Repeated failures must stop, not race silently to the end of the queue.
 func TestConsecutiveFailuresPause(t *testing.T) {
 	c, _ := newCore(t)

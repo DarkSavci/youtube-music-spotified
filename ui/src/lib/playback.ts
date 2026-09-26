@@ -1,4 +1,5 @@
 import { apiUrl } from "./base";
+import { isCurrentList } from "./samelist";
 import {
   NativeEngine,
   type Engine,
@@ -463,12 +464,8 @@ export const transport = {
      * everyone's queue with the song they are already hearing.
      */
     const s = usePlayer.getState();
-    const clicked = tracks[index];
-    // Only within the list already queued, though. A different list that
-    // happens to start on the current song (an artist's Play after one of
-    // their Popular rows) is a request for that list, and replaces the queue.
-    const queued = new Set(s.queue.map((t) => t.id));
-    if (clicked && s.track?.id === clicked.id && tracks.every((t) => queued.has(t.id))) {
+    // Only within the list already queued, though; see isCurrentList.
+    if (isCurrentList(s, tracks, index, origin)) {
       const playing = s.state === "playing" || s.state === "loading" || s.state === "stalled";
       if (!playing) this.toggle();
       return;

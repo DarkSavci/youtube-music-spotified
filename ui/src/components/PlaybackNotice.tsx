@@ -21,14 +21,17 @@ export function PlaybackNotice() {
     <div className="playnotice" role="status">
       {notice}
       {following ? <button className="chip" onClick={retryTogetherPlayback}>Retry playback</button> : null}
-      {/* Read and understood: it can go. A new problem brings a new notice. */}
-      <button
-        className="iconbtn playnotice__close"
-        aria-label="Dismiss"
-        onClick={() => usePlayer.setState({ notice: null })}
-      >
-        <IconClose size={14} />
-      </button>
+      {/* Read and understood: it can go. A new problem brings a new notice.
+          Not in a room, where the notice carries the way to retry. */}
+      {following ? null : (
+        <button
+          className="iconbtn playnotice__close"
+          aria-label="Dismiss"
+          onClick={() => usePlayer.setState({ notice: null })}
+        >
+          <IconClose size={14} />
+        </button>
+      )}
     </div>
   );
 }

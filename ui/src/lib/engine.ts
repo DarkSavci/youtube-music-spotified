@@ -100,6 +100,14 @@ function gainDb(trackLkfs: number, targetLkfs: number): number {
 const STALL_MS = 20_000;
 /** How long a NotSupportedError from play() waits for the element's own error event. */
 const UNANSWERED_REJECTION_MS = 3_000;
+/**
+ * When a failed preload of the next track is tried again: later each time,
+ * then not at all. The track still loads normally when it comes up; warming
+ * it is only a head start, and not worth a stream of refused requests.
+ */
+const PRELOAD_RETRY_MS = [2_000, 10_000];
+/** When a missed silence measurement is asked for again; then not at all. */
+const EDGE_RETRY_MS = [3_000, 10_000, 30_000];
 
 function currentVideoId(el: HTMLAudioElement): string | null {
   const m = /\/v1\/stream\/([^/?#]+)/.exec(el.src || "");
@@ -192,6 +200,11 @@ export class NativeEngine implements Engine {
   private failedEpoch = -1;
   /** Error events seen on any deck, so a rejected play() can tell if one followed. */
   private errorEvents = 0;
+  /** Failed silence measurements: how many, and when to ask again. */
+  private edgeFailures = new Map<string, { count: number; retryAt: number }>();
+  private edgesAsking = new Set<string>();
+  /** Failed preloads of the next track: how many, and when to try again. */
+  private preloadFailures = new Map<string, { count: number; retryAt: number }>();
   /** The last position the playing deck was known to be at, in seconds. */
   private lastGoodAt = 0;
   /** When the playing deck last moved forward, for the stall watchdog. */
@@ -595,22 +608,38 @@ export class NativeEngine implements Engine {
    * preload. Loading it there replaced the outgoing song mid-fade and reset
    * its gain, so the crossfade became a plain cut to the next song.
    */
-  private warmNext() {
+  private warmNext(retrying = false) {
     const id = this.current?.preloadVideoId;
     if (!id || this.idle === this.releasing) return;
     if (this.loaded(this.idle, id) || this.loaded(this.deck, id)) return;
+    // Only the next track's failures matter; the rest are forgotten.
+    for (const key of this.preloadFailures.keys()) if (key !== id) this.preloadFailures.delete(key);
+    const failed = this.preloadFailures.get(id);
+    if (failed && (failed.retryAt === Infinity || (!retrying && performance.now() < failed.retryAt))) return;
     this.point(this.idle, id, true);
     this.mixer.set(this.idle, 0);
   }
 
-  /** Clears a failed preload and tries it again shortly. */
+  /**
+   * Clears a failed preload and tries it again later, a couple of times at
+   * most (PRELOAD_RETRY_MS). Retried straight away, a refused stream turned
+   * into hundreds of requests a minute.
+   */
   private rewarmAfterError(el: HTMLAudioElement) {
+    const id = currentVideoId(el);
+    if (!id) return;
+    const failed = this.preloadFailures.get(id) ?? { count: 0, retryAt: 0 };
+    failed.count += 1;
+    const delay = PRELOAD_RETRY_MS[failed.count - 1];
+    failed.retryAt = delay === undefined ? Infinity : performance.now() + delay;
+    this.preloadFailures.set(id, failed);
     window.setTimeout(() => {
       if (el !== this.idle || !el.error || el === this.releasing) return;
       el.removeAttribute("src");
       el.load();
-      this.warmNext();
-    }, 2000);
+      // The retry itself is due now; anything sooner waits for retryAt.
+      this.warmNext(delay !== undefined);
+    }, delay ?? 0);
   }
 
   /** Stops a deck once it has faded out, then lets it warm the next track. */
@@ -840,16 +869,33 @@ export class NativeEngine implements Engine {
     if (!this.recover(el)) this.fail(t.epoch, "stalled");
   }
 
-  private learnEdges(videoId: string, attempt = 0) {
-    if (this.edges.has(videoId)) return;
+  /*
+   * Asks where a track's sound starts and ends. The file may not be ready, or
+   * the request may give way to a track someone clicked, so a miss is asked
+   * again while the track is in play — later each time, and not after
+   * EDGE_RETRY_MS runs out, since every call re-applies the core's target
+   * and a refused stream would otherwise be asked for every few seconds.
+   */
+  private learnEdges(videoId: string, retrying = false) {
+    if (this.edges.has(videoId) || this.edgesAsking.has(videoId)) return;
+    const failed = this.edgeFailures.get(videoId);
+    if (failed && (failed.retryAt === Infinity || (!retrying && performance.now() < failed.retryAt))) return;
+    this.edgesAsking.add(videoId);
     void audibleEdges(videoId, videoId !== this.current?.videoId).then((e) => {
+      this.edgesAsking.delete(videoId);
       if (!e) {
-        // The file was not ready, or the request gave way to a track someone
-        // clicked. Worth asking again while the track is still in play.
+        const miss = this.edgeFailures.get(videoId) ?? { count: 0, retryAt: 0 };
+        miss.count += 1;
+        const delay = EDGE_RETRY_MS[miss.count - 1];
+        miss.retryAt = delay === undefined ? Infinity : performance.now() + delay;
+        this.edgeFailures.set(videoId, miss);
+        if (this.edgeFailures.size > 32)
+          for (const id of this.edgeFailures.keys()) if (id !== videoId) this.edgeFailures.delete(id);
         const inPlay = videoId === this.current?.videoId || videoId === this.current?.preloadVideoId;
-        if (inPlay && attempt < 5) window.setTimeout(() => this.learnEdges(videoId, attempt + 1), 3000);
+        if (inPlay && delay !== undefined) window.setTimeout(() => this.learnEdges(videoId, true), delay);
         return;
       }
+      this.edgeFailures.delete(videoId);
       this.edges.set(videoId, e);
       // Only the tracks in play are worth keeping.
       if (this.edges.size > 32) {
