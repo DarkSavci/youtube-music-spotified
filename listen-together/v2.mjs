@@ -584,6 +584,8 @@ export function command(room, member, cmd, now = Date.now()) {
           ...(room.heard ?? []),
         ]);
         tracks = tracks.filter((t) => !seen.has(t.id) && seen.add(t.id));
+        if (!tracks.length)
+          throw new Error("This radio has nothing the room hasn't already had.");
         const waiting = future.filter((e) => e.radio).length;
         tracks = tracks.slice(0, Math.max(0, RADIO_UPCOMING - waiting));
         if (!tracks.length) throw new Error("The room already has radio queued.");
