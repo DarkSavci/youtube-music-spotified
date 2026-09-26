@@ -113,6 +113,22 @@ let radioBusy = false;
 let radioRetryAt = 0;
 /** Songs left after the current one before the leader adds radio, as autoplay does. */
 const RADIO_LOW = 5;
+// Songs this room has had while we were in it, played or jumped past. The
+// relay refuses radio that repeats them; leaving them out here as well keeps
+// a radio batch from shrinking to nothing once the relay filters it.
+const roomHeard = new Set<string>();
+const HEARD_MAX = 1000;
+function rememberHeard(room: RoomState) {
+  const at = room.queue.findIndex((e) => e.id === room.current);
+  for (const e of [...(room.history ?? []).slice(-50), ...room.queue.slice(0, at + 1)]) {
+    roomHeard.delete(e.track.id);
+    roomHeard.add(e.track.id);
+  }
+  for (const old of roomHeard) {
+    if (roomHeard.size <= HEARD_MAX) break;
+    roomHeard.delete(old);
+  }
+}
 export function roomCanControl() {
   const { room, member } = useTogether.getState();
   return (
@@ -533,6 +549,7 @@ function radioAllowance(room: RoomState) {
 async function radioFor(seed: string, room: RoomState) {
   const found = await api.radio(seed);
   const seen = roomTrackIds(useTogether.getState().room ?? room);
+  for (const id of roomHeard) seen.add(id);
   seen.add(seed);
   return found.filter((t) => {
     if (t.playable === false || seen.has(t.id)) return false;
@@ -667,6 +684,7 @@ export async function connectTogether(options: ConnectOptions) {
   radioSeed = "";
   radioBusy = false;
   radioRetryAt = 0;
+  roomHeard.clear();
   useTogether.setState({ error: null });
   setRoomTransport(route);
   let seeded = false;
@@ -722,6 +740,7 @@ export async function connectTogether(options: ConnectOptions) {
       if (previous && previous.revision > room.revision) return;
       awaitingFresh = false;
       useTogether.setState({ room });
+      rememberHeard(room);
       if (room.video && room.video.revision > lastVideo) {
         lastVideo = room.video.revision;
         if (

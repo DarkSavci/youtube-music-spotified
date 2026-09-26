@@ -107,6 +107,11 @@ export function makeRoom(pin, options = {}, now = Date.now()) {
     // When every connected listener first said the current song will not
     // play for them; the room moves on after a grace period.
     unplayableSince: null,
+    // Songs the room has had (played, or jumped past), so radio never brings
+    // one back. The queue keeps only a few played songs and the history
+    // records only what ended, so neither is enough on its own. Kept here,
+    // never sent to listeners.
+    heard: new Set(),
   };
 }
 export function addMember(room, value) {
@@ -146,7 +151,7 @@ export function dropRequests(room, memberId) {
   return room.requests.length !== before;
 }
 export function snapshot(room) {
-  const { creatorIP, ...publicRoom } = room;
+  const { creatorIP, heard, ...publicRoom } = room;
   return {
     ...publicRoom,
     members: [...room.members.values()].map(
@@ -231,6 +236,27 @@ function fair(room) {
 // wait at once. It is not anyone's contribution, so it does not count toward
 // a guest's limit, and what people add or accept goes ahead of it.
 const RADIO_UPCOMING = 50;
+/** How many songs a room remembers having had, oldest forgotten first. */
+const HEARD_MAX = 1000;
+/**
+ * Notes the current song and everything before it as had. Called before a
+ * command or tick can move on or trim the queue, so a song jumped past is
+ * remembered even though it never reaches the history.
+ */
+export function rememberHeard(room) {
+  const heard = room.heard;
+  if (!heard) return;
+  const at = room.queue.findIndex((e) => e.id === room.current);
+  for (const e of room.queue.slice(0, at + 1)) {
+    heard.delete(e.track.id);
+    heard.add(e.track.id);
+  }
+  for (const e of room.history.slice(-50)) if (!heard.has(e.track.id)) heard.add(e.track.id);
+  for (const old of heard) {
+    if (heard.size <= HEARD_MAX) break;
+    heard.delete(old);
+  }
+}
 /** Where a song someone added goes: after the other picks, before the radio. */
 function pickSlot(room) {
   const at = room.queue.findIndex((e) => e.id === room.current);
@@ -343,6 +369,7 @@ export function command(room, member, cmd, now = Date.now()) {
   if (!cmd || typeof cmd.op !== "string" || cmd.op.length > 100 || !cmd.op)
     throw new Error("Invalid operation.");
   if (member.operations.has(cmd.op)) return false;
+  rememberHeard(room);
   const owner = room.owner === member.id,
     control = canControl(room, member);
   // Older apps add songs directly; in a room that takes requests the relay
@@ -554,6 +581,7 @@ export function command(room, member, cmd, now = Date.now()) {
             .slice(0, room.queue.length - future.length)
             .map((e) => e.track.id),
           ...room.history.slice(-50).map((e) => e.track.id),
+          ...(room.heard ?? []),
         ]);
         tracks = tracks.filter((t) => !seen.has(t.id) && seen.add(t.id));
         const waiting = future.filter((e) => e.radio).length;
@@ -972,6 +1000,7 @@ export function command(room, member, cmd, now = Date.now()) {
   return true;
 }
 export function tick(room, now = Date.now()) {
+  rememberHeard(room);
   if (room.countdown) {
     const connected = [...room.members.values()].filter((m) => m.connected);
     if (room.countdown.startAt && now >= room.countdown.startAt) {
