@@ -32,6 +32,9 @@ test('songs order by plays, and are left alone when a count is missing', () => {
   assert.deepEqual(ids(byPlays([song('a', '', '22M plays'), song('b', '', '30M plays'), song('c', '', '1B plays')])), ['c', 'b', 'a']);
   const partial = [song('a', '', '22M plays'), song('b', '', ''), song('c', '', '1B plays')];
   assert.deepEqual(ids(byPlays(partial)), ['a', 'b', 'c']);
+  // A song nobody has played yet still has a count, and goes last.
+  const zero = [song('a', '', '86 plays'), song('b', '', '0 plays'), song('c', '', '137 plays')];
+  assert.deepEqual(ids(byPlays(zero)), ['c', 'a', 'b']);
 });
 
 test('newest first puts undated songs last and keeps order within a year', () => {

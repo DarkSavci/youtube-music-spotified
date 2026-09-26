@@ -27,8 +27,9 @@ export function playCount(text: string | undefined): number {
  * disagrees with them. Left alone when any count is missing.
  */
 export function byPlays(tracks: Track[]): Track[] {
+  // "0 plays" is a count; only a row with no count leaves the order alone.
+  if (tracks.some((t) => !/^\s*\d/.test(t.playCount ?? ""))) return tracks;
   const counts = tracks.map((t) => playCount(t.playCount));
-  if (counts.some((c) => c <= 0)) return tracks;
   return tracks
     .map((t, i) => ({ t, i, c: counts[i] ?? 0 }))
     .sort((a, b) => b.c - a.c || a.i - b.i)

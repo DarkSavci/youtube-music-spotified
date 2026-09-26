@@ -632,6 +632,13 @@
   color: var(--text-primary);
   font-size: var(--text-sm);
   text-align: center;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.playnotice__close {
+  flex: none;
+  margin-right: calc(var(--space-2) * -1);
 }
 
 /*
