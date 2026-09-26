@@ -32,6 +32,14 @@ test('the failure ladder counts distinct tracks, falls back at the threshold, an
   assert.equal(ladder.fellBack, false);
   assert.equal(ladder.retryNative(), false);
 
+  // A report for a track other than the one now meant to play is stale.
+  const stale = failureLadder(2, 60_000, () => now);
+  assert.equal(stale.failed(4, 5), 'stale');
+  assert.equal(stale.failed(5, 5), 'counted');
+  assert.equal(stale.failed(3, 6), 'stale');
+  assert.equal(stale.fellBack, false, 'a stale preload failure does not tip it over');
+  assert.equal(stale.failed(6, 6), 'fallback');
+
   const fresh = failureLadder(2, 60_000, () => now);
   fresh.failed(1);
   fresh.loaded();
@@ -394,4 +402,66 @@ test('a track that never starts is retried once, patiently, and fails in about h
   }
   assert.equal(reloads, 1);
   assert.ok(failedAt !== null && failedAt >= 29_000 && failedAt <= 31_000, `failed after ${failedAt} ms`);
+});
+
+// A browser reload: the element drops to 0 and paused until metadata arrives.
+function reloadLikeABrowser(deck) { deck.currentTime = 0; deck.paused = true; }
+
+test('a retry whose reload hangs keeps the position, and never reports 0', async () => {
+  const h = nativeHarness();
+  const deck = playThenFreeze(h, 'hang1234567', 59);
+  const frozeAt = h.clock.now;
+  const mark = h.events.length;
+  const reloads = [];
+  while (h.clock.now - frozeAt < 40_000 && !h.failures().length) {
+    const src = deck.src;
+    h.tick();
+    if (deck.src !== src) { reloads.push(h.clock.now - frozeAt); reloadLikeABrowser(deck); }
+    await flush();
+  }
+  const positions = h.events.slice(mark).filter((e) => e.kind === 'position');
+  assert.equal(positions.filter((e) => e.positionMs === 0).length, 0, "the reload's 0 was reported");
+  assert.equal(reloads.length, 2);
+  // The second window is a retry's (7 s), not a fresh mid-track one (6 s).
+  assert.ok(reloads[1] - reloads[0] >= 7_000, `second retry after ${reloads[1] - reloads[0]} ms`);
+  assert.equal(h.failures().length, 1);
+  // Had the metadata arrived, it would have picked the track up at 59 s.
+  deck.fire('loadedmetadata');
+  assert.equal(deck.currentTime, 59);
+});
+
+test('creeping at the buffered edge is not the music coming back', async () => {
+  const h = nativeHarness();
+  const deck = playThenFreeze(h, 'edge1234567', 62);
+  deck.currentTime = 62.909; h.tick();
+  const mark = h.events.length;
+  for (let i = 0; i < 8; i++) h.tick();
+  assert.ok(h.events.slice(mark).some((e) => e.kind === 'stalled'));
+  const shown = h.events.length;
+  deck.currentTime = 62.973; h.tick(); h.tick();
+  assert.equal(h.events.slice(shown).filter((e) => e.kind === 'position').length, 0);
+  deck.currentTime = 63.4; h.tick();
+  assert.equal(h.events.at(-1).kind, 'position');
+});
+
+test('a track that plays on after a retry gets its retries back', async () => {
+  const h = nativeHarness();
+  const deck = playThenFreeze(h, 'back1234567', 30);
+  // Drops out, is picked up, and plays on for a while.
+  let src = deck.src;
+  while (deck.src === src) h.tick();
+  deck.fire('loadedmetadata');
+  deck.paused = false;
+  for (let i = 1; i <= 12 * 4; i++) { deck.currentTime = 30 + i / 4; h.tick(); }
+  // A second outage later still gets two retries before failing.
+  const frozeAt = h.clock.now;
+  let reloads = 0;
+  while (h.clock.now - frozeAt < 40_000 && !h.failures().length) {
+    src = deck.src;
+    h.tick();
+    if (deck.src !== src) { reloads++; reloadLikeABrowser(deck); }
+    await flush();
+  }
+  assert.equal(reloads, 2);
+  assert.equal(h.failures().length, 1);
 });

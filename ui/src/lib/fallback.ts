@@ -16,8 +16,12 @@
  * earns its place back by loading.
  */
 export interface FailureLadder {
-  /** A failure report; "fallback" when this one should swap the engine. */
-  failed(epoch: number): "fallback" | "counted" | "duplicate";
+  /**
+   * A failure report; "fallback" when this one should swap the engine.
+   * `current` is the track now meant to play: a report for any other (a
+   * preload, a load the queue already left) is stale and not counted.
+   */
+  failed(epoch: number, current?: number | null): "fallback" | "counted" | "duplicate" | "stale";
   /** A track loaded: the resolver works, so the run of failures is over. */
   loaded(): void;
   /** At a track change: whether to leave the fallback and retry native. */
@@ -37,7 +41,8 @@ export function failureLadder(
   let fellBack = false;
   let fellBackAt = 0;
   return {
-    failed(epoch) {
+    failed(epoch, current) {
+      if (current != null && epoch !== current) return "stale";
       if (epoch === lastEpoch) return "duplicate";
       lastEpoch = epoch;
       failures += 1;

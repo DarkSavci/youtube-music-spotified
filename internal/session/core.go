@@ -491,7 +491,9 @@ func (c *Core) HandleEngine(ev EngineEvent) []LogEntry {
 		// Loaded is not a request to play. A track loading while paused — the
 		// last track, restored when the app opens — stays paused until the
 		// listener presses play; only one that was waiting to play moves on.
-		if c.playIntent() {
+		// A stall stays until the position moves: a retry's reload that
+		// loads but never plays is still silence.
+		if c.playIntent() && c.state.State != domain.StateStalled {
 			c.state.State = domain.StatePlaying
 		}
 		c.state.PositionAt = c.clk.Now()

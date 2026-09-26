@@ -235,7 +235,11 @@ function onEngineEvent(e: EngineEvent) {
       return;
     }
     if (e.kind === "failed") {
-      const step = ladder.failed(e.epoch);
+      // A report for a track already moved past (a preload, or a load the
+      // queue has left) is stale to the core, so it is not counted here
+      // either: only the track now playing can tip the engine into fallback.
+      const step = ladder.failed(e.epoch, targetEpoch);
+      if (step === "stale") return;
       if (step === "fallback") fallBack();
       else if (usePlayer.getState().followingRoom) {
         usePlayer.setState({ notice: "This track could not play on your account. Waiting for the room’s next track." });

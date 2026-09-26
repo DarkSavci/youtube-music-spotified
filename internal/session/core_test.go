@@ -601,6 +601,22 @@ func TestFrozenPositionKeepsAStall(t *testing.T) {
 	}
 }
 
+// A retry's reload that loads but does not move is still a stall.
+func TestLoadedKeepsAStallUntilItMoves(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 3)
+	c.HandleEngine(EngineEvent{Kind: EvPosition, Epoch: c.State().Epoch, PositionMs: 59000})
+	c.HandleEngine(EngineEvent{Kind: EvStalled, Epoch: c.State().Epoch})
+	c.HandleEngine(EngineEvent{Kind: EvLoaded, Epoch: c.State().Epoch, DurationMs: 200000})
+	if got := c.State().State; got != domain.StateStalled {
+		t.Fatalf("state = %v, want still stalled after a reload's metadata", got)
+	}
+	c.HandleEngine(EngineEvent{Kind: EvPosition, Epoch: c.State().Epoch, PositionMs: 59500})
+	if got := c.State().State; got != domain.StatePlaying {
+		t.Fatalf("state = %v, want playing once it moved", got)
+	}
+}
+
 // An explicit pause still stops the engine — intent is the user's, not the
 // buffer's.
 func TestPauseStillStopsTheEngine(t *testing.T) {

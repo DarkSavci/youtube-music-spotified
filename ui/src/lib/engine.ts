@@ -116,6 +116,14 @@ const BUFFERING_MS = 1_500;
 const STALL_MS = 6_000;
 const LOAD_STALL_MS = 15_000;
 const RECOVERY_STALL_MS = 7_000;
+/*
+ * What counts as the deck moving: this much media time past where it was last
+ * seen moving. At the edge of what has buffered, currentTime creeps by a few
+ * hundredths of a second, which is not the music coming back.
+ */
+const MIN_PROGRESS_S = 0.25;
+/** Media time played without a hitch after which a track's retries are refilled. */
+const RETRY_REFILL_S = 10;
 /** How long a NotSupportedError from play() waits for the element's own error event. */
 const UNANSWERED_REJECTION_MS = 3_000;
 /**
@@ -233,6 +241,12 @@ export class NativeEngine implements Engine {
   private playedThisTrack = false;
   /** Set while the deck is frozen and the core has been told it is buffering. */
   private stallShown = false;
+  /** Set from a retry's reload until its metadata arrives; see recover(). */
+  private reloading = false;
+  /** Where a retry picked the track up, to refill retries once it plays on. */
+  private resumedAt = 0;
+  /** Retry reloads of the current track, refills included. */
+  private reloads = 0;
   /** Where each track's sound starts and ends, for timing crossfades. */
   private edges = new Map<string, Edges>();
 
@@ -391,11 +405,19 @@ export class NativeEngine implements Engine {
     console.info(
       `[engine] retrying ${id} at ${Math.round(at)}s (attempt ${this.recoveries}, media error ${el.error?.code ?? "none"})`,
     );
-    el.src = `${this.srcFor(id)}?retry=${this.recoveries}`;
+    // Counted over the whole track, so a retry after a refill is still a URL
+    // the element has not already given up on.
+    this.reloads += 1;
+    el.src = `${this.srcFor(id)}?retry=${this.reloads}`;
+    // Until the reload's metadata arrives the element sits at 0 and paused.
+    // Neither is news: the position to come back to stays where it was.
+    this.reloading = true;
+    this.resumedAt = at;
     el.addEventListener(
       "loadedmetadata",
       () => {
         if (el !== this.deck || currentVideoId(el) !== id) return;
+        this.reloading = false;
         if (at > 0) el.currentTime = at;
         if (this.current?.playing) void el.play().catch(() => {});
       },
@@ -516,6 +538,8 @@ export class NativeEngine implements Engine {
       this.progressedSinceLoad = false;
       this.playedThisTrack = false;
       this.stallShown = false;
+      this.reloading = false;
+      this.reloads = 0;
     }
     const ms = target.transition.ms ?? 0;
 
@@ -569,6 +593,11 @@ export class NativeEngine implements Engine {
         // Only chase the target position when it has genuinely moved;
         // otherwise normal playback drift seeks on every reconcile.
         el.currentTime = target.startAtMs / 1000;
+        // A seek is a new place to measure progress from, not progress.
+        if (!this.reloading) {
+          this.lastGoodAt = el.currentTime;
+          this.progressAt = performance.now();
+        }
       }
     }
 
@@ -896,21 +925,32 @@ export class NativeEngine implements Engine {
   private watchForStall(el: HTMLAudioElement): boolean {
     const now = performance.now();
     const t = this.current;
-    if (!t?.playing || el.paused) {
+    // A retry's reload leaves the element paused until it can play; that is
+    // the wait being timed, not the listener pausing.
+    if (!t?.playing || (el.paused && !this.reloading)) {
       this.progressAt = now;
+      this.lastGoodAt = el.currentTime;
       this.stallShown = false;
       return false;
     }
-    if (el.currentTime !== this.lastGoodAt) {
+    const moved = el.currentTime - this.lastGoodAt;
+    if (!this.reloading && moved < 0 && this.recoveries === 0) {
+      // Backwards outside a retry: someone scrubbed. Measure from here.
+      this.lastGoodAt = el.currentTime;
+      this.progressAt = now;
+    } else if (!this.reloading && moved >= MIN_PROGRESS_S) {
       this.lastGoodAt = el.currentTime;
       this.progressAt = now;
       this.progressedSinceLoad = true;
       this.playedThisTrack = true;
       this.stallShown = false;
+      // A hiccup it came back from should not use up the track's retries.
+      if (this.recoveries > 0 && this.lastGoodAt - this.resumedAt >= RETRY_REFILL_S) this.recoveries = 0;
       return false;
     }
     const still = now - this.progressAt;
-    if (still >= BUFFERING_MS && !this.stallShown) {
+    if (still < BUFFERING_MS) return this.stallShown;
+    if (!this.stallShown) {
       this.stallShown = true;
       this.emit({ kind: "stalled", epoch: t.epoch });
     }
@@ -924,6 +964,7 @@ export class NativeEngine implements Engine {
     if (!this.recover(el)) this.fail(t.epoch, "stalled");
     return this.stallShown;
   }
+
 
 
   /*
