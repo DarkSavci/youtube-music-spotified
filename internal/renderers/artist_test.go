@@ -23,6 +23,11 @@ func TestArtistRadioAndShuffleAreReadByName(t *testing.T) {
 		if ar.ShuffleID != "RDAOni3jl65KF37F9JYsJM8DGg" || ar.ShuffleSeed != "JhulBGMA7G4" {
 			t.Fatalf("shuffle = %q from %q, want the Shuffle button's list", ar.ShuffleID, ar.ShuffleSeed)
 		}
+		// The params select each list's behaviour; without them the shuffle
+		// intermittently came back as a generic radio.
+		if ar.ShuffleParams != "wAEB8gECGAE%3D" || ar.RadioParams != "wAEB" {
+			t.Fatalf("params: shuffle %q, radio %q", ar.ShuffleParams, ar.RadioParams)
+		}
 	}
 }
 

@@ -170,20 +170,25 @@ func (c *InnerTube) Radio(ctx context.Context, seedTrackID string) ([]domain.Tra
 // RadioPage reads a page of a track's radio, following YouTube's own
 // continuation token, which is how its Up next never runs out.
 func (c *InnerTube) RadioPage(ctx context.Context, seedTrackID, token string) ([]domain.Track, string, error) {
-	return c.MixPage(ctx, seedTrackID, "RDAMVM"+seedTrackID, token)
+	return c.MixPage(ctx, domain.MixSeed{VideoID: seedTrackID, PlaylistID: "RDAMVM" + seedTrackID}, token)
 }
 
 // MixPage reads a page of any of YouTube's generated queues: a track's radio
 // (RDAMVM…), an artist's mix (RDEM…) or its shuffle (RDAO…). The artist page
 // hands over both the list and the song it starts from, and YouTube wants
-// both — the list alone answers with an empty panel.
-func (c *InnerTube) MixPage(ctx context.Context, seedTrackID, playlistID, token string) ([]domain.Track, string, error) {
+// both — the list alone answers with an empty panel — and the button's
+// params, which are what make a shuffle the artist's own songs.
+func (c *InnerTube) MixPage(ctx context.Context, mix domain.MixSeed, token string) ([]domain.Track, string, error) {
 	body := map[string]any{"continuation": token}
 	if token == "" {
-		if seedTrackID == "" || playlistID == "" {
+		if mix.VideoID == "" || mix.PlaylistID == "" {
 			return nil, "", fmt.Errorf("catalog: empty radio seed")
 		}
-		body = map[string]any{"videoId": seedTrackID, "playlistId": playlistID}
+		body = map[string]any{"videoId": mix.VideoID, "playlistId": mix.PlaylistID}
+		if mix.Params != "" {
+			// Sent as the header carries them, as the web client does.
+			body["params"] = mix.Params
+		}
 	}
 	doc, err := c.call(ctx, "next", body)
 	if err != nil {

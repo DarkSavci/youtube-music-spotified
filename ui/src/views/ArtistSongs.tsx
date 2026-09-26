@@ -1,5 +1,5 @@
-import { useEffect, useMemo } from "react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { TrackTable } from "../components/TrackTable";
@@ -10,7 +10,7 @@ import { transport } from "../lib/playback";
 import { artworkAtLeast } from "../lib/types";
 import type { Album, Track } from "../lib/types";
 import { useSettings } from "../lib/settings";
-import { byAlbum, byPlays, missingAlbums, newestFirst, yearsByAlbum, type SongOrder } from "../lib/artistsongs";
+import { withReleases, byAlbum, byPlays, missingAlbums, newestFirst, yearsByAlbum, type SongOrder } from "../lib/artistsongs";
 
 const ORDERS: { id: SongOrder; label: string }[] = [
   { id: "popular", label: "Popular" },
@@ -18,18 +18,62 @@ const ORDERS: { id: SongOrder; label: string }[] = [
   { id: "album", label: "By album" },
 ];
 
-// How many albums of unknown year are looked up one by one. The artist's own
-// shelves and discography cover most; this is for the stragglers, and past it
-// the rest are shown as undated rather than spending more requests.
-const LOOKUP_LIMIT = 40;
+// How many releases are opened for their songs and years. Past it, the rest
+// of a very long discography is left out rather than spending more requests.
+const RELEASE_LIMIT = 120;
 
 /**
- * Every song by an artist (#48), in YouTube's most-played order, newest first,
- * or album by album.
+ * Opens releases for their songs, four at a time, reporting as they arrive
+ * so the page fills in rather than waiting on the slowest. Each shares its
+ * cache with the album page.
+ */
+function useReleases(ids: string[]): { albums: Album[]; loading: boolean; done: number; failed: number } {
+  const qc = useQueryClient();
+  const key = ids.join(",");
+  const [state, setState] = useState<{ key: string; albums: Album[]; done: number; failed: number }>({ key: "", albums: [], done: 0, failed: 0 });
+  useEffect(() => {
+    if (ids.length === 0) return;
+    const abort = new AbortController();
+    const queue = [...ids];
+    setState({ key, albums: [], done: 0, failed: 0 });
+    const work = async () => {
+      for (let id = queue.shift(); id && !abort.signal.aborted; id = queue.shift()) {
+        const albumId = id;
+        try {
+          const album = await qc.fetchQuery({
+            queryKey: ["album", albumId],
+            queryFn: ({ signal }) => api.album(albumId, signal),
+            staleTime: 10 * 60_000,
+          });
+          if (!abort.signal.aborted)
+            setState((s) => (s.key === key ? { ...s, albums: [...s.albums, album], done: s.done + 1 } : s));
+        } catch {
+          if (!abort.signal.aborted)
+            setState((s) => (s.key === key ? { ...s, done: s.done + 1, failed: s.failed + 1 } : s));
+        }
+      }
+    };
+    for (let i = 0; i < 4; i++) void work();
+    return () => abort.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  const current = state.key === key;
+  return {
+    albums: current ? state.albums : [],
+    loading: ids.length > 0 && (!current || state.done < ids.length),
+    done: current ? state.done : 0,
+    failed: current ? state.failed : 0,
+  };
+}
+
+/**
+ * An artist's songs (#48): YouTube's most played, newest first, or album by
+ * album.
  *
- * The list is the playlist the artist page's Top songs heading links to. It
- * is loaded a page at a time; the release years that ordering by date needs
- * are fetched only once that ordering is chosen.
+ * The most-played list is the playlist the artist page's Top songs heading
+ * links to, and YouTube stops it at about 150. The dated orders complete it
+ * from the artist's releases, which are opened only once one of them is
+ * chosen, so those orders really are every song.
  */
 export function ArtistSongsView() {
   const { id = "" } = useParams();
@@ -79,46 +123,38 @@ export function ArtistSongsView() {
     },
   });
 
-  const known = useMemo(
-    () => yearsByAlbum(artist.data?.albums, artist.data?.singles, discography.data),
-    [artist.data, discography.data],
-  );
-  const missing = useMemo(
-    () => (dated && complete && !discography.isPending ? missingAlbums(tracks, known).slice(0, LOOKUP_LIMIT) : []),
-    [dated, complete, discography.isPending, tracks, known],
-  );
-  const lookups = useQuery({
-    queryKey: ["artist", id, "album-years", missing.join(",")],
-    enabled: missing.length > 0,
-    staleTime: 10 * 60_000,
-    queryFn: async ({ signal }) => {
-      const found: Album[] = [];
-      const queue = [...missing];
-      await Promise.all(
-        Array.from({ length: 4 }, async () => {
-          for (let next = queue.shift(); next; next = queue.shift()) {
-            try {
-              found.push(await api.album(next, signal));
-            } catch {
-              if (signal.aborted) return;
-            }
-          }
-        }),
-      );
-      return found;
-    },
-  });
+  // Every release: those the listed songs are on, the artist page's shelves
+  // and the discography behind them.
+  const releaseIds = useMemo(() => {
+    if (!dated || !complete || discography.isPending) return [];
+    const ids = [...(artist.data?.albums ?? []), ...(artist.data?.singles ?? []), ...(discography.data ?? [])].map((a) => a.id);
+    // The list's own releases first: past the limit, a missing year on a
+    // listed song costs more than a missing rarity.
+    return [...new Set([...missingAlbums(tracks, new Map()), ...ids])].filter(Boolean).slice(0, RELEASE_LIMIT);
+  }, [dated, complete, discography.isPending, discography.data, artist.data, tracks]);
+  const releases = useReleases(releaseIds);
 
-  const years = useMemo(() => yearsByAlbum(artist.data?.albums, artist.data?.singles, discography.data, lookups.data), [artist.data, discography.data, lookups.data]);
+  const years = useMemo(
+    () => yearsByAlbum(artist.data?.albums, artist.data?.singles, discography.data, releases.albums),
+    [artist.data, discography.data, releases.albums],
+  );
   const albums = useMemo(() => {
     const out = new Map<string, Album>();
-    for (const a of [...(artist.data?.albums ?? []), ...(artist.data?.singles ?? []), ...(discography.data ?? []), ...(lookups.data ?? [])])
+    for (const a of [...releases.albums, ...(artist.data?.albums ?? []), ...(artist.data?.singles ?? []), ...(discography.data ?? [])])
       if (!out.has(a.id)) out.set(a.id, a);
     return out;
-  }, [artist.data, discography.data, lookups.data]);
+  }, [artist.data, discography.data, releases.albums]);
 
-  const ordered = useMemo(() => (order === "newest" ? newestFirst(tracks, years) : tracks), [order, tracks, years]);
-  const groups = useMemo(() => (order === "album" ? byAlbum(tracks, years) : []), [order, tracks, years]);
+  // Dated orders show the whole discography; Popular is YouTube's list of
+  // the most played, which is where it stops.
+  const all = useMemo(() => {
+    if (!dated) return tracks;
+    const merged = withReleases(tracks, releases.albums);
+    return showVideos ? merged : merged.filter((t) => !t.isVideo);
+  }, [dated, tracks, releases.albums, showVideos]);
+
+  const ordered = useMemo(() => (order === "newest" ? newestFirst(all, years) : all), [order, all, years]);
+  const groups = useMemo(() => (order === "album" ? byAlbum(all, years) : []), [order, all, years]);
   // What Play and a row click play: the list as it is shown.
   const shown = useMemo(() => (order === "album" ? groups.flatMap((g) => g.tracks) : ordered), [order, groups, ordered]);
 
@@ -135,14 +171,26 @@ export function ArtistSongsView() {
     const at = target ? playable.indexOf(target) : 0;
     if (playable.length > 0) transport.play(playable, Math.max(0, at), origin);
   };
-  const resolving = dated && (!complete || discography.isFetching || lookups.isFetching);
-  const undated = dated && complete && !resolving ? tracks.filter((t) => !(t.album?.id && years.has(t.album.id))).length : 0;
+  const resolving = dated && (!complete || discography.isFetching || releases.loading);
+  const undated = dated && complete && !resolving ? all.filter((t) => !(t.album?.id && years.has(t.album.id))).length : 0;
+  const status = !complete
+    ? `Loading songs… ${tracks.length} so far`
+    : !dated
+      ? `The ${tracks.length} most played · Newest and By album add the rest of the discography`
+      : resolving
+        ? `${all.length} songs · opening releases ${releases.done} of ${releaseIds.length}…`
+        : [
+            `${all.length} songs from ${releaseIds.length} releases`,
+            releaseIds.length >= RELEASE_LIMIT ? `the first ${RELEASE_LIMIT} releases only` : "",
+            releases.failed > 0 ? `${releases.failed} could not be opened` : "",
+            undated > 0 ? `${undated} without a known release date, shown last` : "",
+          ].filter(Boolean).join(" · ");
 
   return (
     <>
       <div className="artistsongs__head">
         <Link className="artistsongs__artist" to={`/artist/${encodeURIComponent(id)}`}>{name}</Link>
-        <h1 className="artistsongs__title">All songs</h1>
+        <h1 className="artistsongs__title">Songs</h1>
       </div>
       <div className="entityactions">
         <button
@@ -171,13 +219,7 @@ export function ArtistSongsView() {
       {songs.error && tracks.length === 0 ? <PageError error={songs.error} onRetry={() => void songs.refetch()} /> : null}
       {tracks.length > 0 ? (
         <p className="artistsongs__status" aria-live="polite">
-          {!complete
-            ? `Loading songs… ${tracks.length} so far`
-            : resolving
-              ? `${tracks.length} songs · finding release dates…`
-              : undated > 0
-                ? `${tracks.length} songs · ${undated} without a known release date, shown last`
-                : `${tracks.length} songs`}
+          {status}
           {isFetchNextPageError ? " · Some songs could not be loaded." : null}
         </p>
       ) : null}
@@ -214,7 +256,7 @@ export function ArtistSongsView() {
               </section>
             );
           })
-        : tracks.length > 0 ? (
+        : all.length > 0 ? (
             <TrackTable tracks={ordered} origin={origin} keepVideos onPlayTrack={(i) => play(ordered, i)} />
           ) : null}
     </>

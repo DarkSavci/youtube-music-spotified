@@ -17,6 +17,11 @@ import { toast } from "../lib/toast";
 import { apiUrl } from "../lib/base";
 import { useFollowArtist } from "../lib/playlists";
 import { EntityActions } from "../components/EntityActions";
+import { shuffled } from "../lib/artistsongs";
+
+// Fewer songs than this in YouTube's shuffle of an artist, and the page
+// shuffles the artist's song list instead.
+const SHUFFLE_MIN = 20;
 
 /* ---------- album ---------- */
 
@@ -295,16 +300,46 @@ export function ArtistView() {
         else transport.play(songs, 0, artist.name);
         return;
       }
-      const list = kind === "radio" ? artist.radioId : artist.shuffleId;
-      const seed = kind === "radio" ? artist.radioSeed : artist.shuffleSeed;
-      const origin = kind === "radio" ? `${artist.name} radio` : artist.name;
-      if (!list || !seed || !(await transport.playMix(list, seed, origin)))
-        toast(kind === "radio" ? "Could not start this artist's radio." : "Could not shuffle this artist.");
+      /*
+       * Each button has its own origin. Play and Shuffle can start on the
+       * same song, and a queue is known by its origin and first song, so
+       * sharing a name let autoplay carry the shuffle's list on into Play.
+       */
+      if (kind === "radio") {
+        const started =
+          artist.radioId && artist.radioSeed
+            ? await transport.playMix(
+                { playlistId: artist.radioId, videoId: artist.radioSeed, params: artist.radioParams },
+                `${artist.name} radio`,
+              )
+            : { result: "failed" };
+        if (started.result !== "ok") toast("Could not start this artist's radio.");
+        return;
+      }
+      const origin = `${artist.name} · Shuffle`;
+      /*
+       * YouTube's shuffle keeps going for as long as the artist has songs.
+       * A small artist's can be three long, after which autoplay drifts to
+       * other artists — so a short one is replaced by a shuffle of the
+       * artist's own song list, when that list is the longer of the two.
+       */
+      const mix =
+        artist.shuffleId && artist.shuffleSeed
+          ? { playlistId: artist.shuffleId, videoId: artist.shuffleSeed, params: artist.shuffleParams }
+          : null;
+      const started = mix ? await transport.playMix(mix, origin, SHUFFLE_MIN) : { result: "short" as const, tracks: 0 };
+      if (started.result === "ok") return;
+      const songs = shuffled(await artistSongs(artist));
+      if (mix && started.result === "short" && songs.length < (started.tracks ?? 0)) {
+        if ((await transport.playMix(mix, origin)).result === "ok") return;
+      }
+      if (songs.length === 0) toast("Could not shuffle this artist.");
+      else transport.play(songs, 0, origin);
     } finally {
       setStarting(null);
     }
   };
-  const canShuffle = Boolean(data.shuffleId && data.shuffleSeed);
+  const canShuffle = Boolean((data.shuffleId && data.shuffleSeed) || data.songsId || top.length > 1);
   const canRadio = Boolean(data.radioId && data.radioSeed);
 
   return (

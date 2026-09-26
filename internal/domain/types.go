@@ -140,10 +140,12 @@ type Artist struct {
 	// which YouTube Music's own Mix button plays. ShuffleID (RDAO…) is a
 	// shuffle of the Artist's own songs. Each list starts from a song, its
 	// seed, and YouTube will not produce either without it.
-	RadioID     string `json:"radioId,omitempty"`
-	RadioSeed   string `json:"radioSeed,omitempty"`
-	ShuffleID   string `json:"shuffleId,omitempty"`
-	ShuffleSeed string `json:"shuffleSeed,omitempty"`
+	RadioID       string `json:"radioId,omitempty"`
+	RadioSeed     string `json:"radioSeed,omitempty"`
+	RadioParams   string `json:"radioParams,omitempty"`
+	ShuffleID     string `json:"shuffleId,omitempty"`
+	ShuffleSeed   string `json:"shuffleSeed,omitempty"`
+	ShuffleParams string `json:"shuffleParams,omitempty"`
 
 	// SongsID is the playlist of all of the Artist's songs that the Top songs
 	// heading links to, most played first. Empty when YouTube offers none.
@@ -217,6 +219,16 @@ type ShelfItem struct {
 	Playlist *Playlist     `json:"playlist,omitempty"`
 	Podcast  *Podcast      `json:"podcast,omitempty"`
 	Episode  *Episode      `json:"episode,omitempty"`
+}
+
+// MixSeed names one of YouTube's generated queues: the list, the song it
+// starts from, and the opaque params its button sends. The params select
+// the list's behaviour — without them an artist's shuffle intermittently
+// came back as a generic radio.
+type MixSeed struct {
+	VideoID    string `json:"videoId"`
+	PlaylistID string `json:"playlistId"`
+	Params     string `json:"params,omitempty"`
 }
 
 // BrowseLink addresses a browse surface: an id, and the params some surfaces

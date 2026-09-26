@@ -1,7 +1,7 @@
 import type {
   Podcast,
   Track,
-  Album, Artist, BrowsePage, Health, LibraryItem, Me, Playlist, SearchResults,
+  Album, Artist, BrowsePage, Health, LibraryItem, Me, MixSeed, Playlist, SearchResults,
 } from "./types";
 
 /**
@@ -89,8 +89,11 @@ export const api = {
   radio: (trackId: string, signal?: AbortSignal) =>
     get<Track[]>(`/radio/${encodeURIComponent(trackId)}`, signal),
   /** The first page of a named radio (an artist's mix or shuffle) starting at `seed`. */
-  mix: (seed: string, list: string, signal?: AbortSignal) =>
-    get<Track[]>(`/radio/${encodeURIComponent(seed)}?list=${encodeURIComponent(list)}`, signal),
+  mix: (mix: MixSeed, signal?: AbortSignal) =>
+    get<Track[]>(
+      `/radio/${encodeURIComponent(mix.videoId)}?list=${encodeURIComponent(mix.playlistId)}${mix.params ? `&params=${encodeURIComponent(mix.params)}` : ""}`,
+      signal,
+    ),
 };
 
 /**

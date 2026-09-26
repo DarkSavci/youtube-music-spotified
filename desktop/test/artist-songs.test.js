@@ -59,3 +59,26 @@ test('albums still missing a year are listed once, in order', () => {
   const years = yearsByAlbum([{ id: 'known', year: '1999' }]);
   assert.deepEqual(Array.from(missingAlbums([song('a', 'x'), song('b', 'known'), song('c', 'y'), song('d', 'x'), song('e', '')], years)), ['x', 'y']);
 });
+
+test('releases complete the list without repeating a song it has', () => {
+  const { withReleases } = load();
+  const list = [song('a', 'r1', '9M plays'), song('b', 'r2', '1M plays')];
+  const releases = [
+    { id: 'r1', title: 'One', tracks: [{ id: 'a', title: 'a' }, { id: 'a-video', title: 'A ', album: { id: 'r1', name: 'One' } }, { id: 'c', title: 'c' }] },
+    { id: 'r3', title: 'Three', tracks: [{ id: 'd', title: 'd' }, { id: 'c', title: 'c' }] },
+  ];
+  const out = withReleases(list, releases);
+  assert.deepEqual(ids(out), ['a', 'b', 'c', 'd']);
+  // A release's own songs are placed on it even when their rows omit it.
+  assert.equal(out[3].album.id, 'r3');
+});
+
+test('a shuffle keeps every song once', () => {
+  const { shuffled } = load();
+  const input = ['a', 'b', 'c', 'd', 'e'];
+  let n = 0;
+  const out = Array.from(shuffled(input, () => [0.9, 0.1, 0.5, 0.3][n++ % 4]));
+  assert.deepEqual([...out].sort(), input);
+  assert.notDeepEqual(out, input);
+  assert.deepEqual(input, ['a', 'b', 'c', 'd', 'e']);
+});

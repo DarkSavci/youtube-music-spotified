@@ -31,8 +31,8 @@ func (s *stubCatalog) RadioPage(ctx context.Context, seed, _ string) ([]domain.T
 	t, err := s.Radio(ctx, seed)
 	return t, "", err
 }
-func (s *stubCatalog) MixPage(ctx context.Context, seed, _, _ string) ([]domain.Track, string, error) {
-	t, err := s.Radio(ctx, seed)
+func (s *stubCatalog) MixPage(ctx context.Context, mix domain.MixSeed, _ string) ([]domain.Track, string, error) {
+	t, err := s.Radio(ctx, mix.VideoID)
 	return t, "", err
 }
 func (s *stubCatalog) Home(context.Context) (domain.BrowsePage, error) {

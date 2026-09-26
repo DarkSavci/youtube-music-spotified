@@ -50,7 +50,7 @@ func (b brokenCatalog) Radio(context.Context, string) ([]domain.Track, error) { 
 func (b brokenCatalog) RadioPage(context.Context, string, string) ([]domain.Track, string, error) {
 	return nil, "", b.err
 }
-func (b brokenCatalog) MixPage(context.Context, string, string, string) ([]domain.Track, string, error) {
+func (b brokenCatalog) MixPage(context.Context, domain.MixSeed, string) ([]domain.Track, string, error) {
 	return nil, "", b.err
 }
 func (b brokenCatalog) Podcast(context.Context, string) (domain.Podcast, error) {

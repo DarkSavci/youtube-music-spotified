@@ -9,7 +9,7 @@ import {
 import { EmbeddedEngine } from "./embedded";
 import { maxVolume, useSettings } from "./settings";
 import { SessionClient, type Projection } from "./sessionclient";
-import type { Artist, Track } from "./types";
+import type { Artist, MixSeed, Track } from "./types";
 import { currentPosition, interpolationRate, usePlayer } from "./player";
 import { effectiveSpeed, playableSpeed, type SpeedSupport } from "./speed";
 import { recordPlay } from "./playlog";
@@ -478,23 +478,30 @@ export const transport = {
    * the way a song's radio keeps going; a room, which the core does not
    * extend, gets the first page as a plain queue.
    *
-   * Resolves false when nothing could be played, so the caller can say so.
+   * Resolves "failed" when nothing could be played, and "short" when the
+   * list had fewer than minTracks songs (`tracks` of them), in which case
+   * nothing was played and the caller can play something fuller.
    */
-  async playMix(list: string, seed: string, origin: string): Promise<boolean> {
+  async playMix(
+    mix: MixSeed,
+    origin: string,
+    minTracks = 0,
+  ): Promise<{ result: "ok" | "short" | "failed"; tracks?: number }> {
     if (roomTransport || !serverAuthoritative || !session) {
       const { api } = await import("./api");
       let tracks: Track[];
       try {
-        tracks = (await api.mix(seed, list)).filter((t) => t.playable);
+        tracks = (await api.mix(mix)).filter((t) => t.playable);
       } catch {
-        return false;
+        return { result: "failed" };
       }
-      if (tracks.length === 0) return false;
+      if (tracks.length === 0) return { result: "failed" };
+      if (tracks.length < minTracks) return { result: "short", tracks: tracks.length };
       this.play(tracks, 0, origin);
-      return true;
+      return { result: "ok" };
     }
-    if (roomControlsLocked()) return true;
-    return session.startMix(list, seed, origin);
+    if (roomControlsLocked()) return { result: "ok" };
+    return session.startMix(mix, origin, minTracks);
   },
 
   /** Plays another entry of the queue, one already played included. */

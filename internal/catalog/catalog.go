@@ -73,7 +73,7 @@ type Catalog interface {
 	// MixPage is RadioPage for a queue YouTube names by playlist rather than
 	// by its seed: an artist's mix or shuffle. The seed is the song the list
 	// starts from.
-	MixPage(ctx context.Context, seedTrackID, playlistID, token string) (tracks []domain.Track, next string, err error)
+	MixPage(ctx context.Context, mix domain.MixSeed, token string) (tracks []domain.Track, next string, err error)
 }
 
 // filterParams maps a domain search filter to the opaque parameter the web

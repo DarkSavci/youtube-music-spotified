@@ -39,9 +39,9 @@ export interface Artist {
   /** Whether the signed-in account already follows this artist. */
   following?: boolean; monthlyListeners?: string;
   /** The artist's mix (their music and music like it) and the song it starts from. */
-  radioId?: string; radioSeed?: string;
-  /** A shuffle of the artist's own songs, and the song it starts from. */
-  shuffleId?: string; shuffleSeed?: string;
+  radioId?: string; radioSeed?: string; radioParams?: string;
+  /** A shuffle of the artist's own songs, the song it starts from, and its button's params. */
+  shuffleId?: string; shuffleSeed?: string; shuffleParams?: string;
   /** The playlist of all the artist's songs, most played first. */
   songsId?: string;
   topTracks?: Track[]; albums?: Album[]; singles?: Album[]; related?: Artist[];
@@ -50,6 +50,9 @@ export interface Artist {
 }
 
 export interface BrowseLink { id: string; params?: string }
+
+/** One of YouTube's generated queues: the list, its first song, its button's params. */
+export interface MixSeed { playlistId: string; videoId: string; params?: string }
 
 export interface Playlist {
   id: string; title: string; description?: string;

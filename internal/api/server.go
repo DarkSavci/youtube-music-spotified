@@ -491,7 +491,8 @@ func (s *Server) handleRadio(w http.ResponseWriter, r *http.Request) {
 	// ?list= names a generated queue other than the song's own radio (an
 	// artist's mix); the path is then the song that list starts from.
 	if list := r.URL.Query().Get("list"); list != "" {
-		tracks, _, err := s.deps.Catalog.MixPage(r.Context(), r.PathValue("id"), list, "")
+		mix := domain.MixSeed{VideoID: r.PathValue("id"), PlaylistID: list, Params: r.URL.Query().Get("params")}
+		tracks, _, err := s.deps.Catalog.MixPage(r.Context(), mix, "")
 		if err != nil {
 			s.fail(w, r, err)
 			return

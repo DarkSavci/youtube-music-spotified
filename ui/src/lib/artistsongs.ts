@@ -35,6 +35,44 @@ export function byPlays(tracks: Track[]): Track[] {
     .map((x) => x.t);
 }
 
+/** A shuffled copy (Fisher–Yates). `random` is injectable for tests. */
+export function shuffled<T>(items: T[], random: () => number = Math.random): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [out[i], out[j]] = [out[j] as T, out[i] as T];
+  }
+  return out;
+}
+
+const titleKey = (t: string) => t.toLowerCase().replace(/\s+/g, " ").trim();
+
+/**
+ * The songs list completed from the artist's releases.
+ *
+ * YouTube's list of an artist's songs stops at their most played 150 or so.
+ * The rest are on the releases themselves, so every release's tracks that
+ * the list does not already have are added after it. A song counts as
+ * already there by its id, or by its title on the same release — the list
+ * and the release page can name one recording by two videos.
+ */
+export function withReleases(tracks: Track[], releases: Album[]): Track[] {
+  const ids = new Set(tracks.map((t) => t.id));
+  const titles = new Set(tracks.map((t) => `${t.album?.id ?? ""}\u0000${titleKey(t.title)}`));
+  const out = [...tracks];
+  for (const release of releases) {
+    for (const t of release.tracks ?? []) {
+      const album = t.album?.id ? t.album : { id: release.id, name: release.title };
+      const key = `${album.id}\u0000${titleKey(t.title)}`;
+      if (ids.has(t.id) || titles.has(key)) continue;
+      ids.add(t.id);
+      titles.add(key);
+      out.push({ ...t, album });
+    }
+  }
+  return out;
+}
+
 /** Album id → release year, from every album list at hand. */
 export function yearsByAlbum(...lists: (Album[] | undefined)[]): Map<string, number> {
   const out = new Map<string, number>();

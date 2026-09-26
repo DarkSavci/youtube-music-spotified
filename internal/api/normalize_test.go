@@ -41,7 +41,7 @@ func (emptyCatalog) Radio(context.Context, string) ([]domain.Track, error) { ret
 func (emptyCatalog) RadioPage(context.Context, string, string) ([]domain.Track, string, error) {
 	return nil, "", nil
 }
-func (emptyCatalog) MixPage(context.Context, string, string, string) ([]domain.Track, string, error) {
+func (emptyCatalog) MixPage(context.Context, domain.MixSeed, string) ([]domain.Track, string, error) {
 	return nil, "", nil
 }
 func (emptyCatalog) Podcast(context.Context, string) (domain.Podcast, error) {

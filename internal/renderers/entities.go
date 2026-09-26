@@ -170,10 +170,10 @@ func ParseArtist(doc Node, id string, pc ParseContext) (domain.Artist, bool) {
 	 * theirs); playButton is YouTube's Shuffle (RDAO…, the artist's own songs).
 	 */
 	if mix := h.Child("startRadioButton").Child("buttonRenderer").Child("navigationEndpoint").Child("watchEndpoint"); mix != nil {
-		ar.RadioID, ar.RadioSeed = mix.Str("playlistId"), mix.Str("videoId")
+		ar.RadioID, ar.RadioSeed, ar.RadioParams = mix.Str("playlistId"), mix.Str("videoId"), mix.Str("params")
 	}
 	if shuffle := h.Child("playButton").Child("buttonRenderer").Child("navigationEndpoint").Child("watchEndpoint"); shuffle != nil {
-		ar.ShuffleID, ar.ShuffleSeed = shuffle.Str("playlistId"), shuffle.Str("videoId")
+		ar.ShuffleID, ar.ShuffleSeed, ar.ShuffleParams = shuffle.Str("playlistId"), shuffle.Str("videoId"), shuffle.Str("params")
 	}
 	if ar.ShuffleID == "" {
 		if shuffle := h.Child("shuffleEndpoint"); shuffle != nil {

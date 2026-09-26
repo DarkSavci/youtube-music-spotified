@@ -34,10 +34,10 @@ type autoplay struct {
 	// the listener starts does not continue the previous one's radio.
 	key  string
 	seed string
-	// list names the generated queue the radio pages come from when it is not
-	// the seed's own radio: an artist's mix or shuffle. Empty for a song's
+	// mix names the generated queue the radio pages come from when it is not
+	// the seed's own radio: an artist's mix or shuffle. Zero for a song's
 	// radio.
-	list  string
+	mix   domain.MixSeed
 	token string
 	// exhausted is set when a radio has no more pages.
 	exhausted bool
@@ -103,30 +103,30 @@ func (s *Server) topUp(ctx context.Context, p session.Projection) {
 	}
 	if key := queueKey(q); key != a.key {
 		// A queue autoplay has not seen: continue it from its last track.
-		a.key, a.seed, a.list, a.token, a.exhausted = key, q.Items[len(q.Items)-1].ID, "", "", false
+		a.key, a.seed, a.mix, a.token, a.exhausted = key, q.Items[len(q.Items)-1].ID, domain.MixSeed{}, "", false
 	}
 	if a.exhausted {
 		// The radio ran dry: start another from where the queue now ends.
-		a.seed, a.list, a.token, a.exhausted = q.Items[len(q.Items)-1].ID, "", "", false
+		a.seed, a.mix, a.token, a.exhausted = q.Items[len(q.Items)-1].ID, domain.MixSeed{}, "", false
 	}
 	a.busy = true
-	go s.extendRadio(ctx, a.key, a.seed, a.list, a.token)
+	go s.extendRadio(ctx, a.key, a.seed, a.mix, a.token)
 }
 
 // radioPage reads one page of either kind of radio.
-func (s *Server) radioPage(ctx context.Context, seed, list, token string) ([]domain.Track, string, error) {
-	if list != "" {
-		return s.deps.Catalog.MixPage(ctx, seed, list, token)
+func (s *Server) radioPage(ctx context.Context, seed string, mix domain.MixSeed, token string) ([]domain.Track, string, error) {
+	if mix.PlaylistID != "" {
+		return s.deps.Catalog.MixPage(ctx, mix, token)
 	}
 	return s.deps.Catalog.RadioPage(ctx, seed, token)
 }
 
 // extendRadio fetches a page of radio and appends what is new to the queue.
-func (s *Server) extendRadio(ctx context.Context, key, seed, list, token string) {
+func (s *Server) extendRadio(ctx context.Context, key, seed string, mix domain.MixSeed, token string) {
 	a := s.autoplay
 	fctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	tracks, next, err := s.radioPage(fctx, seed, list, token)
+	tracks, next, err := s.radioPage(fctx, seed, mix, token)
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -190,13 +190,18 @@ func (s *Server) handleStartRadio(w http.ResponseWriter, r *http.Request) {
 		// and the song it starts from.
 		PlaylistID string `json:"playlistId"`
 		VideoID    string `json:"videoId"`
+		Params     string `json:"params"`
+		// MinTracks refuses a named radio shorter than this without playing
+		// it, so the caller can play something fuller instead: a small
+		// artist's shuffle can be three songs long.
+		MinTracks int `json:"minTracks"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.write(w, http.StatusBadRequest, apiError{Error: "invalid body"})
 		return
 	}
 	if body.PlaylistID != "" && body.VideoID != "" {
-		s.startMix(w, r, body.DeviceID, body.VideoID, body.PlaylistID, body.Origin)
+		s.startMix(w, r, body.DeviceID, domain.MixSeed{VideoID: body.VideoID, PlaylistID: body.PlaylistID, Params: body.Params}, body.Origin, body.MinTracks)
 		return
 	}
 	if body.Track.ID == "" {
@@ -219,10 +224,10 @@ func (s *Server) handleStartRadio(w http.ResponseWriter, r *http.Request) {
 	q := s.deps.Session.Projection().State.Queue
 	a := s.autoplay
 	a.mu.Lock()
-	a.key, a.seed, a.list, a.token, a.exhausted, a.failedAt = queueKey(q), body.Track.ID, "", "", false, time.Time{}
+	a.key, a.seed, a.mix, a.token, a.exhausted, a.failedAt = queueKey(q), body.Track.ID, domain.MixSeed{}, "", false, time.Time{}
 	if !a.busy {
 		a.busy = true
-		go s.extendRadio(context.WithoutCancel(r.Context()), a.key, a.seed, "", "")
+		go s.extendRadio(context.WithoutCancel(r.Context()), a.key, a.seed, domain.MixSeed{}, "")
 	}
 	a.mu.Unlock()
 
@@ -240,10 +245,10 @@ Unlike a song's radio there is no song in hand to start at once: the list
 names its first song only by id. So the first page is fetched before playing,
 and later pages continue it the way a song's radio continues.
 */
-func (s *Server) startMix(w http.ResponseWriter, r *http.Request, deviceID, seed, list, origin string) {
+func (s *Server) startMix(w http.ResponseWriter, r *http.Request, deviceID string, mix domain.MixSeed, origin string, minTracks int) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	tracks, next, err := s.deps.Catalog.MixPage(ctx, seed, list, "")
+	tracks, next, err := s.deps.Catalog.MixPage(ctx, mix, "")
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -260,6 +265,10 @@ func (s *Server) startMix(w http.ResponseWriter, r *http.Request, deviceID, seed
 		s.write(w, http.StatusBadGateway, apiError{Error: "the radio came back empty"})
 		return
 	}
+	if len(queue) < minTracks {
+		s.write(w, http.StatusConflict, map[string]any{"error": "the radio is too short", "short": true, "tracks": len(queue)})
+		return
+	}
 	if origin == "" {
 		origin = "Radio"
 	}
@@ -274,7 +283,7 @@ func (s *Server) startMix(w http.ResponseWriter, r *http.Request, deviceID, seed
 	q := s.deps.Session.Projection().State.Queue
 	a := s.autoplay
 	a.mu.Lock()
-	a.key, a.seed, a.list, a.token, a.exhausted, a.failedAt = queueKey(q), seed, list, next, next == "", time.Time{}
+	a.key, a.seed, a.mix, a.token, a.exhausted, a.failedAt = queueKey(q), mix.VideoID, mix, next, next == "", time.Time{}
 	a.mu.Unlock()
 
 	s.write(w, http.StatusOK, map[string]any{
