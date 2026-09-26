@@ -323,6 +323,26 @@ test("accepting keeps only a few played songs, like adding does", () => {
   assert.equal(room.queue.at(-1).track.id, song(1).id);
   assert.equal(room.queue.findIndex((e) => e.id === room.current), 20);
 });
+test("a refused accept leaves the played songs where they were", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, {
+    kind: "enqueue",
+    tracks: Array.from({ length: 40 }, (_, n) => many(n)),
+  });
+  send(leader, { kind: "jump", entry: room.queue[30].id });
+  send(guest, { kind: "request", tracks: [many(35)] });
+  // Turned off after asking, so the accept is refused as a duplicate.
+  send(leader, { kind: "settings", duplicates: false });
+  const queue = room.queue,
+    revision = room.revision;
+  assert.throws(
+    () => send(leader, { kind: "acceptRequest", request: room.requests[0].id }),
+    /already in the queue/,
+  );
+  assert.equal(room.queue, queue);
+  assert.equal(room.queue.length, 40);
+  assert.equal(room.revision, revision);
+});
 test("an explicit accept lets a request in even past the guest's limit", () => {
   const { room, leader, guest, send } = setup({ mode: "contributions", limit: 5 });
   send(guest, { kind: "request", tracks: [song(1), song(2)] });

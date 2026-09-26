@@ -228,7 +228,9 @@ function acceptRequests(room, ids, placement, member, now) {
   let refusal = null;
   const accepted = [];
   // Like an addition, only a few played songs stay behind the current one,
-  // so the history does not count toward the 500-song cap.
+  // so the history does not count toward the 500-song cap. The trim is kept
+  // only if something is accepted: a refused accept leaves the room as it was.
+  const untrimmed = room.queue;
   const played = room.queue.findIndex((e) => e.id === room.current);
   if (played > 20) room.queue = room.queue.slice(played - 20);
   for (const requestId of ids) {
@@ -268,7 +270,10 @@ function acceptRequests(room, ids, placement, member, now) {
     room.requests = room.requests.filter((r) => r.id !== request.id);
     accepted.push(entry);
   }
-  if (!accepted.length) throw new Error(refusal || "Choose a request.");
+  if (!accepted.length) {
+    room.queue = untrimmed;
+    throw new Error(refusal || "Choose a request.");
+  }
   if (!room.current) {
     room.current = accepted[0].id;
     room.positionMs = 0;
