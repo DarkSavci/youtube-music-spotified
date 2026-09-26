@@ -70,6 +70,16 @@ export function RoomSettings({ room }: { room: RoomState }) {
           />
           Lock new joins
         </label>
+        {room.mode === "contributions" && (
+          <label className="room-check">
+            <input
+              type="checkbox"
+              checked={room.autoAccept}
+              onChange={(e) => settings({ autoAccept: e.target.checked })}
+            />
+            Add requests without asking me
+          </label>
+        )}
         <label className="room-check">
           <input
             type="checkbox"

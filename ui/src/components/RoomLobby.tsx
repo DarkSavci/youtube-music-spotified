@@ -23,7 +23,7 @@ export const roomPresets: {
   {
     id: "contributions",
     title: "Take requests",
-    description: "Friends add songs. You choose what plays and when.",
+    description: "Friends request songs. You approve what plays and when.",
   },
   {
     id: "listen",

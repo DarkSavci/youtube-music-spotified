@@ -105,6 +105,81 @@ export function roomCanControl() {
       room.members.find((m) => m.id === member)?.role === "dj")
   );
 }
+/**
+ * Whether songs this listener adds wait for the leader's approval: a guest in
+ * a "Take requests" room, unless the leader accepts everything.
+ */
+export function roomRequesting() {
+  const { room } = useTogether.getState();
+  return (
+    !!room &&
+    room.mode === "contributions" &&
+    !room.autoAccept &&
+    !roomCanControl()
+  );
+}
+/** Adds songs to the room, or asks for them where the leader approves. */
+export async function roomAddTracks(tracks: unknown[]) {
+  const requesting = roomRequesting();
+  const ok = await roomCommand({
+    kind: requesting ? "request" : "enqueue",
+    tracks,
+  });
+  if (ok && requesting)
+    toast(
+      tracks.length === 1
+        ? "Request sent. The leader decides what plays."
+        : `${tracks.length} requests sent. The leader decides what plays.`,
+    );
+  return ok;
+}
+// Requests this listener withdrew, so their disappearance is not reported
+// as the leader declining them.
+const cancelledRequests = new Set<string>();
+export async function cancelRoomRequest(request: string) {
+  cancelledRequests.add(request);
+  const ok = await roomCommand({ kind: "cancelRequest", request });
+  if (!ok) cancelledRequests.delete(request);
+  return ok;
+}
+/**
+ * Tells the leader about new requests, and a guest what became of theirs.
+ * Returns whether it said anything, so the same news is not toasted twice.
+ */
+function reportRequests(previous: RoomState, room: RoomState, member: string) {
+  let said = false;
+  const before = new Set((previous.requests ?? []).map((r) => r.id));
+  const answers =
+    room.owner === member ||
+    room.members.find((m) => m.id === member)?.role === "dj";
+  const arrived = (room.requests ?? []).filter(
+    (r) => !before.has(r.id) && r.by.id !== member,
+  );
+  const [first] = arrived;
+  if (answers && first) {
+    toast(
+      arrived.length === 1
+        ? `${first.by.name} requested “${first.track.title}”.`
+        : `${arrived.length} new song requests.`,
+    );
+    said = true;
+  }
+  const now = new Set((room.requests ?? []).map((r) => r.id));
+  for (const request of previous.requests ?? []) {
+    if (request.by.id !== member || now.has(request.id)) continue;
+    if (cancelledRequests.delete(request.id)) continue;
+    const accepted = [...room.queue, ...(room.history ?? [])].some(
+      (e) => e.request === request.id,
+    );
+    toast(
+      accepted
+        ? `“${request.track.title}” was added to the queue.`
+        : `Your request for “${request.track.title}” wasn’t added.`,
+    );
+    said = true;
+  }
+  return said;
+}
 /** The relay's clock, for countdowns and expiries it sets. */
 export function roomNow() {
   return client?.serverNow() ?? Date.now();
@@ -231,6 +306,8 @@ function denied(room: RoomState, kind: string, data: Record<string, unknown>) {
     return "Only the leader can change room settings.";
   if (roomCanControl()) return null;
   if (kind === "enqueue" && room.mode === "contributions") return null;
+  // A request has no position yet; the leader chooses where it goes.
+  if (kind === "enqueueNext" && roomRequesting()) return null;
   // With nothing after the current song, "next" is an ordinary append.
   if (kind === "enqueueNext" && room.mode === "contributions")
     return room.queue[room.queue.findIndex((e) => e.id === room.current) + 1]
@@ -294,6 +371,14 @@ function route(kind: string, data: Record<string, unknown> = {}) {
   if (Array.isArray(data.tracks) && data.tracks.length > 100) {
     command.tracks = data.tracks.slice(0, 100);
     toast("Using the first 100 songs. Add more in batches from your library.");
+  }
+  if (
+    (kind === "enqueue" || kind === "enqueueNext") &&
+    roomRequesting() &&
+    Array.isArray(command.tracks)
+  ) {
+    void roomAddTracks(command.tracks);
+    return true;
   }
   if (kind === "toggle") command = { kind: room.playing ? "pause" : "play" };
   if (kind === "jump" || kind === "remove")
@@ -419,8 +504,11 @@ export async function connectTogether(options: ConnectOptions) {
             revision: useVideo.getState().revision + 1,
           });
       }
+      const told =
+        !!previous && reportRequests(previous, room, useTogether.getState().member);
       if (
         previous &&
+        !told &&
         useRoomPreferences.getState().notifications &&
         previous.activity.at(-1)?.id !== room.activity.at(-1)?.id
       )

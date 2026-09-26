@@ -16,6 +16,7 @@ For remote access, put this listener behind an HTTPS reverse proxy that forwards
 
 - Persisted named server entries and selected server; 8-digit server-scoped PINs.
 - Collaborative, Contributions and Listen-only presets; leader/DJ/listener permissions.
+- Song requests in Contributions ("Take requests") rooms: a guest's additions wait in `requests` until the leader or a DJ accepts them (play next or add to queue) or declines them; guests may cancel their own. Waiting requests count toward the per-guest limit and duplicate rule, are rechecked on accept, do not move the room revision, and leave with their requester. `autoAccept` restores direct additions; switching to Collaborative accepts waiting requests and Listen-only clears them. A plain `enqueue` from a guest is treated as a request, so older apps keep working.
 - Shared canonical queue/timing, operation deduplication, stale command rejection and single server-side track advancement.
 - Member roster, contributor identity, playback reports, local resync and optional in-app activity notifications.
 - Lock joining, optional approval, kick plus PIN rotation, PIN rotation without interruption.

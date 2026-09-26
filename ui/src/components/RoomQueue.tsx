@@ -1,8 +1,18 @@
 import { useEffect, useState } from "react";
-import type { Entry, RoomState } from "../../../listen-together/client-v2.mjs";
+import type {
+  Entry,
+  RoomState,
+  SongRequest,
+} from "../../../listen-together/client-v2.mjs";
 import { api } from "../lib/api";
 import { useCreatePlaylist } from "../lib/playlists";
-import { roomCommand, roomNow } from "../lib/together";
+import {
+  cancelRoomRequest,
+  roomAddTracks,
+  roomCommand,
+  roomNow,
+  roomRequesting,
+} from "../lib/together";
 import { toast } from "../lib/toast";
 import {
   artistNames,
@@ -13,7 +23,14 @@ import {
 import { Artwork } from "./Artwork";
 import { usePrompt } from "./Prompt";
 import { RoomAvatar } from "./RoomAvatar";
-import { IconClose, IconPlay, IconPlus, IconQueue, IconSearch } from "./Icon";
+import {
+  IconCheckCircle,
+  IconClose,
+  IconPlay,
+  IconPlus,
+  IconQueue,
+  IconSearch,
+} from "./Icon";
 
 function EntryRow({
   entry,
@@ -32,6 +49,7 @@ function EntryRow({
   canAdd: boolean;
   history?: boolean;
 }) {
+  const requesting = roomRequesting();
   return (
     <li
       className={`room-track ${entry.id === room.current && !history ? "room-track--current" : ""}`}
@@ -56,11 +74,13 @@ function EntryRow({
         canAdd && (
           <button
             className="iconbtn"
-            title="Add to queue"
-            aria-label={`Add ${entry.track.title} to queue`}
-            onClick={() =>
-              void roomCommand({ kind: "enqueue", tracks: [entry.track] })
+            title={requesting ? "Request" : "Add to queue"}
+            aria-label={
+              requesting
+                ? `Request ${entry.track.title}`
+                : `Add ${entry.track.title} to queue`
             }
+            onClick={() => void roomAddTracks([entry.track])}
           >
             <IconPlus />
           </button>
@@ -97,6 +117,108 @@ function EntryRow({
         </>
       )}
     </li>
+  );
+}
+
+/**
+ * Songs waiting for approval. The leader and DJs answer them; a guest sees
+ * their own, and may withdraw them.
+ */
+function RoomRequests({
+  room,
+  member,
+  answers,
+}: {
+  room: RoomState;
+  member: string;
+  answers: boolean;
+}) {
+  const requests = (room.requests ?? []).filter(
+    (r) => answers || r.by.id === member,
+  );
+  if (!requests.length) return null;
+  const answer = (kind: string, ids: string[], placement?: string) =>
+    void roomCommand({ kind, requests: ids, placement });
+  const row = (r: SongRequest) => (
+    <li key={r.id} className="room-track room-request">
+      <Artwork
+        src={artworkAtLeast(r.track.artwork, 80)}
+        className="room-track__art"
+        alt=""
+      />
+      <span className="room-track__meta">
+        <strong>{r.track.title}</strong>
+        <span>
+          {answers
+            ? `${artistNames(r.track.artists)} · from ${r.by.name}`
+            : artistNames(r.track.artists)}
+        </span>
+      </span>
+      {answers ? (
+        <>
+          <span className="room-track__by" title={`Requested by ${r.by.name}`}>
+            <RoomAvatar member={r.by} small />
+          </span>
+          <button
+            className="room-textbtn"
+            onClick={() => answer("acceptRequest", [r.id], "next")}
+          >
+            Play next
+          </button>
+          <button
+            className="room-textbtn"
+            onClick={() => answer("acceptRequest", [r.id], "end")}
+          >
+            Add to queue
+          </button>
+          <button
+            className="iconbtn"
+            title="Decline"
+            aria-label={`Decline ${r.track.title} from ${r.by.name}`}
+            onClick={() => answer("declineRequest", [r.id])}
+          >
+            <IconClose size={18} />
+          </button>
+        </>
+      ) : (
+        <>
+          <span className="room-request__status">Pending</span>
+          <button
+            className="room-textbtn"
+            aria-label={`Cancel your request for ${r.track.title}`}
+            onClick={() => void cancelRoomRequest(r.id)}
+          >
+            Cancel
+          </button>
+        </>
+      )}
+    </li>
+  );
+  return (
+    <section className="room-requests" aria-label="Song requests">
+      <header>
+        <h3>
+          {answers ? "Requests" : "Your requests"}{" "}
+          <span>{requests.length}</span>
+        </h3>
+        {answers && requests.length > 1 && (
+          <button
+            className="room-textbtn"
+            onClick={() =>
+              answer(
+                "acceptRequest",
+                requests.map((r) => r.id),
+                "end",
+              )
+            }
+          >
+            <IconCheckCircle size={16} />
+            Accept all
+          </button>
+        )}
+      </header>
+      <ul className="room-tracklist">{requests.map(row)}</ul>
+    </section>
   );
 }
 
@@ -161,6 +283,11 @@ export function RoomQueue({
   );
   // Same rule as the relay: in a listen-only room only controllers add.
   const canAdd = control || room.mode === "contributions";
+  const requesting = roomRequesting();
+  const answers =
+    room.owner === member ||
+    room.members.find((m) => m.id === member)?.role === "dj";
+  const waiting = answers ? (room.requests ?? []).length : 0;
   // The relay lets the person who made an edit, or the leader, undo it for
   // ten seconds; the offer disappears when it would be refused.
   const undo = room.undo;
@@ -225,6 +352,14 @@ export function RoomQueue({
                 : t === "history"
                   ? "History"
                   : "Activity"}
+              {t === "queue" && waiting > 0 && (
+                <span
+                  className="room-badge"
+                  aria-label={`${waiting} waiting ${waiting === 1 ? "request" : "requests"}`}
+                >
+                  {waiting}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -243,8 +378,14 @@ export function RoomQueue({
             <label className="room-search">
               <IconSearch size={20} />
               <input
-                aria-label="Find songs to add"
-                placeholder="Find a song to add to the room"
+                aria-label={
+                  requesting ? "Find songs to request" : "Find songs to add"
+                }
+                placeholder={
+                  requesting
+                    ? "Find a song to request from the leader"
+                    : "Find a song to add to the room"
+                }
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -280,18 +421,18 @@ export function RoomQueue({
                   </span>
                   <button
                     className="room-secondary"
-                    onClick={() =>
-                      void roomCommand({ kind: "enqueue", tracks: [t] })
-                    }
+                    onClick={() => void roomAddTracks([t])}
                   >
                     <IconPlus size={18} />
-                    Add
+                    {requesting ? "Request" : "Add"}
                   </button>
                 </li>
               ))}
             </ul>
           ) : (
-            <ul className="room-tracklist">
+            <>
+              <RoomRequests room={room} member={member} answers={answers} />
+              <ul className="room-tracklist">
               {room.queue
                 .slice(activeIndex)
                 .map((e, i) => row(e, activeIndex + i))}
@@ -301,7 +442,8 @@ export function RoomQueue({
                   <p>Good music starts with one song.</p>
                 </li>
               )}
-            </ul>
+              </ul>
+            </>
           )}
         </>
       )}
