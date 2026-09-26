@@ -536,7 +536,10 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upstream unreachable", http.StatusBadGateway)
 		return
 	}
-	defer func() { _ = resp.Body.Close() }()
+	// The body is bound now, not read from resp when the function returns:
+	// the retry below reassigns resp, to nil when it cannot connect, and a
+	// deferred resp.Body then panicked on every such request.
+	defer closeBody(resp.Body)
 
 	/*
 	 * A 403 means the URL went stale, not that the track is gone.
@@ -568,7 +571,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "upstream unreachable", http.StatusBadGateway)
 			return
 		}
-		defer func() { _ = resp.Body.Close() }()
+		defer closeBody(resp.Body)
 
 		// One retry only. A second 403 is a real refusal — the account, the
 		// track or the address — and retrying further would hang the player
@@ -595,6 +598,8 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		s.deps.Log.Debug("stream copy ended", "video", videoID, "err", err)
 	}
 }
+
+func closeBody(body io.Closer) { _ = body.Close() }
 
 const browserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
 	"(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"

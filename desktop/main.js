@@ -554,6 +554,25 @@ function installMacMenu() {
   ]));
 }
 
+/*
+ * YouTube's embedded player refuses to start without a Referer (error 153,
+ * "video player configuration error"). The packaged window is a file:// page,
+ * which sends none, so every track failed in the embedded engine there. The
+ * frame's requests get the https origin YouTube expects; one that already
+ * carries a Referer (the dev server's http:// page) is left alone.
+ */
+const EMBED_URLS = ["https://www.youtube.com/embed/*", "https://www.youtube-nocookie.com/embed/*"];
+const EMBED_REFERER = "https://github.com/DarkSavci/youtube-music-spotified";
+
+function isEmbedRequest(url) {
+  return /^https:\/\/www\.youtube(-nocookie)?\.com\/embed\//.test(url);
+}
+
+function withEmbedReferer(headers) {
+  const has = Object.keys(headers).some((k) => k.toLowerCase() === "referer" && headers[k]);
+  return has ? headers : { ...headers, Referer: EMBED_REFERER };
+}
+
 /* ---------- lifecycle ---------- */
 
 // A second launch should focus the running window rather than starting a
@@ -575,10 +594,12 @@ if (!app.requestSingleInstanceLock()) {
     // Adding the header here also covers <video> requests, which cannot set
     // headers themselves. Embedded frames (YouTube's player) share the
     // session, so the header goes only on the app windows' own documents.
-    // Electron keeps one listener per event: registering another replaces it.
+    // Electron keeps one listener per event: registering another replaces it,
+    // which is why the YouTube embed's Referer is handled here too.
     session.defaultSession.webRequest.onBeforeSendHeaders(
-      { urls: [`http://${CORE_HOST}:${CORE_PORT}/*`] },
+      { urls: [`http://${CORE_HOST}:${CORE_PORT}/*`, ...EMBED_URLS] },
       (details, callback) => {
+        if (isEmbedRequest(details.url)) return callback({ requestHeaders: withEmbedReferer(details.requestHeaders) });
         const own = details.webContents && appContents.has(details.webContents.id) && details.frame && !details.frame.parent;
         if (!own) return callback({});
         callback({ requestHeaders: { ...details.requestHeaders, "X-Spotifier-Client": CLIENT_TOKEN } });

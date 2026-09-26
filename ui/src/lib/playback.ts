@@ -7,6 +7,7 @@ import {
   type Target,
 } from "./engine";
 import { EmbeddedEngine } from "./embedded";
+import { failureLadder } from "./fallback";
 import { maxVolume, useSettings } from "./settings";
 import { SessionClient, type Projection } from "./sessionclient";
 import type { Track } from "./types";
@@ -68,22 +69,49 @@ let session: SessionClient | null = null;
 let serverAuthoritative = false;
 
 /**
- * Consecutive resolution failures before falling back to the embedded engine.
- *
- * One failure is an unavailable track and skipping is correct. Several in a row
- * means the resolver itself is broken — an upstream player change, an expired
- * session, a blocked address — and continuing to skip would silently race to
- * the end of the queue. Falling back keeps music playing at reduced
- * capability, which is far better than a player that quietly does nothing.
+ * Failures on distinct tracks before falling back to the embedded engine; see
+ * lib/fallback.ts. Two, so the swap happens before the core's own limit of
+ * three pauses the queue: the third track then plays on the embedded player.
+ * Falling back keeps music playing at reduced capability, which is far better
+ * than a player that quietly does nothing.
  */
-const FALLBACK_AFTER_FAILURES = 3;
-let consecutiveFailures = 0;
-let fellBack = false;
+const FALLBACK_AFTER_FAILURES = 2;
+/** How long playback stays on the fallback before the native engine is retried. */
+const RETRY_NATIVE_AFTER_MS = 10 * 60_000;
+const ladder = failureLadder(FALLBACK_AFTER_FAILURES, RETRY_NATIVE_AFTER_MS);
+const FALLBACK_NOTICE =
+  "Tracks kept failing to load, so playback switched to YouTube’s embedded player. The equaliser and crossfade are off for now.";
+/** The epoch of the last target, to notice track changes; see retryNativeAtTrackChange(). */
+let targetEpoch: number | null = null;
+
+/** Swaps to the embedded engine after repeated failures, and says so. */
+function fallBack() {
+  console.warn("[playback] falling back to the embedded engine");
+  swapEngine();
+  if (serverAuthoritative && session) session.setCapabilities(engine!.capabilities);
+  usePlayer.setState({ notice: FALLBACK_NOTICE });
+}
+
+/**
+ * Leaves the fallback at a track boundary once it has been in use a while, so
+ * a passing outage does not cost the native engine for the rest of the day.
+ * If the resolver is still broken, two more failures fall back again.
+ */
+function retryNativeAtTrackChange(epoch: number) {
+  if (epoch === targetEpoch) return;
+  targetEpoch = epoch;
+  if (!ladder.retryNative()) return;
+  if (useSettings.getState().enginePreference === "embedded") return;
+  console.info("[playback] retrying the native engine");
+  swapEngine();
+  if (serverAuthoritative && session) session.setCapabilities(engine!.capabilities);
+  if (usePlayer.getState().notice === FALLBACK_NOTICE) usePlayer.setState({ notice: null });
+}
 
 /** Builds the engine the settings ask for, or the best available. */
 function createEngine(): Engine {
   const preference = useSettings.getState().enginePreference;
-  if (preference === "embedded" || fellBack) {
+  if (preference === "embedded" || ladder.fellBack) {
     usePlayer.setState({ engineEq: false });
     return new EmbeddedEngine(onEngineEvent);
   }
@@ -206,16 +234,15 @@ function onEngineEvent(e: EngineEvent) {
       return;
     }
     if (e.kind === "failed") {
-      usePlayer.setState({ notice: usePlayer.getState().followingRoom ? "This track could not play on your account. Waiting for the room’s next track." : null });
-      consecutiveFailures += 1;
-      if (consecutiveFailures >= FALLBACK_AFTER_FAILURES && !fellBack) {
-        console.warn("[playback] falling back to the embedded engine");
-        fellBack = true;
-        swapEngine();
-        session.setCapabilities(engine!.capabilities);
+      const step = ladder.failed(e.epoch);
+      if (step === "fallback") fallBack();
+      else if (usePlayer.getState().followingRoom) {
+        usePlayer.setState({ notice: "This track could not play on your account. Waiting for the room’s next track." });
+      } else if (step === "counted" && usePlayer.getState().notice !== FALLBACK_NOTICE) {
+        usePlayer.setState({ notice: null });
       }
     } else if (e.kind === "loaded") {
-      consecutiveFailures = 0;
+      ladder.loaded();
     }
     return;
   }
@@ -226,7 +253,7 @@ function onEngineEvent(e: EngineEvent) {
   const store = usePlayer.getState();
   switch (e.kind) {
     case "loaded":
-      consecutiveFailures = 0;
+      ladder.loaded();
       usePlayer.setState((s) => ({
         state: "playing",
         track: s.track && e.durationMs > 0 && !s.track.durationMs
@@ -279,14 +306,9 @@ function onEngineEvent(e: EngineEvent) {
       console.warn("[playback] track failed:", e.reason);
       closeOutCurrent(false, e.reason);
 
-      consecutiveFailures += 1;
-      if (consecutiveFailures >= FALLBACK_AFTER_FAILURES && !fellBack) {
-        // Repeated failures mean the resolver is broken rather than the track.
-        // Degrade to the embedded engine instead of skipping to the end.
-        console.warn("[playback] falling back to the embedded engine");
-        fellBack = true;
-        swapEngine();
-      }
+      // Repeated failures mean the resolver is broken rather than the track.
+      // Degrade to the embedded engine instead of skipping to the end.
+      if (ladder.failed(e.epoch) === "fallback") fallBack();
       usePlayer.setState((s) => ({
         queue: s.queue.map((t, i) => (i === s.index ? { ...t, playable: false } : t)),
       }));
@@ -334,6 +356,7 @@ function applyProjection(p: Projection) {
     },
   });
 
+  retryNativeAtTrackChange(p.target.Epoch);
   if (engine) {
     engine.apply({
       epoch: p.target.Epoch,
@@ -375,6 +398,7 @@ export function startPlayback() {
   const sync = () => {
     if (!engine) return;
     const target = deriveTarget();
+    retryNativeAtTrackChange(target.epoch);
     // Only reconcile when something meaningful changed; a Target is
     // idempotent but re-applying it on every store write would thrash the
     // media element.
@@ -648,8 +672,8 @@ export function stopPlayback() {
   engine?.destroy();
   engine = null;
   lastTargetKey = "";
-  consecutiveFailures = 0;
-  fellBack = false;
+  ladder.reset();
+  targetEpoch = null;
 }
 
 /** Which engine is producing sound, for the diagnostics panel. */

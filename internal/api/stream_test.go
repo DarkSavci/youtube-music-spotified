@@ -166,6 +166,55 @@ func TestStreamGivesUpAfterOneRetry(t *testing.T) {
 	}
 }
 
+// refusedThenUnreachableResolver hands out a URL that is refused, then one on
+// a port nothing listens on, so the retry after the 403 fails to connect.
+type refusedThenUnreachableResolver struct {
+	base  string
+	calls atomic.Int32
+}
+
+func (r *refusedThenUnreachableResolver) Name() string { return "refused-then-unreachable" }
+
+func (r *refusedThenUnreachableResolver) Resolve(_ context.Context, videoID string) (domain.Stream, resolver.Quality, error) {
+	url := r.base + "/media"
+	if r.calls.Add(1) > 1 {
+		url = "http://127.0.0.1:1/media"
+	}
+	return domain.Stream{
+		Kind:      domain.StreamURL,
+		VideoID:   videoID,
+		URL:       url,
+		MimeType:  `audio/webm; codecs="opus"`,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}, resolver.Quality{}, nil
+}
+
+// The retry after a 403 can fail outright. The relay used to close the first
+// response's body in a deferred closure that read the variable the retry had
+// overwritten with nil, so this panicked on every such request and the client
+// got a dropped connection instead of an answer.
+func TestStreamAnswersWhenTheRetryAfterARefusalCannotConnect(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer upstream.Close()
+
+	srv := httptest.NewServer(api.New(api.Deps{
+		Recorder: obs.NewRecorder(),
+		Resolver: &refusedThenUnreachableResolver{base: upstream.URL},
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/stream/abc123")
+	if err != nil {
+		t.Fatalf("request failed (the handler panicked?): %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 for an upstream that cannot be reached", resp.StatusCode)
+	}
+}
+
 // An unbounded request is what upstream refuses and what every media element
 // sends first, so the relay must never forward one.
 func TestBoundedRangeNeverAsksForAWholeFile(t *testing.T) {
