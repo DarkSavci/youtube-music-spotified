@@ -54,8 +54,32 @@ func ParseAlbum(doc Node, id string, pc ParseContext) (domain.Album, bool) {
 		return domain.Album{}, false
 	}
 	al.Artwork = headerArtwork(h)
-	al.Description = textOf(h.Child("description"))
+	al.ArtistArtwork = artworkOf(Find(h.Child("straplineThumbnail"), "thumbnails"))
+	al.Description = headerDescription(h)
 	al.Explicit = IsExplicit(h)
+
+	// The subtitle opens with the release type: "Album", "Single" or "EP".
+	for _, r := range h.Child("subtitle").Nodes("runs") {
+		text := strings.TrimSpace(r.Str("text"))
+		if text == "" || isSeparator(text) {
+			continue
+		}
+		if !isYear(text) && !strings.Contains(strings.ToLower(text), "song") {
+			al.Type = text
+		}
+		break
+	}
+
+	// straplineTextOne is the artist line and nothing else, so every name on it
+	// is an artist even without a link. Compilations credit "Various Artists"
+	// as plain text, and requiring a link left those albums with no byline.
+	for _, r := range h.Child("straplineTextOne").Nodes("runs") {
+		text := strings.TrimSpace(r.Str("text"))
+		if text == "" || isSeparator(text) {
+			continue
+		}
+		al.Artists = appendArtist(al.Artists, domain.ArtistRef{ID: artistRunID(r), Name: text})
+	}
 
 	for _, r := range headerSubtitleRuns(h) {
 		text := strings.TrimSpace(r.Str("text"))
@@ -66,7 +90,7 @@ func ParseAlbum(doc Node, id string, pc ParseContext) (domain.Album, bool) {
 		browseID := be.Str("browseId")
 		switch {
 		case strings.HasPrefix(browseID, "UC"), strings.Contains(be.PageType(), "ARTIST"):
-			al.Artists = append(al.Artists, domain.ArtistRef{ID: browseID, Name: text})
+			al.Artists = appendArtist(al.Artists, domain.ArtistRef{ID: browseID, Name: text})
 		case isYear(text):
 			al.Year = text
 		case strings.Contains(strings.ToLower(text), "song"):
@@ -99,7 +123,48 @@ func ParseAlbum(doc Node, id string, pc ParseContext) (domain.Album, bool) {
 	for _, t := range al.Tracks {
 		al.DurationMs += t.DurationMs
 	}
+	// Carousels under the track list, such as "Releases for you".
+	for _, n := range FindAll(doc, NodeCarousel) {
+		if sh, ok := ParseShelf(n, NodeCarousel, pc); ok {
+			al.Shelves = append(al.Shelves, sh)
+		}
+	}
 	return al, true
+}
+
+// headerDescription reads a header's description, which is either text runs
+// directly or, on album pages, wrapped in a musicDescriptionShelfRenderer.
+func headerDescription(h Node) string {
+	d := h.Child("description")
+	if s := textOf(d); s != "" {
+		return s
+	}
+	return textOf(d.Child("musicDescriptionShelfRenderer").Child("description"))
+}
+
+// artistRunID returns the channel a run links to, or "" when it links to
+// something other than an artist or to nothing.
+func artistRunID(r Node) string {
+	be := r.Child("navigationEndpoint").Child("browseEndpoint")
+	id := be.Str("browseId")
+	if strings.HasPrefix(id, "UC") || strings.Contains(be.PageType(), "ARTIST") {
+		return id
+	}
+	return ""
+}
+
+// appendArtist adds a credit unless the same name is already listed, since
+// older header layouts repeat the artist on more than one line.
+func appendArtist(list []domain.ArtistRef, a domain.ArtistRef) []domain.ArtistRef {
+	for i, have := range list {
+		if strings.EqualFold(have.Name, a.Name) {
+			if have.ID == "" {
+				list[i].ID = a.ID
+			}
+			return list
+		}
+	}
+	return append(list, a)
 }
 
 // ---------- artist ----------

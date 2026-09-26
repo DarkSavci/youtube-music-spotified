@@ -111,6 +111,14 @@ type Album struct {
 	Description   string      `json:"description,omitempty"`
 	Explicit      bool        `json:"explicit"`
 	Tracks        []Track     `json:"tracks,omitempty"`
+	// Type is the release type as YouTube labels it: "Album", "Single", "EP".
+	// Empty where the source does not say.
+	Type string `json:"type,omitempty"`
+	// ArtistArtwork is the primary artist's picture, shown beside the byline.
+	ArtistArtwork ArtworkSet `json:"artistArtwork,omitempty"`
+	// Shelves are the carousels under the track list, such as "Releases for
+	// you". Only an album page has them.
+	Shelves []Shelf `json:"shelves,omitempty"`
 }
 
 // Artist is a performer with a YouTube Music page. ID is the channel identifier.

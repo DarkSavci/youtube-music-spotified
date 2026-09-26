@@ -111,6 +111,7 @@ func normalizeAlbum(a domain.Album) domain.Album {
 	a.Tracks = nonNilTracks(a.Tracks)
 	a.Artists = nonNilArtistRefs(a.Artists)
 	a.Artwork = art(a.Artwork)
+	a.Shelves = nonNilShelves(a.Shelves)
 	return a
 }
 
