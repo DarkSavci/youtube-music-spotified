@@ -65,6 +65,8 @@ export interface RoomState {
   requests: SongRequest[];
   /** Guests' additions skip approval in a "Take requests" room. */
   autoAccept: boolean;
+  /** The last song ended with nothing after it; an added song starts at once. */
+  finished?: boolean;
 }
 export interface ConnectOptions {
   server: string;

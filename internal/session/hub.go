@@ -41,10 +41,14 @@ type Projection struct {
 	// the saved resume point with nothing.
 	PersonalResume *domain.Session `json:"-"`
 	FollowingRoom  bool            `json:"followingRoom"`
-	State          domain.Session  `json:"state"`
-	Target         Target          `json:"target"`
-	Devices        []Device        `json:"devices"`
-	Caps           Capabilities    `json:"capabilities"`
+	// Room is what this player knows about the room's current entry, which
+	// the room itself cannot: whether it played to the end here, and how
+	// long it really is. Nil outside a room.
+	Room    *RoomPlayback  `json:"room,omitempty"`
+	State   domain.Session `json:"state"`
+	Target  Target         `json:"target"`
+	Devices []Device       `json:"devices"`
+	Caps    Capabilities   `json:"capabilities"`
 }
 
 // LogSink receives play-log entries. Implemented by the Control plane; the Core
@@ -291,6 +295,7 @@ func (h *Hub) projectionLocked() Projection {
 	return Projection{
 		PersonalResume: personal,
 		FollowingRoom:  h.core.following,
+		Room:           h.core.roomPlayback(),
 		State:          state,
 		Target:         h.core.Target(),
 		Devices:        devices,

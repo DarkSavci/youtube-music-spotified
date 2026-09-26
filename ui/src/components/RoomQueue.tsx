@@ -12,6 +12,7 @@ import {
   roomCommand,
   roomNow,
   roomRequesting,
+  startRoomRadio,
 } from "../lib/together";
 import { toast } from "../lib/toast";
 import {
@@ -29,6 +30,7 @@ import {
   IconPlay,
   IconPlus,
   IconQueue,
+  IconRadio,
   IconSearch,
 } from "./Icon";
 
@@ -419,6 +421,20 @@ export function RoomQueue({
                     <strong>{t.title}</strong>
                     <span>{artistNames(t.artists)}</span>
                   </span>
+                  {control && (
+                    <button
+                      className="room-secondary"
+                      aria-label={`Play ${t.title} radio`}
+                      title="Play now, then its radio"
+                      onClick={() => {
+                        setQuery("");
+                        void startRoomRadio(t);
+                      }}
+                    >
+                      <IconRadio size={18} />
+                      Radio
+                    </button>
+                  )}
                   <button
                     className="room-secondary"
                     onClick={() => void roomAddTracks([t])}

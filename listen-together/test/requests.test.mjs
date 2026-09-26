@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { WebSocket } from "ws";
 import {
+  tick,
   makeRoom,
   addMember,
   command,
@@ -352,4 +353,19 @@ test("an explicit accept lets a request in even past the guest's limit", () => {
     requests: room.requests.map((r) => r.id),
   });
   assert.equal(room.queue.filter((e) => e.addedBy.id === guest.id).length, 2);
+});
+
+test("accepting a request after the queue ran out starts it", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [song(0)] });
+  send(leader, { kind: "play" });
+  const first = room.current;
+  assert.equal(tick(room, 12000), true);
+  assert.equal(room.finished, true);
+  send(guest, { kind: "request", tracks: [song(1)] });
+  send(leader, { kind: "acceptRequest", request: room.requests[0].id });
+  assert.equal(room.queue.find((e) => e.id === room.current).track.id, song(1).id);
+  assert.equal(room.playing, true);
+  assert.equal(room.finished, false);
+  assert.equal(room.history.at(-1).id, first);
 });

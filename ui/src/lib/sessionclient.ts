@@ -51,6 +51,7 @@ export interface SessionDevice {
 
 export interface Projection {
   followingRoom?: boolean;
+  room?: { entry: string; ended: boolean; durationMs: number };
   state: SessionState;
   target: SessionTarget;
   devices: SessionDevice[];

@@ -374,8 +374,16 @@ export function createRoomServerV2({
           ].includes(msg.status)
             ? msg.status
             : "connecting";
-          if (member.status !== status) {
+          // Which song the status is about, so "unavailable" for one song is
+          // not read as being about the next.
+          const statusEntry =
+            typeof msg.entry === "string" ? msg.entry.slice(0, 100) : null;
+          if (
+            member.status !== status ||
+            member.statusEntry !== statusEntry
+          ) {
             member.status = status;
+            member.statusEntry = statusEntry;
             broadcast(room);
           }
           return;

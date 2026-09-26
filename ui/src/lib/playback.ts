@@ -316,6 +316,7 @@ function applyProjection(p: Projection) {
   usePlayer.setState({
     outputElsewhere: remote,
     followingRoom: Boolean(p.followingRoom),
+    roomPlayback: p.room ?? null,
     state: p.state.state,
     track,
     queue: items,
@@ -470,7 +471,8 @@ export const transport = {
       if (!playing) this.toggle();
       return;
     }
-    if (routeRoom("replace", { tracks: [track] })) return;
+    // In a room too: the song, then its radio, for everyone.
+    if (routeRoom("radio", { track })) return;
     if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.startRadio(track, origin);
     else usePlayer.getState().playFrom([track], 0, origin ?? `${track.title} radio`);

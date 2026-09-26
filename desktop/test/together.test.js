@@ -29,6 +29,7 @@ async function setup(t) {
     index: 0,
     state: "paused",
     followingRoom: false,
+    roomPlayback: null,
     notice: null,
     anchor: { positionMs: 0, atMs: performance.now(), rate: 0 },
   }));
@@ -38,6 +39,8 @@ async function setup(t) {
     toasts = [],
     leaves = [];
   let route, hold;
+  const radio = { tracks: [], calls: [] };
+  const settings = create(() => ({ autoplay: true }));
   class Client {
     constructor(options) {
       Object.assign(this, options);
@@ -97,6 +100,16 @@ async function setup(t) {
         };
       if (n === "./video") return { useVideo: video };
       if (n === "./toast") return { toast: (m) => toasts.push(m) };
+      if (n === "./api")
+        return {
+          api: {
+            radio: async (id) => {
+              radio.calls.push(id);
+              return radio.tracks;
+            },
+          },
+        };
+      if (n === "./settings") return { useSettings: settings };
       if (n === "./playback")
         return {
           isServerAuthoritative: () => true,
@@ -149,6 +162,8 @@ async function setup(t) {
     toasts,
     leaves,
     route: (...args) => route(...args),
+    radio,
+    settings,
     hold: (p) => (hold = p),
     flush: () => new Promise((r) => setImmediate(r)),
   };
@@ -627,4 +642,257 @@ test("the leader is told about new requests once", async (t) => {
   c.onState(room(1, { ...base, requests: [request("a", "other", "Wish")] }));
   await h.flush();
   assert.deepEqual(h.toasts.slice(before), ["Friend requested “Wish”."]);
+});
+test("a song that ended here is not replayed; the room is told once instead", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  // One continuous timeline: the room keeps counting toward 180 s.
+  const at = Date.now() - 6000;
+  c.onState(room(1, { positionMs: 170000, at }));
+  await h.flush();
+  const synced = h.calls.length;
+  // The audio ran out a little before the catalogue length the room counts to.
+  h.player.setState({
+    state: "paused",
+    roomPlayback: { entry: "entry1", ended: true, durationMs: 176000 },
+    anchor: { positionMs: 176000, atMs: performance.now(), rate: 0 },
+  });
+  c.onState(room(2, { positionMs: 170000, at }));
+  await h.flush();
+  c.onState(room(3, { positionMs: 170000, at }));
+  await h.flush();
+  assert.equal(h.calls.length, synced, "the finished song was started again");
+  const ended = c.commands.filter((x) => x.kind === "ended");
+  assert.equal(ended.length, 1);
+  assert.equal(ended[0].current, "entry1");
+  assert.equal(h.api.useTogether.getState().sync, "Waiting for the next song");
+  // The measured length is offered to the room once as well.
+  const lengths = c.commands.filter((x) => x.kind === "duration");
+  assert.deepEqual(
+    lengths.map((x) => [x.entry, x.durationMs]),
+    [["entry1", 176000]],
+  );
+  // The next entry is followed as usual.
+  c.onState(room(4, { current: "entry2", positionMs: 0 }));
+  await h.flush();
+  assert.equal(h.calls.at(-1).track.id, "abcdefghij1");
+  assert.equal(h.calls.at(-1).playing, true);
+});
+test("playing a song's radio in a room plays the song, then adds its radio", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  const base = room(1);
+  c.onState(base);
+  await h.flush();
+  const seed = { ...base.queue[1].track, id: "seedseed000", title: "Seed" };
+  h.radio.tracks = [
+    seed,
+    { ...seed, id: "radio000001" },
+    { ...seed, id: "abcdefghij0" }, // already in the room
+    { ...seed, id: "radio000001" }, // listed twice
+    { ...seed, id: "radio000002", playable: false },
+    { ...seed, id: "radio000003" },
+  ];
+  // The relay applies the replace before the radio arrives.
+  c.command = function (cmd) {
+    this.commands.push(cmd);
+    if (cmd.kind === "replace")
+      this.onState(
+        room(2, {
+          current: "seedentry",
+          queue: [
+            ...base.queue,
+            { id: "seedentry", track: seed, addedBy: { id: "self" } },
+          ],
+          history: [],
+          limit: 50,
+        }),
+      );
+    return Promise.resolve(true);
+  };
+  assert.equal(h.route("radio", { track: seed }), true);
+  for (let i = 0; i < 5; i++) await h.flush();
+  const kinds = c.commands.map((x) => x.kind);
+  assert.deepEqual(kinds.slice(0, 2), ["replace", "enqueue"]);
+  assert.deepEqual(
+    c.commands[1].tracks.map((x) => x.id),
+    ["radio000001", "radio000003"],
+  );
+});
+test("radio that arrives after someone picked another song is dropped", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  c.onState({ ...room(1), history: [] });
+  await h.flush();
+  const seed = { ...room().queue[1].track, id: "seedseed000" };
+  h.radio.tracks = [{ ...seed, id: "radio000001" }];
+  // The room never moves to the seed: someone else's choice won.
+  assert.equal(h.route("radio", { track: seed }), true);
+  for (let i = 0; i < 5; i++) await h.flush();
+  assert.deepEqual(
+    c.commands.map((x) => x.kind),
+    ["replace"],
+  );
+});
+test("only the leader tops a room up with radio, and only when it runs low", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  const old = Date.now() - 60000;
+  const low = (owner, revision) =>
+    room(revision, {
+      owner,
+      repeat: "off",
+      history: [],
+      queue: room().queue.map((e) => ({ ...e, addedAt: old })),
+    });
+  h.radio.tracks = [{ ...room().queue[0].track, id: "radio000001" }];
+  c.onState(low("other", 1));
+  for (let i = 0; i < 5; i++) await h.flush();
+  assert.equal(h.radio.calls.length, 0, "a guest added radio");
+  c.onState(low("self", 2));
+  for (let i = 0; i < 5; i++) await h.flush();
+  assert.deepEqual(h.radio.calls, ["abcdefghij1"]);
+  const added = c.commands.filter((x) => x.kind === "enqueue");
+  assert.deepEqual(added.at(-1).tracks.map((x) => x.id), ["radio000001"]);
+  // The same last song is not fetched for again.
+  c.onState(low("self", 3));
+  for (let i = 0; i < 5; i++) await h.flush();
+  assert.equal(h.radio.calls.length, 1);
+  // Autoplay off, or repeat on, adds nothing.
+  h.settings.setState({ autoplay: false });
+  const other = low("self", 4);
+  other.queue[1] = { ...other.queue[1], track: { ...other.queue[1].track, id: "differentid" } };
+  c.onState(other);
+  for (let i = 0; i < 5; i++) await h.flush();
+  assert.equal(h.radio.calls.length, 1);
+});
+test("an ignored end report is repeated while the room still plays the song", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  const at = Date.now() - 6000;
+  c.onState(room(1, { positionMs: 140000, at }));
+  await h.flush();
+  h.player.setState({
+    state: "paused",
+    roomPlayback: { entry: "entry1", ended: true, durationMs: 0 },
+  });
+  c.onState(room(2, { positionMs: 140000, at }));
+  await h.flush();
+  c.onState(room(3, { positionMs: 140000, at }));
+  await h.flush();
+  assert.equal(c.commands.filter((x) => x.kind === "ended").length, 1);
+  const realNow = Date.now;
+  Date.now = () => realNow() + 5500;
+  t.after(() => (Date.now = realNow));
+  c.onState(room(4, { positionMs: 140000, at }));
+  await h.flush();
+  assert.equal(c.commands.filter((x) => x.kind === "ended").length, 2);
+});
+test("lengths are reported by controllers only, and again for another media version", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  const at = Date.now();
+  const listen = (revision, patch = {}) =>
+    room(revision, { mode: "listen", positionMs: 1000, at, ...patch });
+  c.onState(listen(1));
+  await h.flush();
+  h.player.setState({
+    roomPlayback: { entry: "entry1", ended: false, durationMs: 176000 },
+  });
+  c.onState(listen(2));
+  await h.flush();
+  assert.equal(c.commands.filter((x) => x.kind === "duration").length, 0);
+  // As a DJ it reports, once.
+  const dj = (revision, patch) =>
+    listen(revision, {
+      members: [{ id: "self", name: "Self", role: "dj", connected: true }],
+      ...patch,
+    });
+  c.onState(dj(3));
+  await h.flush();
+  c.onState(dj(4));
+  await h.flush();
+  assert.equal(c.commands.filter((x) => x.kind === "duration").length, 1);
+  // The video version of the same entry is a different recording.
+  const video = room().queue.map((e) =>
+    e.id === "entry1"
+      ? { ...e, track: { ...e.track, id: "videoversn0", isVideo: true } }
+      : e,
+  );
+  c.onState(dj(5, { queue: video }));
+  await h.flush();
+  h.player.setState({
+    roomPlayback: { entry: "entry1", ended: false, durationMs: 190000 },
+  });
+  c.onState(dj(6, { queue: video }));
+  await h.flush();
+  const lengths = c.commands.filter((x) => x.kind === "duration");
+  assert.deepEqual(lengths.map((x) => x.durationMs), [176000, 190000]);
+});
+test("previous says whether it meant the start of the song or the song before", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  c.onState(room(1, { positionMs: 60000 }));
+  await h.flush();
+  h.route("previous");
+  await h.api.roomCommand({ kind: "previous" });
+  c.onState(room(2, { positionMs: 1000 }));
+  await h.flush();
+  await h.api.roomCommand({ kind: "previous" });
+  assert.deepEqual(
+    c.commands.filter((x) => x.kind === "previous").map((x) => x.restart),
+    [true, true, false],
+  );
+});
+test("status reports name the song they are about", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  c.onState(room(1));
+  await h.flush();
+  assert.ok(c.sent.some((m) => m.type === "status" && m.entry === "entry1"));
+});
+test("the leader does not add radio after handing the room over mid-fetch", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  const old = Date.now() - 60000;
+  const low = (owner, revision) =>
+    room(revision, {
+      owner,
+      repeat: "off",
+      history: [],
+      limit: 50,
+      queue: room().queue.map((e) => ({ ...e, addedAt: old })),
+    });
+  h.radio.tracks = [{ ...room().queue[0].track, id: "radio000001" }];
+  c.onState(low("self", 1));
+  // Hand over while the fetch is in flight: the stub answers on a later tick,
+  // so the new state lands first.
+  c.onState(low("other", 2));
+  for (let i = 0; i < 5; i++) await h.flush();
+  assert.equal(h.radio.calls.length, 1);
+  assert.equal(c.commands.filter((x) => x.kind === "enqueue").length, 0);
+});
+test("a guest in a room that takes requests requests the song they click", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  c.onState(room(1, { mode: "contributions", requests: [] }));
+  await h.flush();
+  const track = h.player.getState().track;
+  assert.equal(h.route("radio", { track }), true);
+  for (let i = 0; i < 3; i++) await h.flush();
+  assert.deepEqual(
+    c.commands.map((x) => x.kind),
+    ["request"],
+  );
+  assert.equal(h.radio.calls.length, 0);
 });
