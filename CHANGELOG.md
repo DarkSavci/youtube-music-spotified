@@ -2,6 +2,30 @@
 
 Every release of Youtube Music Spotified, newest first.
 
+## 0.2.0 — 2026-09-25
+
+### New
+
+- Choose playback speed on a slider with presets, as YouTube does
+- Playback speed
+- Open at login, off by default
+- Right-click the playing track in the bar for its menu
+- Play library items straight from the sidebar
+
+### Fixed
+
+- Make the speed panel's steps and focus work, and remote position hold
+- Stop the mini player shrinking past what its layouts can show
+- Give the mini player's speed control room in every shape
+- Interpolate at 1x while another device is playing
+- Repoint a login entry left by a moved install
+- Retry the liked list instead of giving up on the first failure
+- Keep the lyrics view's close button visible and its caption clear
+- Show media controls in the taskbar thumbnail
+- Align the Share label with the other context menu items
+- Give the What's new dialog a single, themed scrollbar
+
+
 ## 0.1.9 — 2026-09-25
 
 ### New
