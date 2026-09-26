@@ -197,3 +197,24 @@ func TestRoomQueueIsTheResumePoint(t *testing.T) {
 		t.Fatalf("room queue not persisted: %+v", restored)
 	}
 }
+
+func TestEmptyRoomKeepsTheSavedPersonalQueue(t *testing.T) {
+	// Leaving an empty room brings back the queue from before it, so quitting
+	// while in one must not wipe that queue from the resume point.
+	h := NewHub(clock.NewManual(), DefaultSettings(), nil)
+	h.core.Apply(Command{Kind: CmdPlay, Tracks: tracks(4), StartIndex: 2, Origin: "Mine"})
+	h.core.Apply(Command{Kind: CmdFollow})
+	store := &memResume{}
+	keeper := &Keeper{Store: store, UserID: 1}
+	keeper.save(context.Background(), h.Projection())
+	restored := LoadSnapshot(context.Background(), store, 1)
+	if restored == nil || len(restored.Tracks) != 4 || restored.Index != 2 || restored.Origin != "Mine" {
+		t.Fatalf("empty room wiped the personal queue: %+v", restored)
+	}
+	// Once the room has songs, those are the resume point.
+	h.core.Apply(Command{Kind: CmdFollow, Tracks: tracks(6), StartIndex: 1})
+	keeper.save(context.Background(), h.Projection())
+	if restored := LoadSnapshot(context.Background(), store, 1); restored == nil || len(restored.Tracks) != 6 || restored.Index != 1 {
+		t.Fatalf("room queue not persisted: %+v", restored)
+	}
+}

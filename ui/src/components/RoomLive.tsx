@@ -45,7 +45,7 @@ function LeaveDialog({
       </h2>
       <p>
         {owner
-          ? "Choose the next leader, or let us pick a connected listener. The room and queue stay together."
+          ? "Choose the next leader, or let us pick a connected listener. The room and queue stay together, and the music keeps playing here from the room’s queue."
           : "The music keeps playing from the room’s queue."}
       </p>
       {owner && (

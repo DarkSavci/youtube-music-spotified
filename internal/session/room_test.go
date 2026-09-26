@@ -172,3 +172,31 @@ func TestKeepingAnEmptyRoomQueueRestoresThePersonalOne(t *testing.T) {
 		t.Fatalf("empty room left nothing, personal queue should return: %+v", s)
 	}
 }
+
+func TestKeptRoomQueueHonoursShuffle(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 3)
+	c.Apply(Command{Kind: CmdSetShuffle, Shuffle: true})
+	room := tracks(8)
+	c.Apply(Command{Kind: CmdFollow, Tracks: room, StartIndex: 2, Playing: true})
+	epoch := c.State().Epoch
+	c.Apply(Command{Kind: CmdLeaveRoom, KeepQueue: true})
+	s := c.State()
+	if !s.Shuffle || s.Queue.Current().ID != room[2].ID || s.Epoch != epoch || len(s.Queue.Items) != 8 {
+		t.Fatalf("shuffle leave changed the song or lost tracks: %+v", s)
+	}
+	if s.Queue.Index != 0 {
+		t.Fatalf("shuffle is on but the kept queue is still in room order (index %d)", s.Queue.Index)
+	}
+	// Turning shuffle off must bring back the room's order.
+	c.Apply(Command{Kind: CmdSetShuffle, Shuffle: false})
+	s = c.State()
+	if s.Shuffle || s.Queue.Index != 2 || s.Queue.Current().ID != room[2].ID {
+		t.Fatalf("unshuffle did not restore room order: index %d", s.Queue.Index)
+	}
+	for i, tr := range s.Queue.Items {
+		if tr.ID != room[i].ID {
+			t.Fatalf("room order not restored at %d", i)
+		}
+	}
+}

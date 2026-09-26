@@ -164,8 +164,14 @@ func (k *Keeper) save(ctx context.Context, p Projection) {
 		return
 	}
 	// A room's queue is saved like any other: leaving a room carries on with
-	// its queue, so quitting mid-room reopens where the room was, too.
-	snap := snapshotOf(p.State)
+	// its queue, so quitting mid-room reopens where the room was, too. An
+	// empty room keeps the queue from before it instead: leaving one brings
+	// that queue back, so it must not be forgotten.
+	state := p.State
+	if p.FollowingRoom && len(state.Queue.Items) == 0 && p.PersonalResume != nil {
+		state = *p.PersonalResume
+	}
+	snap := snapshotOf(state)
 	if snap == nil {
 		// Nothing queued. Forget rather than leave a stale queue to come back
 		// after the listener has cleared it.

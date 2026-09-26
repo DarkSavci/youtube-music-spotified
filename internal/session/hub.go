@@ -36,11 +36,15 @@ type Device struct {
 // Projection is the state plus the target, which is everything a subscriber
 // needs to render and to reconcile its engine.
 type Projection struct {
-	FollowingRoom bool           `json:"followingRoom"`
-	State         domain.Session `json:"state"`
-	Target        Target         `json:"target"`
-	Devices       []Device       `json:"devices"`
-	Caps          Capabilities   `json:"capabilities"`
+	// PersonalResume is the queue from before the room, set only while
+	// following a room with nothing queued, so an empty room never replaces
+	// the saved resume point with nothing.
+	PersonalResume *domain.Session `json:"-"`
+	FollowingRoom  bool            `json:"followingRoom"`
+	State          domain.Session  `json:"state"`
+	Target         Target          `json:"target"`
+	Devices        []Device        `json:"devices"`
+	Caps           Capabilities    `json:"capabilities"`
 }
 
 // LogSink receives play-log entries. Implemented by the Control plane; the Core
@@ -278,12 +282,19 @@ func (h *Hub) projectionLocked() Projection {
 	if state.Degraded == nil {
 		state.Degraded = []domain.TrackFault{}
 	}
+	var personal *domain.Session
+	if h.core.following && len(state.Queue.Items) == 0 && h.core.beforeRoom != nil {
+		saved := *h.core.beforeRoom
+		saved.Volume = state.Volume
+		personal = &saved
+	}
 	return Projection{
-		FollowingRoom: h.core.following,
-		State:         state,
-		Target:        h.core.Target(),
-		Devices:       devices,
-		Caps:          h.core.Capabilities(),
+		PersonalResume: personal,
+		FollowingRoom:  h.core.following,
+		State:          state,
+		Target:         h.core.Target(),
+		Devices:        devices,
+		Caps:           h.core.Capabilities(),
 	}
 }
 

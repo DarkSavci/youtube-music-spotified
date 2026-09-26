@@ -160,6 +160,13 @@ func (c *Core) Apply(cmd Command) (Reject, []LogEntry) {
 				// stays and the engine keeps its audio.
 				c.beforeRoom = nil
 				c.beforeRoomUnshuffled = nil
+				// The kept queue is in room order. Honour the shuffle
+				// setting the way a new queue does, so the button and
+				// the order agree and turning it off restores room order.
+				c.unshuffled = nil
+				if c.state.Shuffle {
+					c.reshuffle(c.state.Queue.Index)
+				}
 				c.bump()
 				return RejectNone, nil
 			}
