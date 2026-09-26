@@ -159,13 +159,6 @@ export const SHORTCUTS: Shortcut[] = [
     run: (n) => n.toggleQueue(),
   },
   {
-    id: "repeat",
-    keys: "r",
-    label: "Cycle repeat",
-    group: "Playback",
-    run: () => transport.cycleRepeat(),
-  },
-  {
     id: "save",
     keys: "ctrl+s",
     label: "Save the current track",
@@ -187,16 +180,16 @@ export const SHORTCUTS: Shortcut[] = [
     run: (nav) => nav.forward(),
   },
   {
-    id: "home",
+    id: "home-alt",
     keys: "alt+shift+h",
     label: "Home",
     group: "Navigation",
     run: (nav) => nav.go("/"),
   },
   {
-    id: "search",
+    id: "search-focus",
     keys: "ctrl+k",
-    label: "Search",
+    label: "Focus search",
     group: "Navigation",
     run: (nav) => nav.focusSearch(),
   },
