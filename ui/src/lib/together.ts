@@ -16,6 +16,9 @@ import {
 } from "./playback";
 import { useVideo } from "./video";
 import { toast } from "./toast";
+import { api } from "./api";
+import { useSettings } from "./settings";
+import type { Track } from "./types";
 
 interface Server {
   id: string;
@@ -96,6 +99,17 @@ let awaitingFresh = false;
 // While a new room is being seeded from the creator's own music, its first
 // states (empty, then paused at the start) must not interrupt that music.
 let awaitingSeed = false;
+// Room entries this player has already told the relay about, so an end or a
+// measured length is reported once rather than on every sync.
+let reportedEnd = "";
+let reportedLength = "";
+// The leader's radio top-up: the seed last fetched for, whether a fetch is
+// running, and when a failed one may be tried again.
+let radioSeed = "";
+let radioBusy = false;
+let radioRetryAt = 0;
+/** Songs left after the current one before the leader adds radio, as autoplay does. */
+const RADIO_LOW = 5;
 export function roomCanControl() {
   const { room, member } = useTogether.getState();
   return (
@@ -149,17 +163,49 @@ async function applyLatest(force = false) {
     client.send({ type: "status", status: "unavailable" });
     return;
   }
+  // This player reached the end of the song the room is still counting down
+  // (the room ends songs by their catalogue length, which can be a little
+  // long, or missing). Starting it again would replay it from the top; it
+  // waits for the next one instead, and tells the room it is over.
+  const local = state.roomPlayback;
+  const endedHere =
+    !changed && !!local?.ended && local.entry === (room.current ?? "");
+  if (endedHere && room.playing && reportedEnd !== room.current) {
+    reportedEnd = room.current ?? "";
+    void client.command({ kind: "ended", current: room.current });
+  }
+  if (
+    local?.entry === room.current &&
+    local.durationMs > 0 &&
+    track &&
+    reportedLength !== room.current &&
+    (!track.durationMs ||
+      (Math.abs(local.durationMs - track.durationMs) > 1000 &&
+        Math.abs(local.durationMs - track.durationMs) <= 15000))
+  ) {
+    reportedLength = room.current ?? "";
+    void client.command({
+      kind: "duration",
+      entry: room.current,
+      durationMs: local.durationMs,
+    });
+  }
   const pos = position(room),
-    playing = ["playing", "loading", "stalled"].includes(state.state);
+    playing =
+      ["playing", "loading", "stalled"].includes(state.state) ||
+      (endedHere && room.playing);
   const drift = Math.abs(currentPosition(state) - pos);
   const queueChanged =
     state.queue.length !== room.queue.length ||
     state.queue.some((t, i) => t.id !== room.queue[i]?.track.id);
   const correct =
+    !endedHere &&
     drift > 1000 &&
     Date.now() - correctionAt > 4000 &&
     !["loading", "stalled"].includes(state.state);
-  const sync = ["loading", "stalled"].includes(state.state)
+  const sync = endedHere && room.playing
+    ? "Waiting for the next song"
+    : ["loading", "stalled"].includes(state.state)
     ? "Buffering"
     : drift > 1000 && room.playing
       ? "Catching up"
@@ -280,6 +326,10 @@ function route(kind: string, data: Record<string, unknown> = {}) {
     routeSeek(data.positionMs, room.current);
     return true;
   }
+  if (kind === "radio") {
+    void startRoomRadio(data.track as Track);
+    return true;
+  }
   if (["jump", "remove", "move"].includes(kind)) {
     const local = usePlayer.getState().queue;
     if (
@@ -317,6 +367,109 @@ function route(kind: string, data: Record<string, unknown> = {}) {
   void roomCommand(command);
   return true;
 }
+/** The room's songs, played and upcoming, as ids, for leaving out repeats. */
+function roomTrackIds(room: RoomState) {
+  return new Set([
+    ...room.queue.map((e) => e.track.id),
+    ...room.history.map((e) => e.track.id),
+  ]);
+}
+/**
+ * How many songs this member may still add: the leader is only held to the
+ * room's size, everyone else also to their contribution limit.
+ */
+function roomAllowance(room: RoomState) {
+  const { member } = useTogether.getState();
+  const space = Math.min(100, 500 - room.queue.length);
+  if (room.owner === member) return space;
+  const at = room.queue.findIndex((e) => e.id === room.current);
+  const mine = room.queue
+    .slice(at + 1)
+    .filter((e) => e.addedBy.id === member).length;
+  return Math.min(space, room.limit - mine);
+}
+/** Radio songs worth adding after `seed`: playable, and not in the room already. */
+async function radioFor(seed: string, room: RoomState) {
+  const found = await api.radio(seed);
+  const seen = roomTrackIds(useTogether.getState().room ?? room);
+  seen.add(seed);
+  return found.filter((t) => {
+    if (t.playable === false || seen.has(t.id)) return false;
+    seen.add(t.id);
+    return true;
+  });
+}
+/*
+ * Plays a song in the room the way YouTube Music plays one on its own: the
+ * song at once, then its radio after it. The radio is added only if the room
+ * is still on that song when it arrives; someone may have picked another.
+ */
+export async function startRoomRadio(track: Track) {
+  const version = generation;
+  // The leader's top-up must not fetch the same radio a second time.
+  radioSeed = track.id;
+  radioBusy = true;
+  try {
+    if (!(await roomCommand({ kind: "replace", tracks: [track] }))) return;
+    const room = useTogether.getState().room;
+    if (!room) return;
+    const tracks = await radioFor(track.id, room);
+    const now = useTogether.getState().room;
+    if (
+      version !== generation ||
+      !now ||
+      now.queue.find((e) => e.id === now.current)?.track.id !== track.id
+    )
+      return;
+    const allowed = roomAllowance(now);
+    if (tracks.length && allowed > 0)
+      await roomCommand({ kind: "enqueue", tracks: tracks.slice(0, allowed) });
+  } catch {
+    if (version === generation) toast("Couldn't load this song's radio.");
+  } finally {
+    if (version === generation) radioBusy = false;
+  }
+}
+/*
+ * Keeps a room's music going the way autoplay keeps a queue going: when fewer
+ * than a handful of songs are left, the leader adds the last song's radio.
+ * Only the leader does it, so members do not each add their own copy.
+ */
+async function topUpRoomRadio(room: RoomState) {
+  const { member, status } = useTogether.getState();
+  if (
+    status !== "connected" ||
+    room.owner !== member ||
+    room.repeat !== "off" ||
+    !useSettings.getState().autoplay ||
+    radioBusy ||
+    awaitingSeed ||
+    Date.now() < radioRetryAt
+  )
+    return;
+  const last = room.queue.at(-1);
+  if (!last || last.track.id === radioSeed) return;
+  const at = room.queue.findIndex((e) => e.id === room.current);
+  if (room.queue.length - 1 - at >= RADIO_LOW) return;
+  // Whoever just added this song may be adding its radio after it.
+  if (roomNow() - (last.addedAt ?? 0) < 8000) return;
+  const version = generation;
+  radioBusy = true;
+  try {
+    const tracks = await radioFor(last.track.id, room);
+    const now = useTogether.getState().room;
+    if (version !== generation || !now || now.queue.at(-1)?.id !== last.id)
+      return;
+    radioSeed = last.track.id;
+    const allowed = Math.min(50, roomAllowance(now));
+    if (tracks.length && allowed > 0)
+      await roomCommand({ kind: "enqueue", tracks: tracks.slice(0, allowed) });
+  } catch {
+    radioRetryAt = Date.now() + 30000;
+  } finally {
+    if (version === generation) radioBusy = false;
+  }
+}
 export async function leaveTogether(next?: string) {
   const leavingGeneration = ++generation;
   reconnectPause = null;
@@ -353,6 +506,11 @@ export async function connectTogether(options: ConnectOptions) {
   personalVideo = useVideo.getState().enabled;
   appliedEntry = "";
   lastVideo = 0;
+  reportedEnd = "";
+  reportedLength = "";
+  radioSeed = "";
+  radioBusy = false;
+  radioRetryAt = 0;
   useTogether.setState({ error: null });
   setRoomTransport(route);
   let seeded = false;
@@ -465,6 +623,7 @@ export async function connectTogether(options: ConnectOptions) {
             room.positionMs,
         ) > 1000;
       void applyLatest(Boolean(jumped));
+      void topUpRoomRadio(room);
     },
   });
   try {

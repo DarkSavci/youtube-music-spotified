@@ -53,6 +53,8 @@ export interface RoomState {
   votes: string[];
   voteSkip: boolean;
   undo: { revision: number; expires: number; by: string } | null;
+  /** The last song ended with nothing after it; an added song starts at once. */
+  finished?: boolean;
 }
 export interface ConnectOptions {
   server: string;

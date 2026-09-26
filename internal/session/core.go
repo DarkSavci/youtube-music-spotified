@@ -34,9 +34,18 @@ type Core struct {
 	// userChange is whether the listener chose the current track (a play, a
 	// skip, going back) rather than the last one ending. Skips cut; only an
 	// ending crossfades.
-	userChange           bool
-	following            bool // Ephemeral: never restored after an application restart.
-	roomEntry            string
+	userChange bool
+	following  bool // Ephemeral: never restored after an application restart.
+	roomEntry  string
+	// roomEnded is set when this player reached the end of the room's
+	// current entry; roomEndedAt is where the sound stopped. The room may
+	// still be playing that entry (its clock uses the catalogue length), and
+	// following it must not start the finished audio over from the top.
+	roomEnded   bool
+	roomEndedAt int64
+	// roomMeasuredMs is the current room entry's length as the engine
+	// measured it, for the room to correct a missing or rounded one.
+	roomMeasuredMs       int64
 	beforeRoom           *domain.Session
 	beforeRoomUnshuffled []domain.Track
 
@@ -154,6 +163,8 @@ func (c *Core) Apply(cmd Command) (Reject, []LogEntry) {
 		if c.following {
 			c.following = false
 			c.roomEntry = ""
+			c.roomEnded = false
+			c.roomMeasuredMs = 0
 			if c.beforeRoom != nil {
 				volume, epoch := c.state.Volume, c.state.Epoch
 				version, owner := c.state.Version, c.state.OwnerDeviceID
@@ -453,6 +464,9 @@ func (c *Core) HandleEngine(ev EngineEvent) []LogEntry {
 	switch ev.Kind {
 	case EvLoaded:
 		c.consecutiveFaults = 0
+		if c.following && ev.DurationMs > 0 {
+			c.roomMeasuredMs = ev.DurationMs
+		}
 		if ev.DurationMs > 0 {
 			if cur := c.currentPtr(); cur != nil && cur.DurationMs == 0 {
 				cur.DurationMs = ev.DurationMs
@@ -476,6 +490,9 @@ func (c *Core) HandleEngine(ev EngineEvent) []LogEntry {
 		c.lastPositionMs = ev.PositionMs
 		c.state.PositionMs = ev.PositionMs
 		c.state.PositionAt = c.clk.Now()
+		if c.following && ev.DurationMs > 0 {
+			c.roomMeasuredMs = ev.DurationMs
+		}
 		// A track the catalogue gave no length learns it here. EvLoaded is not
 		// enough: with gapless or crossfade the next track loads on the idle
 		// deck, and that report is dropped, so it would play with no length.
@@ -500,6 +517,8 @@ func (c *Core) HandleEngine(ev EngineEvent) []LogEntry {
 	case EvEnded:
 		logs := c.closeOutCurrent(true)
 		if c.following {
+			c.roomEnded = true
+			c.roomEndedAt = max(c.lastPositionMs, c.roomMeasuredMs)
 			if track := c.state.Queue.Current(); track != nil && track.DurationMs > 0 {
 				c.state.PositionMs = track.DurationMs
 				c.lastPositionMs = track.DurationMs
@@ -809,6 +828,20 @@ func clampVolume(v float64) float64 {
 
 var _ = time.Second
 
+// RoomPlayback is the local side of the room's current entry.
+type RoomPlayback struct {
+	Entry      string `json:"entry"`
+	Ended      bool   `json:"ended"`
+	DurationMs int64  `json:"durationMs"`
+}
+
+func (c *Core) roomPlayback() *RoomPlayback {
+	if !c.following || c.roomEntry == "" {
+		return nil
+	}
+	return &RoomPlayback{Entry: c.roomEntry, Ended: c.roomEnded, DurationMs: c.roomMeasuredMs}
+}
+
 // followRoom applies a single authoritative room snapshot without changing
 // local volume, repeat/shuffle preferences, or inventing listening progress.
 func (c *Core) followRoom(cmd Command) (Reject, []LogEntry) {
@@ -843,7 +876,36 @@ func (c *Core) followRoom(cmd Command) (Reject, []LogEntry) {
 		return RejectNone, logs
 	}
 	track := cmd.Tracks[cmd.StartIndex]
-	if !wasFollowing || current == nil || current.ID != track.ID || !current.Playable || (cmd.ExpectedID != "" && c.roomEntry != cmd.ExpectedID) {
+	sameEntry := wasFollowing && current != nil && current.ID == track.ID && current.Playable && (cmd.ExpectedID == "" || c.roomEntry == cmd.ExpectedID)
+	if sameEntry && c.roomEnded {
+		// This player already played the entry to its end. Only a room that
+		// went back into it (repeat one, a seek back) starts it again; one
+		// still counting down its catalogue length waits here, at the end.
+		if cmd.Playing && cmd.PositionMs+5000 < c.roomEndedAt {
+			c.roomEnded = false
+			c.state.Queue = domain.Queue{Items: cmd.Tracks, Index: cmd.StartIndex, Origin: "Listen Together"}
+			c.roomEntry = cmd.ExpectedID
+			c.userChange = true
+			c.startTrack(cmd.StartIndex, cmd.PositionMs)
+			return RejectNone, nil
+		}
+		items := cmd.Tracks
+		// Keep this player's measured length, which the room may not have yet.
+		if cur := c.state.Queue.Current(); cur != nil {
+			items = append([]domain.Track(nil), cmd.Tracks...)
+			items[cmd.StartIndex].DurationMs = max(items[cmd.StartIndex].DurationMs, cur.DurationMs)
+		}
+		c.state.Queue = domain.Queue{Items: items, Index: cmd.StartIndex, Origin: "Listen Together"}
+		c.roomEntry = cmd.ExpectedID
+		c.state.State = domain.StatePaused
+		c.bump()
+		return RejectNone, nil
+	}
+	if !sameEntry {
+		c.roomEnded = false
+		c.roomMeasuredMs = 0
+	}
+	if !sameEntry {
 		logs = c.closeOutCurrent(false)
 		c.state.Queue = domain.Queue{Items: cmd.Tracks, Index: cmd.StartIndex, Origin: "Listen Together"}
 		c.unshuffled = nil

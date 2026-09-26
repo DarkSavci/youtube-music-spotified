@@ -133,3 +133,41 @@ func TestFollowingAnEmptyRoomAgainChangesNothing(t *testing.T) {
 		t.Fatalf("empty room resync moved epoch %d->%d, version %d->%d", epoch, c.State().Epoch, version, c.State().Version)
 	}
 }
+
+func TestRoomEntryThatEndedHereIsNotReplayed(t *testing.T) {
+	c, _ := newCore(t)
+	room := tracks(2)
+	c.Apply(Command{Kind: CmdFollow, Tracks: room, ExpectedID: "e1", PositionMs: 170000, Playing: true})
+	epoch := c.State().Epoch
+	c.HandleEngine(EngineEvent{Kind: EvPosition, Epoch: epoch, PositionMs: 176000, DurationMs: 176500})
+	c.HandleEngine(EngineEvent{Kind: EvEnded, Epoch: epoch})
+	if p := c.roomPlayback(); p == nil || !p.Ended || p.Entry != "e1" || p.DurationMs != 176500 {
+		t.Fatalf("room playback not reported: %+v", p)
+	}
+	// The room's clock still runs to the catalogue length and says "playing".
+	c.Apply(Command{Kind: CmdFollow, Tracks: room, ExpectedID: "e1", PositionMs: 178000, Playing: true})
+	if c.State().State != domain.StatePaused || c.State().Epoch != epoch {
+		t.Fatalf("finished entry was started over: state=%s epoch=%d/%d", c.State().State, c.State().Epoch, epoch)
+	}
+	if c.Target().Playing {
+		t.Fatal("engine asked to play a finished entry")
+	}
+	// The next entry starts normally and clears the flag.
+	c.Apply(Command{Kind: CmdFollow, Tracks: room, StartIndex: 1, ExpectedID: "e2", Playing: true})
+	if c.State().State != domain.StatePlaying || c.State().Epoch == epoch || c.roomPlayback().Ended {
+		t.Fatal("next room entry did not start")
+	}
+}
+
+func TestRoomRepeatOneRestartsAnEndedEntry(t *testing.T) {
+	c, _ := newCore(t)
+	room := tracks(1)
+	c.Apply(Command{Kind: CmdFollow, Tracks: room, ExpectedID: "e1", PositionMs: 179000, Playing: true})
+	epoch := c.State().Epoch
+	c.HandleEngine(EngineEvent{Kind: EvPosition, Epoch: epoch, PositionMs: 179900})
+	c.HandleEngine(EngineEvent{Kind: EvEnded, Epoch: epoch})
+	c.Apply(Command{Kind: CmdFollow, Tracks: room, ExpectedID: "e1", PositionMs: 0, Playing: true})
+	if c.State().State != domain.StatePlaying || c.State().Epoch == epoch || c.State().PositionMs != 0 || c.roomPlayback().Ended {
+		t.Fatalf("repeat one did not restart: %+v", c.State())
+	}
+}

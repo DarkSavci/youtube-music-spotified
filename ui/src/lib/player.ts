@@ -43,6 +43,11 @@ export interface PlayerDevice {
 
 interface PlayerState {
   followingRoom: boolean;
+  /**
+   * What this player knows about the room's current entry: whether it played
+   * to the end here and how long it measured. Null outside a room.
+   */
+  roomPlayback: { entry: string; ended: boolean; durationMs: number } | null;
   state: PlayState;
   track: Track | null;
   queue: Track[];
@@ -118,6 +123,7 @@ const idleCapabilities: Capabilities = {
 
 export const usePlayer = create<PlayerState>((set, get) => ({
   followingRoom: false,
+  roomPlayback: null,
   state: "idle",
   track: null,
   queue: [],

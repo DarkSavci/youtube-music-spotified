@@ -643,3 +643,119 @@ test("the app's client recognises a relay that never greets within a few seconds
   assert.ok(Date.now() - started < 6000);
   for (const ws of silent.clients) ws.terminate();
 });
+test("a listener's end moves the room on once, even for a song with no length", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, {
+    kind: "enqueue",
+    tracks: [{ ...track(0), durationMs: 0 }, track(1)],
+  });
+  send(leader, { kind: "play" });
+  const first = room.current;
+  // The relay's clock cannot end a song it has no length for.
+  assert.equal(tick(room, 90000000), false);
+  assert.equal(room.current, first);
+  const ended = { kind: "ended", current: first, base: room.revision };
+  assert.equal(command(room, guest, { ...ended, op: "g" }, 2000), true);
+  assert.notEqual(room.current, first);
+  assert.equal(room.playing, true);
+  // The same end reported by everyone else is ignored, not an error.
+  const second = room.current;
+  assert.equal(command(room, leader, { ...ended, op: "l" }, 2001), false);
+  assert.equal(room.current, second);
+});
+test("an end reported long before the song's length is ignored", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [{ ...track(0), durationMs: 200000 }, track(1)] });
+  send(leader, { kind: "play" });
+  const first = room.current;
+  assert.equal(
+    command(room, guest, { kind: "ended", current: first, op: "early" }, 60000),
+    false,
+  );
+  assert.equal(room.current, first);
+  // Within ten seconds of the end it counts: the audio is often a little shorter.
+  assert.equal(
+    command(room, guest, { kind: "ended", current: first, op: "late" }, 195000),
+    true,
+  );
+  assert.notEqual(room.current, first);
+});
+test("repeat one restarts on a reported end instead of advancing", () => {
+  const { room, leader, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [track(0), track(1)] });
+  send(leader, { kind: "settings", repeat: "one" });
+  send(leader, { kind: "play" });
+  const first = room.current;
+  command(room, leader, { kind: "ended", current: first, op: "e" }, 11000);
+  assert.equal(room.current, first);
+  assert.equal(position(room, 11000), 0);
+});
+test("a measured length fills a missing one and corrects small errors only", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [{ ...track(0), durationMs: 0 }] });
+  const entry = room.queue[0].id;
+  const revision = room.revision;
+  assert.equal(
+    command(room, guest, { kind: "duration", entry, durationMs: 183400, op: "d1" }, 1000),
+    true,
+  );
+  assert.equal(room.queue[0].track.durationMs, 183400);
+  // A length report describes the song, not the queue: pending commands stay valid.
+  assert.equal(room.revision, revision);
+  assert.equal(
+    command(room, guest, { kind: "duration", entry, durationMs: 180000, op: "d2" }, 1000),
+    true,
+  );
+  assert.equal(room.queue[0].track.durationMs, 180000);
+  // Nobody can cut a song short by claiming it is much shorter.
+  assert.equal(
+    command(room, guest, { kind: "duration", entry, durationMs: 30000, op: "d3" }, 1000),
+    false,
+  );
+  assert.equal(room.queue[0].track.durationMs, 180000);
+});
+test("a song added after the queue ran out starts playing", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [track(0)] });
+  send(leader, { kind: "play" });
+  const first = room.current;
+  assert.equal(tick(room, 12000), true);
+  assert.equal(room.playing, false);
+  assert.equal(room.finished, true);
+  command(
+    room,
+    guest,
+    { kind: "enqueue", tracks: [track(1)], op: "late-add", base: room.revision, current: room.current },
+    13000,
+  );
+  assert.notEqual(room.current, first);
+  assert.equal(room.playing, true);
+  assert.equal(room.finished, false);
+  assert.equal(room.history.at(-1).id, first);
+});
+test("skips are pinned to the song, not to the room's revision", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [track(0), track(1), track(2)] });
+  send(leader, { kind: "play" });
+  const stale = room.revision;
+  send(guest, { kind: "enqueue", tracks: [track(3)] });
+  // The revision moved on, but the song is the same: the skip still lands.
+  assert.equal(
+    command(room, leader, { kind: "next", current: room.current, base: stale, op: "n" }, 2000),
+    true,
+  );
+  assert.equal(room.current, room.queue[1].id);
+});
+test("next after the queue ran out plays the song after it", () => {
+  const { room, leader, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [track(0), track(1)] });
+  send(leader, { kind: "jump", entry: room.queue[1].id });
+  tick(room, 12000);
+  assert.equal(room.finished, true);
+  // Moving an entry after the finished one (here: undoing to an older order)
+  // leaves a song to go to; next must play it rather than sit paused.
+  room.queue.push(room.queue.shift());
+  command(room, leader, { kind: "next", current: room.current, op: "n" }, 12500);
+  assert.equal(room.current, room.queue[1].id);
+  assert.equal(room.playing, true);
+});

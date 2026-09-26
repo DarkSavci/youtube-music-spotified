@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Entry, RoomState } from "../../../listen-together/client-v2.mjs";
 import { api } from "../lib/api";
 import { useCreatePlaylist } from "../lib/playlists";
-import { roomCommand, roomNow } from "../lib/together";
+import { roomCommand, roomNow, startRoomRadio } from "../lib/together";
 import { toast } from "../lib/toast";
 import {
   artistNames,
@@ -13,7 +13,14 @@ import {
 import { Artwork } from "./Artwork";
 import { usePrompt } from "./Prompt";
 import { RoomAvatar } from "./RoomAvatar";
-import { IconClose, IconPlay, IconPlus, IconQueue, IconSearch } from "./Icon";
+import {
+  IconClose,
+  IconPlay,
+  IconPlus,
+  IconQueue,
+  IconRadio,
+  IconSearch,
+} from "./Icon";
 
 function EntryRow({
   entry,
@@ -278,6 +285,20 @@ export function RoomQueue({
                     <strong>{t.title}</strong>
                     <span>{artistNames(t.artists)}</span>
                   </span>
+                  {control && (
+                    <button
+                      className="room-secondary"
+                      aria-label={`Play ${t.title} radio`}
+                      title="Play now, then its radio"
+                      onClick={() => {
+                        setQuery("");
+                        void startRoomRadio(t);
+                      }}
+                    >
+                      <IconRadio size={18} />
+                      Radio
+                    </button>
+                  )}
                   <button
                     className="room-secondary"
                     onClick={() =>
