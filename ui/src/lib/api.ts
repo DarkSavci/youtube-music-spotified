@@ -88,6 +88,9 @@ export const api = {
   /** The endless queue YouTube generates from a seed track. */
   radio: (trackId: string, signal?: AbortSignal) =>
     get<Track[]>(`/radio/${encodeURIComponent(trackId)}`, signal),
+  /** The first page of a named radio (an artist's mix or shuffle) starting at `seed`. */
+  mix: (seed: string, list: string, signal?: AbortSignal) =>
+    get<Track[]>(`/radio/${encodeURIComponent(seed)}?list=${encodeURIComponent(list)}`, signal),
 };
 
 /**

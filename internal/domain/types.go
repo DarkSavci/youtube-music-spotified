@@ -136,13 +136,26 @@ type Artist struct {
 	// substitution. Display text, because that is how it arrives.
 	MonthlyListeners string `json:"monthlyListeners,omitempty"`
 
-	// RadioID and ShuffleID seed endless playback from this Artist.
-	RadioID   string `json:"radioId,omitempty"`
-	ShuffleID string `json:"shuffleId,omitempty"`
+	// RadioID is the Artist's mix (RDEM…): their music and music like it,
+	// which YouTube Music's own Mix button plays. ShuffleID (RDAO…) is a
+	// shuffle of the Artist's own songs. Each list starts from a song, its
+	// seed, and YouTube will not produce either without it.
+	RadioID     string `json:"radioId,omitempty"`
+	RadioSeed   string `json:"radioSeed,omitempty"`
+	ShuffleID   string `json:"shuffleId,omitempty"`
+	ShuffleSeed string `json:"shuffleSeed,omitempty"`
+
+	// SongsID is the playlist of all of the Artist's songs that the Top songs
+	// heading links to, most played first. Empty when YouTube offers none.
+	SongsID string `json:"songsId,omitempty"`
 
 	TopTracks []Track `json:"topTracks,omitempty"`
 	Albums    []Album `json:"albums,omitempty"`
 	Singles   []Album `json:"singles,omitempty"`
+	// AlbumsMore and SinglesMore open the full discography behind those
+	// shelves; nil when the shelf already holds everything.
+	AlbumsMore  *BrowseLink `json:"albumsMore,omitempty"`
+	SinglesMore *BrowseLink `json:"singlesMore,omitempty"`
 	// DescriptionURL is the source the biography links to, usually Wikipedia.
 	// The text arrives with linked runs and flattening it to a string dropped
 	// them, leaving prose with no way back to where it came from.
@@ -204,6 +217,13 @@ type ShelfItem struct {
 	Playlist *Playlist     `json:"playlist,omitempty"`
 	Podcast  *Podcast      `json:"podcast,omitempty"`
 	Episode  *Episode      `json:"episode,omitempty"`
+}
+
+// BrowseLink addresses a browse surface: an id, and the params some surfaces
+// need to be told apart.
+type BrowseLink struct {
+	ID     string `json:"id"`
+	Params string `json:"params,omitempty"`
 }
 
 // Shelf is a horizontally scrolling row of cards on a browse surface.

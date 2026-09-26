@@ -38,9 +38,18 @@ export interface Artist {
   subscribers?: string;
   /** Whether the signed-in account already follows this artist. */
   following?: boolean; monthlyListeners?: string;
-  radioId?: string; shuffleId?: string;
+  /** The artist's mix (their music and music like it) and the song it starts from. */
+  radioId?: string; radioSeed?: string;
+  /** A shuffle of the artist's own songs, and the song it starts from. */
+  shuffleId?: string; shuffleSeed?: string;
+  /** The playlist of all the artist's songs, most played first. */
+  songsId?: string;
   topTracks?: Track[]; albums?: Album[]; singles?: Album[]; related?: Artist[];
+  /** The full discography behind the Albums and Singles shelves. */
+  albumsMore?: BrowseLink; singlesMore?: BrowseLink;
 }
+
+export interface BrowseLink { id: string; params?: string }
 
 export interface Playlist {
   id: string; title: string; description?: string;

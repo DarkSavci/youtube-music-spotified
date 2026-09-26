@@ -9,8 +9,8 @@ import { TrackTable } from "../components/TrackTable";
 import { Shelf, Card } from "../components/Shelf";
 import { PageState, TrackListSkeleton } from "../components/States";
 import { PageError } from "./Home";
-import { IconPlay } from "../components/Icon";
-import { transport } from "../lib/playback";
+import { IconPlay, IconRadio, IconShuffle } from "../components/Icon";
+import { artistSongs, transport } from "../lib/playback";
 import { formatDuration } from "../lib/types";
 import type { Album, ShelfItem, Track } from "../lib/types";
 import { toast } from "../lib/toast";
@@ -233,6 +233,8 @@ export function ArtistView() {
    * which is also what a click reverts to once the refetch lands.
    */
   const [pending, setPending] = useState<boolean | null>(null);
+  // Which of the page's play buttons is fetching what it will play.
+  const [starting, setStarting] = useState<"play" | "shuffle" | "radio" | null>(null);
   useWarmFirstTrack(data?.topTracks);
   const followed = pending ?? data?.following ?? false;
 
@@ -274,6 +276,36 @@ export function ArtistView() {
   if (!data) return <PageState title="Artist not found" />;
 
   const top = data.topTracks ?? [];
+  const artist = data;
+
+  /*
+   * Play is the artist's whole catalogue, most played first, not the five
+   * songs on the page: those looped under repeat and never reached the
+   * albums (#48). Shuffle and Radio are YouTube's own lists for the artist —
+   * a shuffle of their songs, and a mix of theirs and music like it (#47) —
+   * which the core keeps extending as they play.
+   */
+  const start = async (kind: "play" | "shuffle" | "radio") => {
+    if (starting) return;
+    setStarting(kind);
+    try {
+      if (kind === "play") {
+        const songs = await artistSongs(artist);
+        if (songs.length === 0) toast("Nothing by this artist can be played right now.");
+        else transport.play(songs, 0, artist.name);
+        return;
+      }
+      const list = kind === "radio" ? artist.radioId : artist.shuffleId;
+      const seed = kind === "radio" ? artist.radioSeed : artist.shuffleSeed;
+      const origin = kind === "radio" ? `${artist.name} radio` : artist.name;
+      if (!list || !seed || !(await transport.playMix(list, seed, origin)))
+        toast(kind === "radio" ? "Could not start this artist's radio." : "Could not shuffle this artist.");
+    } finally {
+      setStarting(null);
+    }
+  };
+  const canShuffle = Boolean(data.shuffleId && data.shuffleSeed);
+  const canRadio = Boolean(data.radioId && data.radioSeed);
 
   return (
     <>
@@ -323,11 +355,34 @@ export function ArtistView() {
         <button
           className="playbtn playbtn--accent playbtn--lg"
           aria-label={`Play ${data.name}`}
-          disabled={top.length === 0}
-          onClick={() => transport.play(top, 0, data.name)}
+          disabled={top.length === 0 && !data.songsId}
+          aria-busy={starting === "play"}
+          onClick={() => void start("play")}
         >
           <IconPlay size={24} />
         </button>
+        {canShuffle ? (
+          <button
+            className="iconbtn entityactions__icon"
+            aria-label={`Shuffle ${data.name}`}
+            title="Shuffle"
+            aria-busy={starting === "shuffle"}
+            onClick={() => void start("shuffle")}
+          >
+            <IconShuffle size={24} />
+          </button>
+        ) : null}
+        {canRadio ? (
+          <button
+            className="iconbtn entityactions__icon"
+            aria-label={`Start ${data.name} radio`}
+            title="Artist radio: their music and music like it"
+            aria-busy={starting === "radio"}
+            onClick={() => void start("radio")}
+          >
+            <IconRadio size={24} />
+          </button>
+        ) : null}
         <EntityActions kind="artist" id={data.id} title={data.name} tracks={top} />
         {/* Following is a channel subscription upstream, not a library
             addition, which is why it is keyed by the artist's id. */}
@@ -353,18 +408,37 @@ export function ArtistView() {
           must not leave an empty region behind. */}
       {top.length > 0 ? (
         <>
-          <h2 className="shelf__title" style={{ marginTop: "var(--space-5)" }}>
-            Popular
-          </h2>
+          <div className="shelf__header" style={{ marginTop: "var(--space-5)" }}>
+            <h2 className="shelf__title">Popular</h2>
+            {data.songsId ? (
+              <Link className="shelf__showall" to={`/artist/${encodeURIComponent(data.id)}/songs`}>
+                Show all songs
+              </Link>
+            ) : null}
+          </div>
           <TrackTable tracks={top} origin={data.name} showArtwork={false} />
         </>
       ) : null}
 
       {data.albums && data.albums.length > 0 ? (
-        <Shelf shelf={{ title: "Albums", items: albumItems(data.albums) }} />
+        <Shelf
+          shelf={{
+            title: "Albums",
+            items: albumItems(data.albums),
+            showAllId: data.albumsMore?.id,
+            showAllParams: data.albumsMore?.params,
+          }}
+        />
       ) : null}
       {data.singles && data.singles.length > 0 ? (
-        <Shelf shelf={{ title: "Singles and EPs", items: albumItems(data.singles) }} />
+        <Shelf
+          shelf={{
+            title: "Singles and EPs",
+            items: albumItems(data.singles),
+            showAllId: data.singlesMore?.id,
+            showAllParams: data.singlesMore?.params,
+          }}
+        />
       ) : null}
       {data.related && data.related.length > 0 ? (
         <section className="shelf">

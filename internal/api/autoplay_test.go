@@ -44,6 +44,26 @@ func (c *radioCatalog) RadioPage(_ context.Context, seed, token string) ([]domai
 	return out, fmt.Sprintf("page%d", page+1), nil
 }
 
+// MixPage serves a named list the same way, its pages recorded as
+// "list:seed/token" so a test can tell the two kinds of radio apart.
+func (c *radioCatalog) MixPage(ctx context.Context, seed, list, token string) ([]domain.Track, string, error) {
+	c.mu.Lock()
+	c.pages = append(c.pages, list+":"+seed+"/"+token)
+	c.mu.Unlock()
+	page := 0
+	if token != "" {
+		fmt.Sscanf(token, "page%d", &page)
+	}
+	var out []domain.Track
+	if page == 0 {
+		out = append(out, track(seed))
+	}
+	for i := range 10 {
+		out = append(out, track(fmt.Sprintf("%s-%s-%d-%d", list, seed, page, i)))
+	}
+	return out, fmt.Sprintf("page%d", page+1), nil
+}
+
 func (c *radioCatalog) asked() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -205,5 +225,47 @@ func TestRepeatOffResumesAutoplay(t *testing.T) {
 	_, _ = hub.Command(ctx, "d", session.Command{Kind: session.CmdSetRepeat, Repeat: domain.RepeatOff})
 	if ids := waitQueue(t, hub, 4); ids[3] != "p3-r0-0" {
 		t.Fatalf("queue %v", ids)
+	}
+}
+
+// An artist's radio is a named list with the song it starts from. It plays
+// that list and keeps extending it from the same list, not from a song's own
+// radio (#47).
+func TestStartingAnArtistMixContinuesTheList(t *testing.T) {
+	s, hub, cat, _ := radioServer(t)
+	body, _ := json.Marshal(map[string]any{"deviceId": "d", "playlistId": "RDEMx", "videoId": "seed", "origin": "Artist radio"})
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/session/radio", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	ids := queueIDs(hub)
+	if len(ids) != 11 || ids[0] != "seed" || ids[1] != "RDEMx-seed-0-0" {
+		t.Fatalf("queue %v", ids)
+	}
+	if o := hub.Projection().State.Queue.Origin; o != "Artist radio" {
+		t.Errorf("origin %q", o)
+	}
+
+	_, _ = hub.Command(context.Background(), "d", session.Command{Kind: session.CmdJump, At: 8})
+	ids = waitQueue(t, hub, 21)
+	if ids[11] != "RDEMx-seed-1-0" {
+		t.Fatalf("continued with %s, want the list's next page", ids[11])
+	}
+	for _, p := range cat.asked() {
+		if !strings.HasPrefix(p, "RDEMx:") {
+			t.Errorf("asked for %q, a page from outside the list", p)
+		}
+	}
+}
+
+// The room path needs the list's tracks without playing them.
+func TestRadioEndpointServesANamedList(t *testing.T) {
+	s, _, _, _ := radioServer(t)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/radio/seed?list=RDAOx", nil))
+	var tracks []domain.Track
+	if err := json.Unmarshal(rec.Body.Bytes(), &tracks); err != nil || len(tracks) != 11 || tracks[1].ID != "RDAOx-seed-0-0" {
+		t.Fatalf("status %d tracks %v err %v", rec.Code, tracks, err)
 	}
 }

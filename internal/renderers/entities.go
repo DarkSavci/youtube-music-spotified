@@ -2,6 +2,7 @@ package renderers
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -160,11 +161,24 @@ func ParseArtist(doc Node, id string, pc ParseContext) (domain.Artist, bool) {
 		}
 	}
 
-	if play := Find(h, "watchEndpoint"); play != nil {
-		ar.RadioID = play.Str("playlistId")
+	/*
+	 * The header's buttons are read by name.
+	 *
+	 * A search for any watchEndpoint in the header walked a Go map, so it
+	 * returned the Mix button's list on some runs and the Shuffle button's on
+	 * others. startRadioButton is the mix (RDEM…, the artist and music like
+	 * theirs); playButton is YouTube's Shuffle (RDAO…, the artist's own songs).
+	 */
+	if mix := h.Child("startRadioButton").Child("buttonRenderer").Child("navigationEndpoint").Child("watchEndpoint"); mix != nil {
+		ar.RadioID, ar.RadioSeed = mix.Str("playlistId"), mix.Str("videoId")
 	}
-	if shuffle := Find(h, "shuffleEndpoint"); shuffle != nil {
-		ar.ShuffleID = shuffle.Str("playlistId")
+	if shuffle := h.Child("playButton").Child("buttonRenderer").Child("navigationEndpoint").Child("watchEndpoint"); shuffle != nil {
+		ar.ShuffleID, ar.ShuffleSeed = shuffle.Str("playlistId"), shuffle.Str("videoId")
+	}
+	if ar.ShuffleID == "" {
+		if shuffle := h.Child("shuffleEndpoint"); shuffle != nil {
+			ar.ShuffleID = shuffle.Str("playlistId")
+		}
 	}
 
 	// Classify shelves by title: YouTube labels them, and the labels are what
@@ -183,18 +197,25 @@ func ParseArtist(doc Node, id string, pc ParseContext) (domain.Artist, bool) {
 						ar.TopTracks = append(ar.TopTracks, *it.Track)
 					}
 				}
-			case strings.Contains(title, "single"), strings.Contains(title, "ep"):
+				// The heading links to every song, as does the list's footer.
+				if ar.SongsID == "" {
+					ar.SongsID = songsPlaylist(n)
+				}
+			// A word match: "ep" appears inside plenty of titles ("Deep cuts").
+			case strings.Contains(title, "single"), hasWord(title, "ep"), hasWord(title, "eps"):
 				for _, it := range sh.Items {
 					if it.Kind == domain.KindAlbum && it.Album != nil {
 						ar.Singles = append(ar.Singles, *it.Album)
 					}
 				}
+				ar.SinglesMore = showAll(sh)
 			case strings.Contains(title, "album"):
 				for _, it := range sh.Items {
 					if it.Kind == domain.KindAlbum && it.Album != nil {
 						ar.Albums = append(ar.Albums, *it.Album)
 					}
 				}
+				ar.AlbumsMore = showAll(sh)
 			case strings.Contains(title, "fans"), strings.Contains(title, "similar"), strings.Contains(title, "related"):
 				for _, it := range sh.Items {
 					if it.Kind == domain.KindArtist && it.Artist != nil {
@@ -204,7 +225,85 @@ func ParseArtist(doc Node, id string, pc ParseContext) (domain.Artist, bool) {
 			}
 		}
 	}
+	sortByPlays(ar.TopTracks)
 	return ar, true
+}
+
+// songsPlaylist reads the playlist of all an artist's songs off the Top songs
+// shelf: its heading links there, and so does the "Show all" beneath it.
+func songsPlaylist(shelf Node) string {
+	for _, target := range []Node{
+		Find(shelf.Child("title"), "browseEndpoint"),
+		shelf.Child("bottomEndpoint").Child("browseEndpoint"),
+	} {
+		if id := target.Str("browseId"); strings.HasPrefix(id, "VL") {
+			return strings.TrimPrefix(id, "VL")
+		}
+	}
+	return ""
+}
+
+func showAll(sh domain.Shelf) *domain.BrowseLink {
+	if sh.ShowAllID == "" {
+		return nil
+	}
+	return &domain.BrowseLink{ID: sh.ShowAllID, Params: sh.ShowAllParams}
+}
+
+func hasWord(s, word string) bool {
+	for _, f := range strings.FieldsFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+	}) {
+		if f == word {
+			return true
+		}
+	}
+	return false
+}
+
+/*
+sortByPlays orders an artist's popular songs by their play counts.
+
+YouTube's own order is not by plays — a song with 30M sat below one with 22M
+(#48) — and the list is labelled with the counts, so it read as wrong. When a
+count is missing the order is left as YouTube gave it, since there is nothing
+to sort by.
+*/
+func sortByPlays(tracks []domain.Track) {
+	counts := make(map[string]int64, len(tracks))
+	for _, t := range tracks {
+		n := PlayCount(t.PlayCount)
+		if n <= 0 {
+			return
+		}
+		counts[t.ID] = n
+	}
+	sort.SliceStable(tracks, func(i, j int) bool { return counts[tracks[i].ID] > counts[tracks[j].ID] })
+}
+
+// PlayCount reads display text like "1.9B plays", "22M plays" or "850K views"
+// as a number, 0 when it is not one. The API is asked for English, so the
+// suffixes are English ones.
+func PlayCount(s string) int64 {
+	f := strings.Fields(strings.TrimSpace(s))
+	if len(f) == 0 {
+		return 0
+	}
+	num := strings.ReplaceAll(f[0], ",", "")
+	mult := 1.0
+	switch {
+	case strings.HasSuffix(num, "K"):
+		mult, num = 1e3, strings.TrimSuffix(num, "K")
+	case strings.HasSuffix(num, "M"):
+		mult, num = 1e6, strings.TrimSuffix(num, "M")
+	case strings.HasSuffix(num, "B"):
+		mult, num = 1e9, strings.TrimSuffix(num, "B")
+	}
+	v, err := strconv.ParseFloat(num, 64)
+	if err != nil || v < 0 {
+		return 0
+	}
+	return int64(v * mult)
 }
 
 // ---------- playlist ----------

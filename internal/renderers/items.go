@@ -81,14 +81,17 @@ func ParseTrack(n Node) (domain.Track, bool) {
 	 * The endpoint is the discriminator rather than the text, because the text
 	 * is localised and a play count is not distinguishable from a title by
 	 * shape alone.
+	 *
+	 * An artist's all-songs playlist has both: the play count third and the
+	 * album fourth. Reading only the third column lost every album there.
 	 */
-	if len(cols) > 2 {
-		meta := parseSubtitleRuns(cols[2].Child("text").Nodes("runs"))
+	for _, col := range cols[min(2, len(cols)):] {
+		meta := parseSubtitleRuns(col.Child("text").Nodes("runs"))
 		if t.Album == nil && meta.album != nil {
 			t.Album = meta.album
 		}
-		txt := textOf(cols[2].Child("text"))
-		if strings.Contains(txt, "play") || strings.Contains(txt, "view") {
+		txt := textOf(col.Child("text"))
+		if t.PlayCount == "" && (strings.Contains(txt, "play") || strings.Contains(txt, "view")) {
 			t.PlayCount = txt
 		}
 	}
@@ -277,6 +280,8 @@ func ParseCard(n Node) (domain.ShelfItem, bool) {
 		return domain.ShelfItem{Kind: domain.KindAlbum, Album: &domain.Album{
 			ID: browseID, Title: title, Artwork: art,
 			Artists: cardArtists(n.Child("subtitle")),
+			// "Single • 2023", or just "2013" on an artist's Albums shelf.
+			Year: subtitleYear(n.Child("subtitle")),
 		}}, true
 
 	case strings.Contains(pageType, "ARTIST"), strings.HasPrefix(browseID, "UC"):
@@ -367,4 +372,15 @@ func cardTrack(n Node, videoID, title string, art domain.ArtworkSet) *domain.Tra
 		Album:      meta.album,
 		DurationMs: meta.durationMs,
 	}
+}
+
+// subtitleYear is the release year among a card's subtitle runs, empty when
+// there is none.
+func subtitleYear(sub Node) string {
+	for _, r := range sub.Nodes("runs") {
+		if y := strings.TrimSpace(r.Str("text")); isYear(y) {
+			return y
+		}
+	}
+	return ""
 }

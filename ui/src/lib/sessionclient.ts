@@ -210,6 +210,23 @@ export class SessionClient {
     }
   }
 
+  /** Plays a named radio (an artist's mix or shuffle) and keeps it going. */
+  async startMix(playlistId: string, videoId: string, origin: string): Promise<boolean> {
+    try {
+      const res = await fetch(apiUrl("/v1/session/radio"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceId: this.deviceID, playlistId, videoId, origin }),
+      });
+      if (!res.ok) return false;
+      const body = (await res.json()) as { projection: Projection };
+      this.onProjection(body.projection);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Reports what this device's engine is doing. */
   report(event: EngineReport): void {
     void fetch(apiUrl("/v1/session/engine-event"), {

@@ -488,6 +488,17 @@ func (s *Server) handlePodcast(w http.ResponseWriter, r *http.Request) {
 // song radio" is the one menu action that turns a single track into
 // listening, and rebuilding that client-side would mean a second recommender.
 func (s *Server) handleRadio(w http.ResponseWriter, r *http.Request) {
+	// ?list= names a generated queue other than the song's own radio (an
+	// artist's mix); the path is then the song that list starts from.
+	if list := r.URL.Query().Get("list"); list != "" {
+		tracks, _, err := s.deps.Catalog.MixPage(r.Context(), r.PathValue("id"), list, "")
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		s.write(w, http.StatusOK, nonNilTracks(tracks))
+		return
+	}
 	tracks, err := s.deps.Catalog.Radio(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.fail(w, r, err)

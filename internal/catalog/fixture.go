@@ -216,6 +216,12 @@ func (f *Fixture) RadioPage(ctx context.Context, seedTrackID, token string) ([]d
 	return tracks, "", err
 }
 
+// MixPage serves the recorded queue too: there is one "next" recording, and a
+// mix is the same response shape.
+func (f *Fixture) MixPage(ctx context.Context, seedTrackID, _, token string) ([]domain.Track, string, error) {
+	return f.RadioPage(ctx, seedTrackID, token)
+}
+
 /*
 Podcast serves a recorded show.
 
