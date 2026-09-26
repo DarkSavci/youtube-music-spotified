@@ -140,7 +140,7 @@ export function SettingsView() {
         {desktop.available && (
           <Toggle
             label={desktop.isMac ? "Close to menu bar" : "Close to tray"}
-            hint={desktop.isMac ? "Keep playing when the window closes. Reopen from the Dock or menu bar; use Quit to exit. When off, closing the window quits the app." : "The close button hides the window and the music keeps playing. Open it again, or quit, from the icon in the notification area."}
+            hint={desktop.isMac ? "Keep playing when the window closes. Reopen from the Dock or menu bar; use Quit to exit. When off, closing the window quits the app." : "The close button hides the window and the music keeps playing. Open it again, or quit, from the icon in the notification area. When off, closing the window quits the app."}
             checked={prefs.closeToTray}
             onChange={(v) => prefs.set("closeToTray", v)}
           />
