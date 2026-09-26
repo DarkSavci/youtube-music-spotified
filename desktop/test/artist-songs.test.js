@@ -171,10 +171,12 @@ test('releases open albums first, then singles, and a single whose song is known
     rel('s3', 'Brand New Song'),
     rel('s4', 'Earned It [Remastered]'),
   ];
-  const known = [{ id: 'x', title: 'Blinding Lights' }, { id: 'y', title: 'save your tears' }, { id: 'z', title: 'Earned It' }];
+  const known = [{ id: 'x', title: 'blinding  lights' }, { id: 'y', title: 'Save Your Tears' }, { id: 'z', title: 'Earned It' }];
   const plan = releasePlan(['undated'], albums, singles, known);
-  assert.deepEqual(Array.from(plan.order), ['undated', 'a1', 'a2', 's3', 's1', 's2', 's4']);
-  assert.deepEqual([...plan.covered].sort(), ['s1', 's2', 's4']);
+  // Only an exact title counts as known: a featured or other version may be
+  // a recording the list lacks, so those singles are opened.
+  assert.deepEqual(Array.from(plan.order), ['undated', 'a1', 'a2', 's2', 's3', 's4', 's1']);
+  assert.deepEqual([...plan.covered], ['s1']);
 });
 
 test('a release listed as both album and single, or needed for a year, is planned once and not deferred', () => {
@@ -182,5 +184,12 @@ test('a release listed as both album and single, or needed for a year, is planne
   const rel = (id, title) => ({ id, title, artists: by('Me') });
   const plan = releasePlan(['s1'], [rel('a1', 'One')], [rel('s1', 'Hit'), rel('a1', 'One')], [{ id: 'h', title: 'Hit' }, { id: 'o', title: 'One' }]);
   assert.deepEqual(Array.from(plan.order), ['s1', 'a1']);
+  assert.equal(plan.covered.size, 0);
+});
+
+test('singles named with a featured artist or a version are not taken as known', () => {
+  const { releasePlan } = load();
+  const rel = (id, title) => ({ id, title, artists: by('Me') });
+  const plan = releasePlan([], [], [rel('bb', 'Bad Blood (feat. Kendrick Lamar)'), rel('w', 'willow (lonely witch version)')], [{ id: 'a', title: 'Bad Blood' }, { id: 'b', title: 'willow' }]);
   assert.equal(plan.covered.size, 0);
 });

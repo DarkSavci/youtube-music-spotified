@@ -234,14 +234,6 @@ export function byAlbum(tracks: Track[], years: Map<string, number>, canon?: Map
     .map(({ first: _first, ...g }) => g);
 }
 
-// "Song (feat. Someone)" and "Song (with Someone)" are the song "Song".
-const FEATURING = /\s*[([](?:feat\.?|ft\.?|featuring|with)\s[^)\]]*[)\]]\s*$/i;
-
-/** What a single's title says its song is called, for matching it to a known song. */
-function singleSong(title: string): string {
-  return norm(editionTitle(title).replace(FEATURING, ""));
-}
-
 export interface ReleasePlan {
   /** Every release worth opening, most useful first. */
   order: string[];
@@ -271,7 +263,7 @@ export function releasePlan(
   const own = (list: Album[]) => list.filter((a) => a.id && !isCompilation(a.title));
   const open: string[] = [];
   const last: string[] = [];
-  for (const s of own(singles)) (songs.has(singleSong(s.title)) ? last : open).push(s.id);
+  for (const s of own(singles)) (songs.has(norm(s.title)) ? last : open).push(s.id);
   const order = [...new Set([...undatedListed, ...own(albums).map((a) => a.id), ...open, ...last])];
   const early = new Set([...undatedListed, ...own(albums).map((a) => a.id), ...open]);
   return { order, covered: new Set(last.filter((id) => !early.has(id))) };

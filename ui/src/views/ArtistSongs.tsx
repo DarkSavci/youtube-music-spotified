@@ -23,6 +23,9 @@ const ORDERS: { id: SongOrder; label: string }[] = [
 const RELEASE_BATCH = 60;
 // Releases opened at once.
 const RELEASE_PARALLEL = 4;
+// How many releases each artist's page may open, kept for the session so
+// going back to it does not lose the batches already asked for.
+const releaseLimits = new Map<string, number>();
 
 /**
  * Opens releases for their songs, in the order given, until `limit` of them
@@ -80,8 +83,18 @@ function useReleases(scope: string, order: string[], limit: number) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [r, version],
   );
+  // Failed releases are not retried on their own, or a refusing server
+  // would be asked forever; asking for more tries them again.
+  const retryFailed = useCallback(() => {
+    const cur = run.current;
+    if (!cur) return;
+    for (const [id, album] of cur.opened) if (album === null) cur.opened.delete(id);
+    bump();
+    pump();
+  }, [pump]);
   return {
     albums,
+    retryFailed,
     opened: r?.opened ?? EMPTY,
     loading: (r?.inflight.size ?? 0) > 0,
     failed: r ? [...r.opened.values()].filter((a) => a === null).length : 0,
@@ -153,8 +166,12 @@ export function ArtistSongsView() {
   const discSingles = discography.data?.singles;
 
   // How many releases may open; "Open more releases" raises it.
-  const [limit, setLimit] = useState(RELEASE_BATCH);
-  useEffect(() => setLimit(RELEASE_BATCH), [id]);
+  const [limit, setLimitState] = useState(() => releaseLimits.get(id) ?? RELEASE_BATCH);
+  useEffect(() => setLimitState(releaseLimits.get(id) ?? RELEASE_BATCH), [id]);
+  const setLimit = (n: number) => {
+    releaseLimits.set(id, n);
+    setLimitState(n);
+  };
   const ready = dated && complete && !discography.isPending;
   const [known, setKnown] = useState<Track[]>([]);
   const plan = useMemo(() => {
@@ -214,7 +231,8 @@ export function ArtistSongsView() {
   const unopened = plan.order.filter((r) => !releases.opened.has(r));
   const pending = releases.loading || (unopened.length > 0 && releases.opened.size < limit);
   const resolving = dated && (!complete || discography.isFetching || pending);
-  const openedCount = plan.order.length - unopened.length;
+  // Only releases that actually opened; failures are counted apart.
+  const openedCount = plan.order.filter((r) => releases.opened.get(r)).length;
   const coveredLeft = unopened.filter((r) => plan.covered.has(r)).length;
   const undated =
     dated && complete && !resolving
@@ -238,7 +256,13 @@ export function ArtistSongsView() {
             releases.failed > 0 ? `${releases.failed} could not be opened` : "",
             undated > 0 ? `${undated} without a known release date, shown last` : "",
           ].filter(Boolean).join(" · ");
-  const canOpenMore = dated && complete && !resolving && unopened.length > 0;
+  const canOpenMore = dated && complete && !resolving && unopened.length + releases.failed > 0;
+  const moreCount = Math.min(RELEASE_BATCH, unopened.length + releases.failed);
+  const openMore = () => {
+    // The failures are tried again first, within the new batch.
+    setLimit(releases.opened.size - releases.failed + RELEASE_BATCH);
+    releases.retryFailed();
+  };
 
   return (
     <>
@@ -276,8 +300,10 @@ export function ArtistSongsView() {
           {status}
           {isFetchNextPageError ? " · Some songs could not be loaded." : null}
           {canOpenMore ? (
-            <button className="chip artistsongs__more" onClick={() => setLimit(releases.opened.size + RELEASE_BATCH)}>
-              {`Open ${Math.min(RELEASE_BATCH, unopened.length)} more ${Math.min(RELEASE_BATCH, unopened.length) === 1 ? "release" : "releases"}`}
+            <button className="chip artistsongs__more" onClick={openMore}>
+              {unopened.length === 0
+                ? "Try again"
+                : `Open ${moreCount} more ${moreCount === 1 ? "release" : "releases"}`}
             </button>
           ) : null}
         </p>
