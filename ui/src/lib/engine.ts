@@ -186,6 +186,8 @@ export class NativeEngine implements Engine {
   private releaseTimer: number | undefined;
   /** Recovery attempts for the current track; see recover(). */
   private recoveries = 0;
+  /** The epoch a failure was last reported for; see fail(). */
+  private failedEpoch = -1;
   /** The last position the playing deck was known to be at, in seconds. */
   private lastGoodAt = 0;
   /** When the playing deck last moved forward, for the stall watchdog. */
@@ -282,13 +284,24 @@ export class NativeEngine implements Engine {
           this.emit({ kind: "blocked", epoch, reason });
           return;
         }
-        this.emit({
-          kind: "failed",
-          epoch,
-          reason: reason ?? (code ? `media_error_${code}` : "media_error"),
-        });
+        this.fail(epoch, reason ?? (code ? `media_error_${code}` : "media_error"));
       });
     });
+  }
+
+  /*
+   * Reports a failure once per load of a track.
+   *
+   * A deck whose source failed rejects every play() after it, and each
+   * projection from the core reconciles, and so calls play(), again. Every
+   * rejection used to be reported, so one dead track arrived as a burst of
+   * twenty failures that tripped the engine fallback by itself. A fresh press
+   * of play re-arms it (see apply()), so retrying a dead track still reports.
+   */
+  private fail(epoch: number, reason: string) {
+    if (this.failedEpoch === epoch) return;
+    this.failedEpoch = epoch;
+    this.emit({ kind: "failed", epoch, reason });
   }
 
   private srcFor(videoId: string): string {
@@ -412,6 +425,7 @@ export class NativeEngine implements Engine {
   apply(target: Target) {
     const prev = this.current;
     this.current = target;
+    if (prev && target.playing && !prev.playing) this.failedEpoch = -1;
 
     if (!target.videoId) {
       for (const el of this.decks) el.pause();
@@ -515,8 +529,19 @@ export class NativeEngine implements Engine {
       for (const el of this.decks) el.volume = perceptualGain(target.volume);
     }
 
+    // Pressing play on a track whose load already failed: the element keeps
+    // its error and would reject play() forever without reporting again, so
+    // the player sat on "playing" in silence. Load it afresh instead.
+    const retry = target.playing && !prev?.playing && this.deck.error !== null;
+    if (retry && this.loaded(this.deck, target.videoId)) {
+      this.recoveries = 0;
+      this.point(this.deck, target.videoId);
+      if (target.startAtMs > 0) this.deck.currentTime = target.startAtMs / 1000;
+    }
+
     if (target.playing) {
-      void this.deck.play().catch((err) => {
+      const deck = this.deck;
+      void deck.play().catch((err) => {
         // NotAllowedError is the autoplay policy asking for a gesture, not a
         // broken track. Treating the two alike burned through the queue,
         // marking each track unplayable on the way past.
@@ -528,11 +553,12 @@ export class NativeEngine implements Engine {
         // a track change, a pause, a teardown. The track is untouched, and
         // reporting it faulted the queue one entry at a time.
         if (err?.name === "AbortError") return;
-        this.emit({
-          kind: "failed",
-          epoch: target.epoch,
-          reason: String(err?.name ?? "play_rejected"),
-        });
+        // A source that failed to load rejects play() too, but the element's
+        // error listener owns that failure: it retries, or asks why, first.
+        // By the time this runs a retry may already have cleared deck.error,
+        // so the rejection's name is what identifies it.
+        if (err?.name === "NotSupportedError" || deck.error) return;
+        this.fail(target.epoch, String(err?.name ?? "play_rejected"));
       });
       this.startTicker();
     } else {
@@ -774,11 +800,17 @@ export class NativeEngine implements Engine {
    * no error, no end, just silence with the pause button showing. Twenty
    * seconds without moving while it should be playing is treated as the
    * failure it is.
+   *
+   * A seek is not exempt. A retry seeks back to where the track was, and when
+   * the range it needs is refused the element stays "seeking" for good; with
+   * seeking exempt the watchdog never fired and the player sat on "playing"
+   * in silence until the app was restarted. A seek that lands within the
+   * window moves currentTime, which counts as progress.
    */
   private watchForStall(el: HTMLAudioElement) {
     const now = performance.now();
     const t = this.current;
-    if (!t?.playing || el.paused || el.seeking) {
+    if (!t?.playing || el.paused) {
       this.progressAt = now;
       return;
     }
@@ -789,9 +821,7 @@ export class NativeEngine implements Engine {
     }
     if (now - this.progressAt < STALL_MS) return;
     this.progressAt = now;
-    if (!this.recover(el)) {
-      this.emit({ kind: "failed", epoch: t.epoch, reason: "stalled" });
-    }
+    if (!this.recover(el)) this.fail(t.epoch, "stalled");
   }
 
   private learnEdges(videoId: string, attempt = 0) {
