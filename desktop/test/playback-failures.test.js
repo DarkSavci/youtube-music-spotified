@@ -41,6 +41,7 @@ test('the failure ladder counts distinct tracks, falls back at the threshold, an
 function nativeHarness(options = {}) {
   const clock = { now: 0 };
   const timeouts = [];
+  const intervals = [];
   const events = [];
   const decks = [];
   class FakeAudio {
@@ -67,7 +68,7 @@ function nativeHarness(options = {}) {
     Audio: FakeAudio,
     MediaError: { MEDIA_ERR_ABORTED: 1 },
     performance: { now: () => clock.now },
-    window: { setInterval: () => 1, clearInterval: noop, setTimeout: (fn) => timeouts.push(fn), clearTimeout: noop },
+    window: { setInterval: (fn) => (intervals.push(fn), 1), clearInterval: noop, setTimeout: (fn) => timeouts.push(fn), clearTimeout: noop },
     setInterval: () => 1, clearInterval: noop, setTimeout: () => 1, clearTimeout: noop,
     fetch: async () => ({ ok: true, json: async () => ({ rateLimited: false }) }),
     console: { info: noop, warn: noop, debug: noop },
@@ -81,7 +82,8 @@ function nativeHarness(options = {}) {
   const native = new engine.NativeEngine((e) => events.push(e));
   const target = (over = {}) => ({ epoch: 1, videoId: 'dead1234567', startAtMs: 0, playing: true, preloadVideoId: null, volume: 1, transition: { kind: 'gapless' }, ...over });
   const runTimeouts = () => { for (const fn of timeouts.splice(0)) fn(); };
-  return { native, decks, events, target, clock, runTimeouts, failures: () => events.filter((e) => e.kind === 'failed') };
+  const tick = (ms = 250) => { clock.now += ms; for (const fn of intervals) fn(); };
+  return { native, decks, events, target, clock, runTimeouts, tick, failures: () => events.filter((e) => e.kind === 'failed') };
 }
 
 test('a dead track is reported once, however many reconciles reject play()', async () => {
@@ -309,4 +311,87 @@ test('a silence measurement that keeps missing is asked for a few times, not eve
   // One first ask and three retries (EDGE_RETRY_MS), then no more.
   assert.equal(perTrack('live1234567'), 4);
   assert.equal(perTrack('next1234567'), 4);
+});
+
+// Plays for a while, then the connection dies: currentTime stops moving.
+function playThenFreeze(h, id, seconds) {
+  h.native.apply(h.target({ videoId: id }));
+  const deck = h.decks.find((d) => d.src.includes(id));
+  deck.paused = false;
+  for (let i = 1; i <= seconds * 4; i++) { deck.currentTime = i / 4; h.tick(); }
+  return deck;
+}
+
+test('a deck that stops moving says it is buffering at once, and reports no frozen positions', async () => {
+  const h = nativeHarness();
+  const deck = playThenFreeze(h, 'froz1234567', 59);
+  const mark = h.events.length;
+  // 1.5 s without movement: one "stalled", and no position reports after it.
+  for (let i = 0; i < 6; i++) h.tick();
+  const after = h.events.slice(mark);
+  const stalled = after.findIndex((e) => e.kind === 'stalled');
+  assert.ok(stalled >= 0, 'buffering reported');
+  assert.ok(after.filter((e) => e.kind === 'stalled').length === 1);
+  for (let i = 0; i < 8; i++) h.tick();
+  assert.equal(h.events.slice(mark + stalled + 1).filter((e) => e.kind === 'position').length, 0);
+  // It moves again: positions resume, so the core goes back to "playing".
+  deck.currentTime = 59.5; h.tick();
+  assert.equal(h.events.at(-1).kind, 'position');
+  assert.equal(h.events.at(-1).positionMs, 59500);
+});
+
+test('a stream that dies mid-track fails in about twenty seconds, not a minute', async () => {
+  const h = nativeHarness();
+  const deck = playThenFreeze(h, 'dies1234567', 59);
+  const frozeAt = h.clock.now;
+  const reloads = [];
+  let failedAt = null;
+  while (h.clock.now - frozeAt < 60_000 && failedAt === null) {
+    const src = deck.src;
+    h.tick();
+    // A retry reloads the same track; its range is refused, so it never moves.
+    if (deck.src !== src) { reloads.push(h.clock.now - frozeAt); deck.paused = false; deck.currentTime = 59; }
+    await flush();
+    if (h.failures().length) failedAt = h.clock.now - frozeAt;
+  }
+  assert.equal(reloads.length, 2, 'picked up again twice first');
+  assert.ok(reloads[0] <= 6_500, `first retry after ${reloads[0]} ms`);
+  assert.ok(failedAt !== null && failedAt <= 21_000, `failed after ${failedAt} ms`);
+  assert.deepEqual(h.failures().map((e) => e.reason), ['stalled']);
+});
+
+test('a slow first load is given time before it counts as stalled', async () => {
+  const h = nativeHarness();
+  h.native.apply(h.target({ videoId: 'slow1234567' }));
+  const deck = h.decks.find((d) => d.src.includes('slow1234567'));
+  deck.paused = false;
+  const src = deck.src;
+  // Twelve seconds with no first byte: buffering, but not retried or failed.
+  for (let i = 0; i < 48; i++) h.tick();
+  await flush();
+  assert.ok(h.events.some((e) => e.kind === 'stalled'));
+  assert.equal(deck.src, src, 'not reloaded yet');
+  assert.equal(h.failures().length, 0);
+  // Then it starts.
+  deck.currentTime = 0.25; h.tick();
+  assert.equal(h.events.at(-1).kind, 'position');
+});
+
+test('a track that never starts is retried once, patiently, and fails in about half a minute', async () => {
+  const h = nativeHarness();
+  h.native.apply(h.target({ videoId: 'none1234567' }));
+  const deck = h.decks.find((d) => d.src.includes('none1234567'));
+  deck.paused = false;
+  const start = h.clock.now;
+  let reloads = 0;
+  let failedAt = null;
+  while (h.clock.now - start < 60_000 && failedAt === null) {
+    const src = deck.src;
+    h.tick();
+    if (deck.src !== src) { reloads++; deck.paused = false; }
+    await flush();
+    if (h.failures().length) failedAt = h.clock.now - start;
+  }
+  assert.equal(reloads, 1);
+  assert.ok(failedAt !== null && failedAt >= 29_000 && failedAt <= 31_000, `failed after ${failedAt} ms`);
 });

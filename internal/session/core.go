@@ -503,6 +503,7 @@ func (c *Core) HandleEngine(ev EngineEvent) []LogEntry {
 		if ev.PositionMs > c.lastPositionMs {
 			c.playedMs += ev.PositionMs - c.lastPositionMs
 		}
+		moved := ev.PositionMs != c.lastPositionMs
 		c.lastPositionMs = ev.PositionMs
 		c.state.PositionMs = ev.PositionMs
 		c.state.PositionAt = c.clk.Now()
@@ -518,7 +519,9 @@ func (c *Core) HandleEngine(ev EngineEvent) []LogEntry {
 				cur.DurationMs = ev.DurationMs
 			}
 		}
-		if c.state.State == domain.StateStalled {
+		// Only movement ends a stall. A report of the same frozen position
+		// would otherwise put "playing" back over a deck that is silent.
+		if c.state.State == domain.StateStalled && moved {
 			c.state.State = domain.StatePlaying
 		}
 		c.bump()

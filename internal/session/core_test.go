@@ -584,6 +584,23 @@ func TestPositionReportClearsAStall(t *testing.T) {
 	}
 }
 
+// A report of the same frozen position is not data arriving: the stall
+// stays, or the bar would show "playing" over silence.
+func TestFrozenPositionKeepsAStall(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 3)
+	c.HandleEngine(EngineEvent{Kind: EvPosition, Epoch: c.State().Epoch, PositionMs: 59000})
+	c.HandleEngine(EngineEvent{Kind: EvStalled, Epoch: c.State().Epoch})
+	c.HandleEngine(EngineEvent{Kind: EvPosition, Epoch: c.State().Epoch, PositionMs: 59000})
+	if got := c.State().State; got != domain.StateStalled {
+		t.Fatalf("state = %v, want still stalled", got)
+	}
+	c.HandleEngine(EngineEvent{Kind: EvPosition, Epoch: c.State().Epoch, PositionMs: 59250})
+	if got := c.State().State; got != domain.StatePlaying {
+		t.Fatalf("state = %v, want playing once it moved", got)
+	}
+}
+
 // An explicit pause still stops the engine — intent is the user's, not the
 // buffer's.
 func TestPauseStillStopsTheEngine(t *testing.T) {
