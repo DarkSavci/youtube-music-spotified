@@ -98,14 +98,59 @@ test("taking turns shares the picks and leaves the radio at the end", () => {
   assert.ok(next.findIndex((e) => e.addedBy.id === guest.id) < 2);
 });
 
-test("a guest cannot add radio in a room that takes requests", () => {
-  const { room, leader, guest, send } = setup({ mode: "contributions" });
+test("only playback controllers add radio, even where guests add directly", () => {
+  for (const settings of [
+    { mode: "contributions" },
+    { mode: "contributions", autoAccept: true, limit: 2 },
+  ]) {
+    const { room, leader, guest, send } = setup(settings);
+    send(leader, { kind: "enqueue", tracks: [song(0)] });
+    assert.throws(
+      () => send(guest, { kind: "enqueue", tracks: range(100, 150), radio: true }),
+      /playback controllers/,
+    );
+    assert.equal(room.requests.length, 0);
+    assert.equal(room.queue.filter((e) => e.radio).length, 0);
+  }
+});
+
+test("a song only the radio would play can still be requested", () => {
+  const { room, leader, guest, send } = setup({ mode: "contributions", duplicates: false });
   send(leader, { kind: "enqueue", tracks: [song(0)] });
-  assert.throws(
-    () => send(guest, { kind: "enqueue", tracks: range(100, 110), radio: true }),
-    /leader adds radio/,
+  send(leader, { kind: "enqueue", tracks: [song(7)], radio: true });
+  send(guest, { kind: "request", tracks: [song(7)] });
+  send(leader, { kind: "acceptRequest", request: room.requests[0].id });
+  const copies = upcoming(room).filter((e) => e.track.id === song(7).id);
+  assert.equal(copies.length, 1);
+  assert.equal(copies[0].radio, undefined);
+});
+
+test("a radio song playing is nobody's turn", () => {
+  const { room, leader, guest, send } = setup({ mode: "collaborative", policy: "turns" });
+  send(leader, { kind: "enqueue", tracks: [song(0)] });
+  send(guest, { kind: "enqueue", tracks: [song(9)] });
+  send(leader, { kind: "next" });
+  // The guest's pick is playing; then a radio song plays after it.
+  send(leader, { kind: "enqueue", tracks: [song(100)], radio: true });
+  send(leader, { kind: "next" });
+  assert.equal(room.queue.find((e) => e.id === room.current).radio, true);
+  send(guest, { kind: "enqueue", tracks: [song(1), song(2)] });
+  send(leader, { kind: "enqueue", tracks: [song(3)] });
+  // The guest's pick played last, so the leader goes first.
+  assert.deepEqual(
+    upcoming(room).map((e) => e.track.id),
+    [song(3).id, song(1).id, song(2).id],
   );
-  assert.equal(room.requests.length, 0);
+});
+
+test("radio does not replay the song that just finished", () => {
+  const { room, leader, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [song(0)] });
+  send(leader, { kind: "next" });
+  assert.equal(room.finished, true);
+  send(leader, { kind: "enqueue", tracks: [song(0), song(5)], radio: true });
+  assert.equal(room.queue.find((e) => e.id === room.current).track.id, song(5).id);
+  assert.equal(room.queue.filter((e) => e.radio).length, 1);
 });
 
 test("radio added after the queue ran out still starts", async () => {

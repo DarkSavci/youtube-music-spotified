@@ -38,7 +38,7 @@ test('the failure ladder counts distinct tracks, falls back at the threshold, an
   assert.equal(fresh.failed(2), 'counted', 'a track that loads ends the run');
 });
 
-function nativeHarness() {
+function nativeHarness(options = {}) {
   const clock = { now: 0 };
   const timeouts = [];
   const events = [];
@@ -74,7 +74,7 @@ function nativeHarness() {
     require(name) {
       if (name === './base') return { apiUrl: (p) => p };
       if (name === './decks') return { Mixer: function Mixer() { return mixer; }, perceptualGain: (v) => v };
-      if (name === './silence') return { audibleEdges: async () => null };
+      if (name === './silence') return { audibleEdges: options.audibleEdges ?? (async () => null) };
       throw new Error(name);
     },
   });
@@ -290,4 +290,23 @@ test('a failing preload of the next track is retried twice at most, later each t
   }
   assert.equal(preloads(), 3, 'one warm-up and two retries, then no more');
   assert.equal(h.failures().length, 0, 'a failed preload is not the playing track failing');
+});
+
+test('a silence measurement that keeps missing is asked for a few times, not every reconcile', async () => {
+  const asked = [];
+  const h = nativeHarness({ audibleEdges: async (id) => { asked.push(id); return null; } });
+  // Measured for crossfades: where the sound ends and the next one begins.
+  const t = h.target({ videoId: 'live1234567', preloadVideoId: 'next1234567', transition: { kind: 'crossfade', durationMs: 5000 } });
+  for (let round = 0; round < 20; round++) {
+    // The core re-applies its target many times a minute.
+    for (let i = 0; i < 10; i++) h.native.apply({ ...t, volume: 1 - i / 100 });
+    await flush();
+    h.clock.now += 60_000;
+    h.runTimeouts();
+    await flush();
+  }
+  const perTrack = (id) => asked.filter((x) => x === id).length;
+  // One first ask and three retries (EDGE_RETRY_MS), then no more.
+  assert.equal(perTrack('live1234567'), 4);
+  assert.equal(perTrack('next1234567'), 4);
 });
