@@ -191,8 +191,8 @@ export function RoomLobby({
             Join room <IconChevronRight />
           </button>
           <div className="room-note">
-            Joining pauses your personal queue. We’ll bring it back when you
-            leave.
+            Joining pauses your personal queue. When you leave, the music
+            keeps playing from the room’s queue.
           </div>
         </section>
       </div>

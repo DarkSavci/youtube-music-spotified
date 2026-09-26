@@ -72,7 +72,7 @@ func TestRoomSeekDoesNotCountAsListenedTime(t *testing.T) {
 	}
 }
 
-func TestRoomMirrorsQueueAndRestoresPersonalSession(t *testing.T) {
+func TestRoomMirrorsQueueAndLeavingCanRestorePersonalSession(t *testing.T) {
 	c, _ := newCore(t)
 	playN(t, c, 3)
 	c.Apply(Command{Kind: CmdSeek, PositionMs: 12345})
@@ -131,5 +131,72 @@ func TestFollowingAnEmptyRoomAgainChangesNothing(t *testing.T) {
 	}
 	if c.State().Epoch != epoch || c.State().Version != version {
 		t.Fatalf("empty room resync moved epoch %d->%d, version %d->%d", epoch, c.State().Epoch, version, c.State().Version)
+	}
+}
+
+func TestLeavingCanKeepTheRoomQueuePlaying(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 3)
+	c.Apply(Command{Kind: CmdFollow, Tracks: tracks(5), StartIndex: 2, ExpectedID: "entry", PositionMs: 4000, Playing: true})
+	epoch, version := c.State().Epoch, c.State().Version
+	c.HandleEngine(EngineEvent{Kind: EvPosition, Epoch: epoch, PositionMs: 9000})
+	r, _ := c.Apply(Command{Kind: CmdLeaveRoom, KeepQueue: true})
+	s := c.State()
+	if r != RejectNone || len(s.Queue.Items) != 5 || s.Queue.Index != 2 || s.State != domain.StatePlaying {
+		t.Fatalf("room queue not kept: %+v", s)
+	}
+	if s.Epoch != epoch {
+		t.Fatalf("keeping the queue restarted the song: epoch %d -> %d", epoch, s.Epoch)
+	}
+	if s.Version <= version || c.following || c.beforeRoom != nil {
+		t.Fatal("still following the room after leaving")
+	}
+	if pos := c.positionNow(); pos < 9000 {
+		t.Fatalf("position went back to %d", pos)
+	}
+	// Now an ordinary session: the local engine advances it again.
+	c.HandleEngine(EngineEvent{Kind: EvEnded, Epoch: c.State().Epoch})
+	if c.State().Queue.Index != 3 {
+		t.Fatalf("kept queue did not advance: index %d", c.State().Queue.Index)
+	}
+}
+
+func TestKeepingAnEmptyRoomQueueRestoresThePersonalOne(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 3)
+	original := c.State().Queue.Current().ID
+	c.Apply(Command{Kind: CmdFollow})
+	c.Apply(Command{Kind: CmdLeaveRoom, KeepQueue: true})
+	s := c.State()
+	if len(s.Queue.Items) != 3 || s.Queue.Current().ID != original || s.State != domain.StatePaused {
+		t.Fatalf("empty room left nothing, personal queue should return: %+v", s)
+	}
+}
+
+func TestKeptRoomQueueHonoursShuffle(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 3)
+	c.Apply(Command{Kind: CmdSetShuffle, Shuffle: true})
+	room := tracks(8)
+	c.Apply(Command{Kind: CmdFollow, Tracks: room, StartIndex: 2, Playing: true})
+	epoch := c.State().Epoch
+	c.Apply(Command{Kind: CmdLeaveRoom, KeepQueue: true})
+	s := c.State()
+	if !s.Shuffle || s.Queue.Current().ID != room[2].ID || s.Epoch != epoch || len(s.Queue.Items) != 8 {
+		t.Fatalf("shuffle leave changed the song or lost tracks: %+v", s)
+	}
+	if s.Queue.Index != 0 {
+		t.Fatalf("shuffle is on but the kept queue is still in room order (index %d)", s.Queue.Index)
+	}
+	// Turning shuffle off must bring back the room's order.
+	c.Apply(Command{Kind: CmdSetShuffle, Shuffle: false})
+	s = c.State()
+	if s.Shuffle || s.Queue.Index != 2 || s.Queue.Current().ID != room[2].ID {
+		t.Fatalf("unshuffle did not restore room order: index %d", s.Queue.Index)
+	}
+	for i, tr := range s.Queue.Items {
+		if tr.ID != room[i].ID {
+			t.Fatalf("room order not restored at %d", i)
+		}
 	}
 }

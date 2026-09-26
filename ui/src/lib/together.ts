@@ -317,7 +317,11 @@ function route(kind: string, data: Record<string, unknown> = {}) {
   void roomCommand(command);
   return true;
 }
-export async function leaveTogether(next?: string) {
+/**
+ * Leaves the room. Playback carries on with the room's queue unless
+ * `keepQueue` is false, which brings back the queue from before the room.
+ */
+export async function leaveTogether(next?: string, keepQueue = true) {
   const leavingGeneration = ++generation;
   reconnectPause = null;
   pendingForce = false;
@@ -337,7 +341,7 @@ export async function leaveTogether(next?: string) {
   });
   await task;
   if (generation === leavingGeneration) {
-    await leaveRoomPlayback();
+    await leaveRoomPlayback(keepQueue);
     if (old && generation === leavingGeneration)
       useVideo.setState({ enabled: personalVideo });
   }
@@ -347,7 +351,9 @@ export async function connectTogether(options: ConnectOptions) {
     throw new Error(
       "Wait for the local music service to connect, then try again.",
     );
-  await leaveTogether();
+  // Switching rooms: the next room starts from the personal queue, not the
+  // last room's.
+  await leaveTogether(undefined, false);
   const version = ++generation;
   const seed = usePlayer.getState();
   personalVideo = useVideo.getState().enabled;

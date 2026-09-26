@@ -50,6 +50,9 @@ type Command struct {
 	ExpectedID string // Guard a delayed song/video switch against track changes.
 	Kind       CommandKind
 	Playing    bool // Desired room playback state for CmdFollow.
+	// KeepQueue makes CmdLeaveRoom carry on with the room's queue instead of
+	// bringing back the queue from before the room.
+	KeepQueue bool
 
 	// Play
 	Tracks     []domain.Track

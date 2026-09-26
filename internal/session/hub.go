@@ -36,6 +36,9 @@ type Device struct {
 // Projection is the state plus the target, which is everything a subscriber
 // needs to render and to reconcile its engine.
 type Projection struct {
+	// PersonalResume is the queue from before the room, set only while
+	// following a room with nothing queued, so an empty room never replaces
+	// the saved resume point with nothing.
 	PersonalResume *domain.Session `json:"-"`
 	FollowingRoom  bool            `json:"followingRoom"`
 	State          domain.Session  `json:"state"`
@@ -280,7 +283,7 @@ func (h *Hub) projectionLocked() Projection {
 		state.Degraded = []domain.TrackFault{}
 	}
 	var personal *domain.Session
-	if h.core.beforeRoom != nil {
+	if h.core.following && len(state.Queue.Items) == 0 && h.core.beforeRoom != nil {
 		saved := *h.core.beforeRoom
 		saved.Volume = state.Volume
 		personal = &saved

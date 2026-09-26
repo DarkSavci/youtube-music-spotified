@@ -35,7 +35,8 @@ async function setup(t) {
   const video = create(() => ({ enabled: false, revision: 0 }));
   const clients = [],
     calls = [],
-    toasts = [];
+    toasts = [],
+    leaves = [];
   let route, hold;
   class Client {
     constructor(options) {
@@ -100,10 +101,16 @@ async function setup(t) {
         return {
           isServerAuthoritative: () => true,
           setRoomTransport: (r) => (route = r),
-          // Like the core: leaving only pauses when a room was followed.
-          leaveRoomPlayback: async () => {
+          // Like the core: leaving only changes anything when a room was
+          // followed; it carries on with the room's queue unless told not to.
+          leaveRoomPlayback: async (keepQueue = true) => {
+            leaves.push(keepQueue);
             if (player.getState().followingRoom)
-              player.setState({ followingRoom: false, state: "paused" });
+              player.setState(
+                keepQueue
+                  ? { followingRoom: false }
+                  : { followingRoom: false, state: "paused" },
+              );
           },
           syncRoomPlayback: async (
             track,
@@ -140,6 +147,7 @@ async function setup(t) {
     clients,
     calls,
     toasts,
+    leaves,
     route: (...args) => route(...args),
     hold: (p) => (hold = p),
     flush: () => new Promise((r) => setImmediate(r)),
@@ -275,7 +283,27 @@ test("leave waits for an in-flight local correction before unlocking playback", 
   finish();
   await leaving;
   assert.equal(h.player.getState().followingRoom, false);
-  assert.equal(h.player.getState().state, "paused");
+  // Leaving carries on with the room's queue where it was.
+  assert.equal(h.player.getState().state, "playing");
+  assert.equal(h.player.getState().track.id, "abcdefghij0");
+});
+test("leaving or a room ending keeps the room's queue; switching rooms does not", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  h.clients[0].onState(room());
+  await h.flush();
+  await h.api.leaveTogether();
+  assert.equal(h.leaves.at(-1), true);
+  await h.api.connectTogether(options);
+  assert.equal(h.leaves.at(-1), false, "joining another room restores the personal queue first");
+  h.clients[1].onState(room());
+  await h.flush();
+  h.clients[1].onEnded("The leader ended the room.");
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(h.leaves.at(-1), true);
+  assert.equal(h.player.getState().followingRoom, false);
+  assert.equal(h.player.getState().state, "playing");
+  assert.equal(h.api.useTogether.getState().error, "The leader ended the room.");
 });
 test("listeners without permission are answered locally instead of sending doomed commands", async (t) => {
   const h = await setup(t);
