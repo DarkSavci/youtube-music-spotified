@@ -30,6 +30,12 @@ export interface Album {
   year?: string; trackCount: number; durationMs?: number;
   artwork: Artwork[]; dominantColor?: string;
   description?: string; explicit: boolean; tracks?: Track[];
+  /** "Album", "Single" or "EP", as YouTube labels the release. */
+  type?: string;
+  /** The primary artist's picture, for the byline. Album pages only. */
+  artistArtwork?: Artwork[];
+  /** Carousels under the track list, such as "Releases for you". */
+  shelves?: Shelf[];
 }
 
 export interface Artist {

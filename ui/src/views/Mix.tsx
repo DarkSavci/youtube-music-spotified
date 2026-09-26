@@ -2,7 +2,7 @@ import { useParams } from "react-router-dom";
 import { useMixes } from "../lib/mixes";
 import { transport } from "../lib/playback";
 import { artworkAtLeast, formatDuration } from "../lib/types";
-import { EntityHeader } from "../components/EntityHeader";
+import { EntityHeader, MetaLine } from "../components/EntityHeader";
 import { TrackTable } from "../components/TrackTable";
 import { PageState, TrackListSkeleton } from "../components/States";
 import { IconPlay } from "../components/Icon";
@@ -32,11 +32,13 @@ export function MixView() {
         title={mix.title}
         artwork={cover}
         meta={
-          <>
-            <span>{mix.description}</span>
-            <span>{`· ${mix.tracks.length} songs`}</span>
-            {total > 0 ? <span>{`· ${formatDuration(total)}`}</span> : null}
-          </>
+          <MetaLine
+            parts={[
+              mix.description ? <span>{mix.description}</span> : null,
+              <span>{`${mix.tracks.length} ${mix.tracks.length === 1 ? "song" : "songs"}`}</span>,
+              total > 0 ? <span>{formatDuration(total)}</span> : null,
+            ]}
+          />
         }
       />
       <div className="entityactions">

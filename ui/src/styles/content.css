@@ -301,21 +301,59 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
+/*
+ * Sized by length (see titleLength): a hero size suits a few words, and a long
+ * title set that large ran to six lines and shoved the artwork off the header.
+ * Whatever the size, three lines is the most a title takes; the full text is
+ * in the element's tooltip.
+ */
 .entityheader__title {
   font-size: clamp(var(--text-2xl), 6vw, var(--text-hero));
-  line-height: 1.05;
+  line-height: 1.08;
   letter-spacing: -0.04em;
+  overflow-wrap: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  /* Room for descenders, which the clamp's overflow would otherwise clip. */
+  padding-bottom: 0.06em;
+}
+.entityheader__title[data-length="medium"] {
+  font-size: clamp(var(--text-2xl), 4.5vw, 56px);
+}
+.entityheader__title[data-length="long"] {
+  font-size: clamp(var(--text-xl), 3.2vw, var(--text-3xl));
+  letter-spacing: -0.03em;
+}
+.entityheader__title[data-length="xlong"] {
+  font-size: clamp(var(--text-lg), 2.4vw, 36px);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
 }
 .entityheader__meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1) var(--space-2);
   font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 .entityheader__meta strong {
   color: var(--text-primary);
   font-weight: var(--weight-semibold);
+}
+.entityheader__byline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.entityheader__avatar {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: var(--radius-circle);
+  object-fit: cover;
 }
 
 .entityactions {
@@ -1585,8 +1623,11 @@ li[data-state="active"] .lyrics__line {
   padding: 12px var(--space-5);
   background: var(--surface-raised);
 }
+/* A long title in the sticky row must not squeeze the play button oval. */
+.entityactions > .playbtn { flex: none; }
 .entityactions__title {
   display: none;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

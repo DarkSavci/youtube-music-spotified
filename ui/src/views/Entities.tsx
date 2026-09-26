@@ -4,14 +4,14 @@ import { warmFirst } from "../lib/warm";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, browsePath } from "../lib/api";
-import { EntityHeader } from "../components/EntityHeader";
+import { EntityHeader, MetaLine } from "../components/EntityHeader";
 import { TrackTable } from "../components/TrackTable";
 import { Shelf, Card } from "../components/Shelf";
 import { PageState, TrackListSkeleton } from "../components/States";
 import { PageError } from "./Home";
 import { IconPlay } from "../components/Icon";
 import { transport } from "../lib/playback";
-import { formatDuration } from "../lib/types";
+import { artworkAtLeast, formatDuration } from "../lib/types";
 import type { Album, ShelfItem, Track } from "../lib/types";
 import { toast } from "../lib/toast";
 import { apiUrl } from "../lib/base";
@@ -38,6 +38,16 @@ function useWarmFirstTrack(tracks: Track[] | undefined) {
   }, [key]);
 }
 
+/** A release's running time the way Spotify writes it: "1 hr 51 min", "38 min 12 sec". */
+function formatLength(ms: number): string {
+  const total = Math.round(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return m > 0 ? `${h} hr ${m} min` : `${h} hr`;
+  return s > 0 ? `${m} min ${s} sec` : `${m} min`;
+}
+
 export function AlbumView() {
   const { id = "" } = useParams();
   const { data, isPending, error, refetch } = useQuery({
@@ -55,17 +65,26 @@ export function AlbumView() {
   return (
     <>
       <EntityHeader
-        kind="Album"
+        kind={data.type || "Album"}
         title={data.title}
         artwork={data.artwork}
         dominantColor={data.dominantColor}
         meta={
-          <>
-            <strong><ArtistLinks artists={data.artists} /></strong>
-            {data.year ? <span>{`· ${data.year}`}</span> : null}
-            <span>{`· ${data.trackCount} songs`}</span>
-            {data.durationMs ? <span>{`· ${formatDuration(data.durationMs)}`}</span> : null}
-          </>
+          <MetaLine
+            parts={[
+              data.artists.some((a) => a.name) ? (
+                <span className="entityheader__byline">
+                  {data.artistArtwork && data.artistArtwork.length > 0 ? (
+                    <img className="entityheader__avatar" src={artworkAtLeast(data.artistArtwork, 48)} alt="" />
+                  ) : null}
+                  <strong><ArtistLinks artists={data.artists} /></strong>
+                </span>
+              ) : null,
+              data.year ? <span>{data.year}</span> : null,
+              data.trackCount ? <span>{`${data.trackCount} ${data.trackCount === 1 ? "song" : "songs"}`}</span> : null,
+              data.durationMs ? <span>{formatLength(data.durationMs)}</span> : null,
+            ]}
+          />
         }
       />
       <div className="entityactions entityactions--sticky">
@@ -81,10 +100,16 @@ export function AlbumView() {
         <EntityActions kind="album" id={data.id} title={data.title} tracks={tracks} />
       </div>
       {tracks.length > 0 ? (
-        <TrackTable tracks={tracks} origin={data.title} variant="album" />
+        // Keeps music videos: some releases are published entirely as video
+        // tracks, and hiding them left the album with no track list at all.
+        <TrackTable tracks={tracks} origin={data.title} variant="album" keepVideos />
       ) : (
         <PageState title="No tracks" body="This album returned no playable tracks." />
       )}
+      {data.description ? <About text={data.description} /> : null}
+      {(data.shelves ?? []).map((shelf, i) => (
+        <Shelf key={`${shelf.title}-${i}`} shelf={shelf} />
+      ))}
     </>
   );
 }

@@ -40,6 +40,61 @@ func TestParseAlbumFixture(t *testing.T) {
 	}
 }
 
+// The album header carries the release type, the artist's picture, a
+// description wrapped in a shelf and a "Releases for you" carousel.
+func TestParseAlbumHeaderDetails(t *testing.T) {
+	al, ok := ParseAlbum(loadFixture(t, "album"), "MPREb_test", ParseContext{})
+	if !ok {
+		t.Fatal("album did not parse")
+	}
+	if al.Type != "Album" {
+		t.Errorf("type = %q, want Album", al.Type)
+	}
+	if len(al.Artists) != 1 || al.Artists[0].Name != "Daft Punk" || al.Artists[0].ID == "" {
+		t.Errorf("artists = %+v, want linked Daft Punk once", al.Artists)
+	}
+	if !strings.HasPrefix(al.Description, "Discovery is the second studio album") {
+		t.Errorf("description = %.60q", al.Description)
+	}
+	if len(al.ArtistArtwork) == 0 {
+		t.Error("no artist artwork")
+	}
+	if len(al.Shelves) != 1 || al.Shelves[0].Title != "Releases for you" || len(al.Shelves[0].Items) == 0 {
+		t.Errorf("shelves = %d, want the Releases for you carousel", len(al.Shelves))
+	}
+}
+
+// A compilation credits "Various Artists" as plain text with no link. It is
+// still the byline, and the long title must survive intact.
+func TestParseAlbumUnlinkedArtist(t *testing.T) {
+	al, ok := ParseAlbum(loadFixture(t, "album_various"), "MPREb_SvUyRYuEyAv", ParseContext{})
+	if !ok {
+		t.Fatal("album did not parse")
+	}
+	if !strings.HasPrefix(al.Title, "Norske Ballader: 30 Ballader") {
+		t.Errorf("title = %q", al.Title)
+	}
+	if len(al.Artists) != 1 || al.Artists[0].Name != "Various Artists" || al.Artists[0].ID != "" {
+		t.Errorf("artists = %+v, want unlinked Various Artists", al.Artists)
+	}
+	if al.Year != "2010" || al.TrackCount != 30 {
+		t.Errorf("year=%q tracks=%d, want 2010 and 30", al.Year, al.TrackCount)
+	}
+}
+
+func TestParseAlbumSingleType(t *testing.T) {
+	al, ok := ParseAlbum(loadFixture(t, "album_single"), "MPREb_msDPv5wFtf1", ParseContext{})
+	if !ok {
+		t.Fatal("single did not parse")
+	}
+	if al.Type != "Single" {
+		t.Errorf("type = %q, want Single", al.Type)
+	}
+	if len(al.Artists) == 0 || al.Artists[0].Name != "Daft Punk" {
+		t.Errorf("artists = %+v", al.Artists)
+	}
+}
+
 func TestParseArtistFixture(t *testing.T) {
 	doc := loadFixture(t, "artist")
 	pc, rec := ctxFor("artist")
