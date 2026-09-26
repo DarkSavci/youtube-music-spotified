@@ -12,11 +12,11 @@ import {
   position,
 } from "../v2.mjs";
 import { createRoomServerV2, limitKey } from "../server-v2.mjs";
-const track = (n) => ({
+const track = (n, durationMs = 10000) => ({
   id: `abcdefghij${n}`,
   title: `Song ${n}`,
   artists: [{ name: "Artist" }],
-  durationMs: 10000,
+  durationMs,
   artwork: [
     {
       url: "https://i.ytimg.com/vi/abcdefghij0/hqdefault.jpg",
@@ -690,7 +690,7 @@ test("repeat one restarts on a reported end instead of advancing", () => {
   assert.equal(room.current, first);
   assert.equal(position(room, 11000), 0);
 });
-test("a measured length fills a missing one and corrects small errors only", () => {
+test("a measured length fills a missing one, once per song", () => {
   const { room, leader, guest, send } = setup();
   send(leader, { kind: "enqueue", tracks: [{ ...track(0), durationMs: 0 }] });
   const entry = room.queue[0].id;
@@ -702,17 +702,122 @@ test("a measured length fills a missing one and corrects small errors only", () 
   assert.equal(room.queue[0].track.durationMs, 183400);
   // A length report describes the song, not the queue: pending commands stay valid.
   assert.equal(room.revision, revision);
+  // Once measured, later reports change nothing.
   assert.equal(
     command(room, guest, { kind: "duration", entry, durationMs: 180000, op: "d2" }, 1000),
-    true,
-  );
-  assert.equal(room.queue[0].track.durationMs, 180000);
-  // Nobody can cut a song short by claiming it is much shorter.
-  assert.equal(
-    command(room, guest, { kind: "duration", entry, durationMs: 30000, op: "d3" }, 1000),
     false,
   );
-  assert.equal(room.queue[0].track.durationMs, 180000);
+  assert.equal(room.queue[0].track.durationMs, 183400);
+});
+test("a measured length only corrects the catalogue length by a little", () => {
+  const { room, leader, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [{ ...track(0), durationMs: 200000 }] });
+  const entry = room.queue[0].id;
+  // Far off: refused, and the song can still be measured properly afterwards.
+  assert.equal(
+    command(room, leader, { kind: "duration", entry, durationMs: 30000, op: "far" }, 1000),
+    false,
+  );
+  assert.equal(
+    command(room, leader, { kind: "duration", entry, durationMs: 188000, op: "near" }, 1000),
+    true,
+  );
+  assert.equal(room.queue[0].track.durationMs, 188000);
+});
+test("length reports cannot be chained to cut a song short or stall the room", () => {
+  for (const mode of ["collaborative", "contributions", "listen"]) {
+    const { room, leader, guest, send } = setup();
+    send(leader, { kind: "replace", tracks: [track(0, 200000), track(1), track(2)] });
+    send(leader, { kind: "settings", mode });
+    const first = room.current;
+    let d = 200000;
+    for (let k = 0; k < 20; k++) {
+      d -= 14000;
+      try {
+        command(room, guest, { kind: "duration", entry: first, durationMs: Math.max(1000, d), op: `s${k}` }, 1000);
+      } catch {}
+    }
+    // At most one bounded correction survives: never below 185 s.
+    assert.ok(room.queue[0].track.durationMs >= 185000, mode);
+    assert.equal(tick(room, 2100), false);
+    assert.equal(room.current, first);
+    // Stretching is capped the same way, so an honest end still counts.
+    const { room: r2, leader: l2, guest: g2, send: s2 } = setup();
+    s2(l2, { kind: "replace", tracks: [track(0, 200000), track(1)] });
+    s2(l2, { kind: "settings", mode });
+    const c2 = r2.current;
+    for (let k = 0; k < 20; k++)
+      try {
+        command(r2, g2, { kind: "duration", entry: c2, durationMs: r2.queue[0].track.durationMs + 14000, op: `x${k}` }, 1000);
+      } catch {}
+    assert.ok(r2.queue[0].track.durationMs <= 215000, mode);
+    command(r2, l2, { kind: "ended", current: c2, op: "honest" }, 1000 + 200500);
+    assert.notEqual(r2.current, c2, mode);
+  }
+});
+test("listeners who cannot control playback cannot report lengths", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [{ ...track(0), durationMs: 0 }] });
+  send(leader, { kind: "settings", mode: "listen" });
+  assert.throws(
+    () => send(guest, { kind: "duration", entry: room.queue[0].id, durationMs: 1000 }),
+    /leader/,
+  );
+  assert.equal(room.queue[0].track.durationMs, 0);
+});
+test("a new media version of a song can be measured again", () => {
+  const { room, leader, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [track(0, 200000)] });
+  const entry = room.queue[0].id;
+  send(leader, { kind: "duration", entry, durationMs: 195000 });
+  send(leader, {
+    kind: "variant",
+    track: { ...track(5), durationMs: 240000, isVideo: true },
+  });
+  assert.equal(
+    command(room, leader, { kind: "duration", entry, durationMs: 247000, op: "v" }, 1000),
+    true,
+  );
+  assert.equal(room.queue[0].track.durationMs, 247000);
+});
+test("two previous presses at once restart the song once", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [track(0, 200000), track(1, 200000)] });
+  send(leader, { kind: "jump", entry: room.queue[1].id });
+  const second = room.current;
+  // Both saw the song 60 s in and meant "back to the start".
+  command(room, leader, { kind: "previous", current: second, restart: true, op: "p1" }, 61000);
+  command(room, guest, { kind: "previous", current: second, restart: true, op: "p2" }, 61001);
+  assert.equal(room.current, second);
+  assert.equal(position(room, 61001), 0);
+  // A press made after seeing the restart goes back a song.
+  command(room, leader, { kind: "previous", current: second, restart: false, op: "p3" }, 62000);
+  assert.equal(room.current, room.queue[0].id);
+});
+test("a song nobody in the room can play is moved past after a grace period", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [{ ...track(0), durationMs: 0 }, track(1)] });
+  send(leader, { kind: "play" });
+  const first = room.current;
+  leader.status = guest.status = "unavailable";
+  leader.statusEntry = first;
+  // One listener who can play it keeps the song for everyone.
+  guest.status = "listening";
+  guest.statusEntry = first;
+  assert.equal(tick(room, 2000), false);
+  assert.equal(tick(room, 60000), false);
+  assert.equal(room.current, first);
+  // A status about another song does not count either.
+  guest.status = "unavailable";
+  guest.statusEntry = "another";
+  assert.equal(tick(room, 61000), false);
+  // Everyone says so, for this song: the room waits, then moves on.
+  guest.statusEntry = first;
+  assert.equal(tick(room, 62000), false);
+  assert.equal(room.current, first);
+  assert.equal(tick(room, 72000), true);
+  assert.notEqual(room.current, first);
+  assert.match(room.activity.at(-1).text, /Nobody could play/);
 });
 test("a song added after the queue ran out starts playing", () => {
   const { room, leader, guest, send } = setup();

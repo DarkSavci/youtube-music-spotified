@@ -3,6 +3,8 @@ import { cleanSnapshot } from "./protocol.mjs";
 
 export const VERSION = 2;
 export const modes = ["collaborative", "contributions", "listen"];
+/** How long a song nobody can play holds the room before it moves on. */
+export const UNPLAYABLE_GRACE_MS = 10000;
 const id = () => randomBytes(18).toString("base64url");
 export function publicImage(value) {
   try {
@@ -98,6 +100,9 @@ export function makeRoom(pin, options = {}, now = Date.now()) {
     // A song added then starts at once instead of waiting for someone to
     // notice the room went quiet.
     finished: false,
+    // When every connected listener first said the current song will not
+    // play for them; the room moves on after a grace period.
+    unplayableSince: null,
   };
 }
 export function addMember(room, value) {
@@ -289,13 +294,17 @@ export function command(room, member, cmd, now = Date.now()) {
       // from a player whose clock ran ahead of the room, are quietly ignored
       // rather than answered with an error.
       const track = currentEntry(room)?.track;
+      // Judged against the shorter of the song's length now and the length
+      // it was added with: a corrected length may not hold a real end back.
+      const catalogue = currentEntry(room)?.catalogueMs;
+      const length = catalogue
+        ? Math.min(catalogue, track?.durationMs || catalogue)
+        : track?.durationMs;
       if (
         !track ||
         !room.playing ||
         cmd.current !== room.current ||
-        (track.durationMs
-          ? oldPosition < track.durationMs - 10000
-          : !control)
+        (length ? oldPosition < length - 10000 : !control)
       ) {
         member.operations.set(cmd.op, room.revision);
         return false;
@@ -308,19 +317,26 @@ export function command(room, member, cmd, now = Date.now()) {
       break;
     }
     case "duration": {
-      // The length a listener's player measured. It corrects a missing or
-      // rounded catalogue length, which is what the relay's clock ends songs
-      // by; it is not a way to cut someone else's song short.
+      // The length a listener's player measured. It fills a missing catalogue
+      // length or corrects a rounded one, which is what the relay's clock
+      // ends songs by. It is accepted once per song and only near the length
+      // the song was added with, so it cannot be used to cut a song short
+      // or stretch it out; and only from members who could skip it anyway.
+      if (!control)
+        throw new Error("The leader controls playback in this room.");
       const target = entry?.track;
       const ms = Math.round(Number(cmd.durationMs));
       if (!target) throw new Error("That queue entry is gone.");
-      if (!Number.isFinite(ms) || ms < 1000 || ms > 86400000)
+      if (!Number.isFinite(ms) || ms < 1000 || ms > 14400000)
         throw new Error("Invalid duration.");
-      const diff = Math.abs(ms - target.durationMs);
-      if (target.durationMs && (diff <= 1000 || diff > 15000)) {
+      const catalogue = entry.catalogueMs ?? target.durationMs;
+      const diff = Math.abs(ms - catalogue);
+      if (entry.measured || (catalogue && (diff <= 1000 || diff > 15000))) {
         member.operations.set(cmd.op, room.revision);
         return false;
       }
+      entry.catalogueMs = catalogue;
+      entry.measured = true;
       if (entry.id === room.current) {
         room.positionMs = Math.min(oldPosition, ms);
         room.at = now;
@@ -329,12 +345,18 @@ export function command(room, member, cmd, now = Date.now()) {
       presence = true;
       break;
     }
-    case "previous":
-      if (oldPosition > 3000) {
+    case "previous": {
+      // The sender says which "previous" they meant from what they saw: back
+      // to the start, or back a song. Two presses at once then restart once
+      // rather than one restarting and the other going back a song.
+      const restart =
+        typeof cmd.restart === "boolean" ? cmd.restart : oldPosition > 3000;
+      if (restart) {
         room.positionMs = 0;
         room.at = now;
       } else advance(room, -1, now);
       break;
+    }
     case "jump":
       if (!entry) throw new Error("That queue entry is gone.");
       room.finished = false;
@@ -390,6 +412,7 @@ export function command(room, member, cmd, now = Date.now()) {
       const added = tracks.map((track) => ({
         id: id(),
         track,
+        catalogueMs: track.durationMs,
         addedBy: { id: member.id, name: member.name, avatar: member.avatar },
         addedAt: now,
       }));
@@ -540,6 +563,8 @@ export function command(room, member, cmd, now = Date.now()) {
       if (!currentEntry(room)) throw new Error("No current song.");
       const oldDuration = currentEntry(room).track.durationMs;
       currentEntry(room).track = cleanTrack(cmd.track);
+      currentEntry(room).catalogueMs = currentEntry(room).track.durationMs;
+      currentEntry(room).measured = false;
       room.positionMs =
         Math.abs(currentEntry(room).track.durationMs - oldDuration) < 5000
           ? oldPosition
@@ -667,6 +692,30 @@ export function tick(room, now = Date.now()) {
       return true;
     }
   }
+  // Everyone connected said the current song will not play for them (the
+  // app reports it per entry). With nobody hearing it, the relay's clock is
+  // all that would move the room on, and a song without a length never
+  // ends; so the room moves on after a grace period. One listener who
+  // cannot play a song never skips it for the others.
+  const connected = [...room.members.values()].filter((m) => m.connected);
+  if (
+    room.playing &&
+    room.current &&
+    connected.length &&
+    connected.every(
+      (m) => m.status === "unavailable" && m.statusEntry === room.current,
+    )
+  ) {
+    room.unplayableSince ??= now;
+    if (now - room.unplayableSince >= UNPLAYABLE_GRACE_MS) {
+      const title = currentEntry(room)?.track.title;
+      room.unplayableSince = null;
+      advance(room, 1, now);
+      event(room, `Nobody could play ${title}, so the room moved on.`, now);
+      room.revision++;
+      return true;
+    }
+  } else room.unplayableSince = null;
   const track = currentEntry(room)?.track;
   if (
     !room.playing ||

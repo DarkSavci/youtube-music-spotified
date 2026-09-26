@@ -99,10 +99,13 @@ let awaitingFresh = false;
 // While a new room is being seeded from the creator's own music, its first
 // states (empty, then paused at the start) must not interrupt that music.
 let awaitingSeed = false;
-// Room entries this player has already told the relay about, so an end or a
-// measured length is reported once rather than on every sync.
-let reportedEnd = "";
+// What this player has already told the relay: when it last reported the
+// end of which entry (repeated now and then, since an early one is ignored),
+// and which entry's media it reported a measured length for.
+let reportedEnd = { entry: "", at: 0 };
 let reportedLength = "";
+/** How often an ignored end report is repeated while the room still plays the song. */
+const END_REPORT_EVERY_MS = 5000;
 // The leader's radio top-up: the seed last fetched for, whether a fetch is
 // running, and when a failed one may be tried again.
 let radioSeed = "";
@@ -129,6 +132,12 @@ export async function roomCommand(data: Record<string, unknown>) {
     return false;
   }
   useTogether.setState({ error: null });
+  // "Previous" means back to the start or back a song depending on where the
+  // song was when it was pressed; saying which keeps two presses at once from
+  // doing both.
+  const room = useTogether.getState().room;
+  if (data.kind === "previous" && data.restart === undefined && room)
+    data = { ...data, restart: position(room) > 3000 };
   return (await client?.command(data)) ?? false;
 }
 function position(room: RoomState) {
@@ -160,7 +169,8 @@ async function applyLatest(force = false) {
       appliedEntry !== (room.current ?? "") || state.track?.id !== track?.id;
   if (!force && !changed && (state.notice || state.track?.playable === false)) {
     useTogether.setState({ sync: "Track unavailable" });
-    client.send({ type: "status", status: "unavailable" });
+    // Which song: the relay moves on when everyone says so about the same one.
+    client.send({ type: "status", status: "unavailable", entry: room.current });
     return;
   }
   // This player reached the end of the song the room is still counting down
@@ -170,20 +180,32 @@ async function applyLatest(force = false) {
   const local = state.roomPlayback;
   const endedHere =
     !changed && !!local?.ended && local.entry === (room.current ?? "");
-  if (endedHere && room.playing && reportedEnd !== room.current) {
-    reportedEnd = room.current ?? "";
+  // The relay ignores an end reported well before the song's length (this
+  // player's clock may have run ahead), so it is repeated until the room
+  // moves on rather than left to the relay's own clock.
+  if (
+    endedHere &&
+    room.playing &&
+    (reportedEnd.entry !== room.current ||
+      Date.now() - reportedEnd.at >= END_REPORT_EVERY_MS)
+  ) {
+    reportedEnd = { entry: room.current ?? "", at: Date.now() };
     void client.command({ kind: "ended", current: room.current });
   }
+  // Keyed by entry and media: the video version of a song is measured again.
+  const lengthKey = `${room.current}:${track?.id}`;
   if (
     local?.entry === room.current &&
     local.durationMs > 0 &&
     track &&
-    reportedLength !== room.current &&
+    state.track?.id === track.id &&
+    reportedLength !== lengthKey &&
+    roomCanControl() &&
     (!track.durationMs ||
       (Math.abs(local.durationMs - track.durationMs) > 1000 &&
         Math.abs(local.durationMs - track.durationMs) <= 15000))
   ) {
-    reportedLength = room.current ?? "";
+    reportedLength = lengthKey;
     void client.command({
       kind: "duration",
       entry: room.current,
@@ -215,6 +237,7 @@ async function applyLatest(force = false) {
   useTogether.setState({ sync });
   client.send({
     type: "status",
+    entry: room.current,
     status:
       sync === "Buffering"
         ? "buffering"
@@ -457,8 +480,16 @@ async function topUpRoomRadio(room: RoomState) {
   radioBusy = true;
   try {
     const tracks = await radioFor(last.track.id, room);
-    const now = useTogether.getState().room;
-    if (version !== generation || !now || now.queue.at(-1)?.id !== last.id)
+    const { room: now, member: me } = useTogether.getState();
+    // Still the leader, still wanting radio, and still the same end of queue.
+    if (
+      version !== generation ||
+      !now ||
+      now.owner !== me ||
+      now.repeat !== "off" ||
+      !useSettings.getState().autoplay ||
+      now.queue.at(-1)?.id !== last.id
+    )
       return;
     radioSeed = last.track.id;
     const allowed = Math.min(50, roomAllowance(now));
@@ -506,7 +537,7 @@ export async function connectTogether(options: ConnectOptions) {
   personalVideo = useVideo.getState().enabled;
   appliedEntry = "";
   lastVideo = 0;
-  reportedEnd = "";
+  reportedEnd = { entry: "", at: 0 };
   reportedLength = "";
   radioSeed = "";
   radioBusy = false;
