@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { makeRoom, addMember, command } from "../v2.mjs";
+import { makeRoom, addMember, command, snapshot, rememberHeard, tick } from "../v2.mjs";
 
 // Radio a room adds is nobody's pick: people's songs go ahead of it, it does
 // not use up a guest's contribution limit, and only so much of it waits.
@@ -163,4 +163,56 @@ test("radio added after the queue ran out still starts", async () => {
   send(leader, { kind: "enqueue", tracks: range(100, 103), radio: true });
   assert.equal(room.queue.find((e) => e.id === room.current).track.id, song(100).id);
   assert.equal(room.playing, true);
+});
+
+test("radio never brings back a song the room jumped past, even once it is trimmed", () => {
+  const { room, leader, send } = setup();
+  send(leader, { kind: "enqueue", tracks: range(0, 40) });
+  // Jump to the 31st song: songs 1–29 were skipped and never reach the history.
+  send(leader, { kind: "jump", entry: room.queue[30].id });
+  // An addition trims the played part of the queue down to 20.
+  send(leader, { kind: "enqueue", tracks: [song(900)] });
+  assert.ok(room.queue.length < 42, "the played songs were not trimmed");
+  assert.equal(room.history.some((e) => e.track.id === song(5).id), false);
+  // Radio suggests skipped, trimmed, current and new songs.
+  send(leader, {
+    kind: "enqueue",
+    radio: true,
+    tracks: [song(5), song(15), song(29), song(30), song(500), song(501)],
+  });
+  const radio = upcoming(room).filter((e) => e.radio).map((e) => e.track.id);
+  assert.deepEqual(radio, [song(500).id, song(501).id]);
+});
+
+test("songs the room ended stay out of the radio after the history moves on", () => {
+  const { room, leader, send } = setup();
+  send(leader, { kind: "enqueue", tracks: range(0, 3) });
+  send(leader, { kind: "play" });
+  // Each song plays to its end (10 s each).
+  for (let t = 11000; t <= 31000; t += 10000) tick(room, t);
+  send(leader, { kind: "enqueue", radio: true, tracks: [song(0), song(1), song(2), song(600)] });
+  const radio = room.queue.filter((e) => e.radio).map((e) => e.track.id);
+  assert.deepEqual(radio, [song(600).id]);
+});
+
+test("people may still add a song the room already had", () => {
+  const { room, leader, guest, send } = setup({ mode: "collaborative" });
+  send(leader, { kind: "enqueue", tracks: range(0, 10) });
+  send(leader, { kind: "jump", entry: room.queue[8].id });
+  send(guest, { kind: "enqueue", tracks: [song(2)] });
+  assert.ok(upcoming(room).some((e) => e.track.id === song(2).id && !e.radio));
+});
+
+test("what the room has had is kept on the relay only, and bounded", () => {
+  const { room, leader, send } = setup();
+  send(leader, { kind: "enqueue", tracks: [song(0)] });
+  rememberHeard(room);
+  assert.ok(room.heard.has(song(0).id));
+  assert.equal("heard" in snapshot(room), false);
+  // Oldest songs are forgotten past the cap.
+  for (let n = 1; n <= 1200; n++) room.heard.add(`x${n}`);
+  rememberHeard(room);
+  assert.equal(room.heard.size, 1000);
+  assert.equal(room.heard.has("x1"), false);
+  assert.ok(room.heard.has("x1200"));
 });

@@ -929,3 +929,23 @@ test("a guest in a room that takes requests requests an album song they double-c
     JSON.stringify([["request", [track.id]]]),
   );
 });
+test("radio leaves out songs the room jumped past, after they leave the queue", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  const old = Date.now() - 60000;
+  const base = room().queue.map((e) => ({ ...e, addedAt: old }));
+  const skipped = { ...base[0], id: "entry0", track: { ...base[0].track, id: "skipped0000" } };
+  // The room plays a song…
+  c.onState(room(1, { owner: "other", current: "entry0", history: [], queue: [skipped, ...base] }));
+  await h.flush();
+  // …then jumps on, and the played part of the queue is trimmed away.
+  h.radio.tracks = [
+    { ...base[0].track, id: "skipped0000" },
+    { ...base[0].track, id: "radio000001" },
+  ];
+  c.onState(room(2, { owner: "self", repeat: "off", history: [], queue: base }));
+  for (let i = 0; i < 5; i++) await h.flush();
+  const added = c.commands.filter((x) => x.kind === "enqueue");
+  assert.deepEqual(added.at(-1).tracks.map((x) => x.id), ["radio000001"]);
+});
