@@ -211,6 +211,35 @@ export class SessionClient {
     }
   }
 
+  /**
+   * Plays a named radio (an artist's mix or shuffle) and keeps it going.
+   * "short" means it had fewer than minTracks songs (`tracks` of them) and
+   * nothing was played.
+   */
+  async startMix(
+    mix: { playlistId: string; videoId: string; params?: string },
+    origin: string,
+    minTracks = 0,
+  ): Promise<{ result: "ok" | "short" | "failed"; tracks?: number }> {
+    try {
+      const res = await fetch(apiUrl("/v1/session/radio"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceId: this.deviceID, ...mix, origin, minTracks }),
+      });
+      if (res.status === 409) {
+        const body = (await res.json().catch(() => ({}))) as { tracks?: number };
+        return { result: "short", tracks: body.tracks };
+      }
+      if (!res.ok) return { result: "failed" };
+      const body = (await res.json()) as { projection: Projection };
+      this.onProjection(body.projection);
+      return { result: "ok" };
+    } catch {
+      return { result: "failed" };
+    }
+  }
+
   /** Reports what this device's engine is doing. */
   report(event: EngineReport): void {
     void fetch(apiUrl("/v1/session/engine-event"), {

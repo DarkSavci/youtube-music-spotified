@@ -243,8 +243,15 @@ func parseListItemAsEntity(n Node) (domain.ShelfItem, bool) {
 		if cols := flexColumns(n); len(artists) == 0 && len(cols) > 1 {
 			artists = cardArtists(cols[1].Child("text"))
 		}
+		var year string
+		for _, r := range subtitleRuns(n) {
+			if y := strings.TrimSpace(r.Str("text")); isYear(y) {
+				year = y
+				break
+			}
+		}
 		return domain.ShelfItem{Kind: domain.KindAlbum, Album: &domain.Album{
-			ID: browseID, Title: title, Artwork: art, Artists: artists,
+			ID: browseID, Title: title, Artwork: art, Artists: artists, Year: year,
 		}}, true
 	case strings.Contains(pageType, "ARTIST"), strings.HasPrefix(browseID, "UC"):
 		return domain.ShelfItem{Kind: domain.KindArtist, Artist: &domain.Artist{

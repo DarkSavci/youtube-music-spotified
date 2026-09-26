@@ -29,6 +29,7 @@ const Changelog = lazy(() => import("./views/Changelog").then((m) => ({ default:
 const AlbumView = lazy(() => import("./views/Entities").then((m) => ({ default: m.AlbumView })));
 const MixView = lazy(() => import("./views/Mix").then((m) => ({ default: m.MixView })));
 const ArtistView = lazy(() => import("./views/Entities").then((m) => ({ default: m.ArtistView })));
+const ArtistSongsView = lazy(() => import("./views/ArtistSongs").then((m) => ({ default: m.ArtistSongsView })));
 const Browse = lazy(() => import("./views/Entities").then((m) => ({ default: m.Browse })));
 const PlaylistView = lazy(() => import("./views/Entities").then((m) => ({ default: m.PlaylistView })));
 const PodcastView = lazy(() => import("./views/Entities").then((m) => ({ default: m.PodcastView })));
@@ -179,6 +180,7 @@ export function App() {
               <Route path="/album/:id" element={<AlbumView />} />
               <Route path="/mix/:id" element={<MixView />} />
               <Route path="/artist/:id" element={<ArtistView />} />
+              <Route path="/artist/:id/songs" element={<ArtistSongsView />} />
               <Route path="/playlist/:id" element={<PlaylistView />} />
               <Route path="/podcast/:id" element={<PodcastView />} />
               <Route

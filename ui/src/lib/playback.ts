@@ -10,7 +10,7 @@ import { EmbeddedEngine } from "./embedded";
 import { failureLadder } from "./fallback";
 import { maxVolume, useSettings } from "./settings";
 import { SessionClient, type Projection } from "./sessionclient";
-import type { Track } from "./types";
+import type { Artist, MixSeed, Track } from "./types";
 import { currentPosition, interpolationRate, usePlayer } from "./player";
 import { effectiveSpeed, playableSpeed, type SpeedSupport } from "./speed";
 import { recordPlay } from "./playlog";
@@ -502,6 +502,38 @@ export const transport = {
     else usePlayer.getState().playFrom([track], 0, origin ?? `${track.title} radio`);
   },
 
+  /*
+   * Plays one of YouTube's named radios: an artist's mix (their music and
+   * music like it) or their shuffle. The core fetches it and keeps it going
+   * the way a song's radio keeps going; a room, which the core does not
+   * extend, gets the first page as a plain queue.
+   *
+   * Resolves "failed" when nothing could be played, and "short" when the
+   * list had fewer than minTracks songs (`tracks` of them), in which case
+   * nothing was played and the caller can play something fuller.
+   */
+  async playMix(
+    mix: MixSeed,
+    origin: string,
+    minTracks = 0,
+  ): Promise<{ result: "ok" | "short" | "failed"; tracks?: number }> {
+    if (roomTransport || !serverAuthoritative || !session) {
+      const { api } = await import("./api");
+      let tracks: Track[];
+      try {
+        tracks = (await api.mix(mix)).filter((t) => t.playable);
+      } catch {
+        return { result: "failed" };
+      }
+      if (tracks.length === 0) return { result: "failed" };
+      if (tracks.length < minTracks) return { result: "short", tracks: tracks.length };
+      this.play(tracks, 0, origin);
+      return { result: "ok" };
+    }
+    if (roomControlsLocked()) return { result: "ok" };
+    return session.startMix(mix, origin, minTracks);
+  },
+
   /** Plays another entry of the queue, one already played included. */
   jump(at: number) {
     if (routeRoom("jump", { at })) return;
@@ -738,7 +770,7 @@ export async function playEntity(
         ? (await api.album(id)).tracks
         : kind === "playlist"
           ? (await api.playlist(id)).tracks
-          : (await api.artist(id)).topTracks;
+          : await artistSongs(await api.artist(id));
     const playable = (tracks ?? []).filter((t) => t.playable);
     if (playable.length === 0) return false;
     transport.play(playable, 0, origin);
@@ -750,6 +782,27 @@ export async function playEntity(
   }
 }
 
+
+/*
+ * What playing an artist plays: every song of theirs, most played first.
+ *
+ * Playing only the five on the page looped them under repeat and never reached
+ * the albums (#48). The Top songs heading links to the full list; the five are
+ * the fallback when an artist has none, or it cannot be loaded.
+ */
+export async function artistSongs(artist: Artist, signal?: AbortSignal): Promise<Track[]> {
+  const top = (artist.topTracks ?? []).filter((t) => t.playable);
+  if (!artist.songsId) return top;
+  const { api } = await import("./api");
+  try {
+    const { byPlays } = await import("./artistsongs");
+    const all = byPlays(((await api.playlist(artist.songsId, signal)).tracks ?? []).filter((t) => t.playable));
+    return all.length > 0 ? all : top;
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    return top;
+  }
+}
 
 /** Moves playback to another device. The projection that follows updates the UI. */
 export function transferTo(deviceId: string) {

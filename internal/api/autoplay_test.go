@@ -22,8 +22,10 @@ import (
 // the first page starting with the seed itself, as YouTube's does.
 type radioCatalog struct {
 	catalog.Catalog
-	mu    sync.Mutex
-	pages []string // "seed/token" of every page asked for
+	mu     sync.Mutex
+	pages  []string // "seed/token" of every page asked for
+	params []string // the params every named list was asked for with
+	short  int      // when set, a named list is this many songs and ends
 }
 
 func (c *radioCatalog) RadioPage(_ context.Context, seed, token string) ([]domain.Track, string, error) {
@@ -40,6 +42,38 @@ func (c *radioCatalog) RadioPage(_ context.Context, seed, token string) ([]domai
 	}
 	for i := range 10 {
 		out = append(out, track(fmt.Sprintf("%s-r%d-%d", seed, page, i)))
+	}
+	return out, fmt.Sprintf("page%d", page+1), nil
+}
+
+// MixPage serves a named list the same way, its pages recorded as
+// "list:seed/token" so a test can tell the two kinds of radio apart.
+func (c *radioCatalog) MixPage(ctx context.Context, mix domain.MixSeed, token string) ([]domain.Track, string, error) {
+	seed, list := mix.VideoID, mix.PlaylistID
+	c.mu.Lock()
+	c.pages = append(c.pages, list+":"+seed+"/"+token)
+	c.params = append(c.params, mix.Params)
+	short := c.short
+	c.mu.Unlock()
+	if short > 0 {
+		var out []domain.Track
+		for i := range short {
+			out = append(out, track(fmt.Sprintf("%s-%s-short-%d", list, seed, i)))
+		}
+		return out, "", nil
+	}
+	c.mu.Lock()
+	c.mu.Unlock()
+	page := 0
+	if token != "" {
+		fmt.Sscanf(token, "page%d", &page)
+	}
+	var out []domain.Track
+	if page == 0 {
+		out = append(out, track(seed))
+	}
+	for i := range 10 {
+		out = append(out, track(fmt.Sprintf("%s-%s-%d-%d", list, seed, page, i)))
 	}
 	return out, fmt.Sprintf("page%d", page+1), nil
 }
@@ -205,5 +239,115 @@ func TestRepeatOffResumesAutoplay(t *testing.T) {
 	_, _ = hub.Command(ctx, "d", session.Command{Kind: session.CmdSetRepeat, Repeat: domain.RepeatOff})
 	if ids := waitQueue(t, hub, 4); ids[3] != "p3-r0-0" {
 		t.Fatalf("queue %v", ids)
+	}
+}
+
+// An artist's radio is a named list with the song it starts from. It plays
+// that list and keeps extending it from the same list, not from a song's own
+// radio (#47).
+func TestStartingAnArtistMixContinuesTheList(t *testing.T) {
+	s, hub, cat, _ := radioServer(t)
+	body, _ := json.Marshal(map[string]any{"deviceId": "d", "playlistId": "RDEMx", "videoId": "seed", "origin": "Artist radio"})
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/session/radio", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	ids := queueIDs(hub)
+	if len(ids) != 11 || ids[0] != "seed" || ids[1] != "RDEMx-seed-0-0" {
+		t.Fatalf("queue %v", ids)
+	}
+	if o := hub.Projection().State.Queue.Origin; o != "Artist radio" {
+		t.Errorf("origin %q", o)
+	}
+
+	_, _ = hub.Command(context.Background(), "d", session.Command{Kind: session.CmdJump, At: 8})
+	ids = waitQueue(t, hub, 21)
+	if ids[11] != "RDEMx-seed-1-0" {
+		t.Fatalf("continued with %s, want the list's next page", ids[11])
+	}
+	for _, p := range cat.asked() {
+		if !strings.HasPrefix(p, "RDEMx:") {
+			t.Errorf("asked for %q, a page from outside the list", p)
+		}
+	}
+}
+
+// The room path needs the list's tracks without playing them.
+func TestRadioEndpointServesANamedList(t *testing.T) {
+	s, _, _, _ := radioServer(t)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/radio/seed?list=RDAOx", nil))
+	var tracks []domain.Track
+	if err := json.Unmarshal(rec.Body.Bytes(), &tracks); err != nil || len(tracks) != 11 || tracks[1].ID != "RDAOx-seed-0-0" {
+		t.Fatalf("status %d tracks %v err %v", rec.Code, tracks, err)
+	}
+}
+
+// The button's params go with the first request: they are what make an
+// artist's shuffle their own songs rather than a generic radio.
+func TestArtistMixSendsTheButtonsParams(t *testing.T) {
+	s, _, cat, _ := radioServer(t)
+	body, _ := json.Marshal(map[string]any{"deviceId": "d", "playlistId": "RDAOx", "videoId": "seed", "params": "wAEB8gECGAE%3D"})
+	s.mux.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/session/radio", bytes.NewReader(body)))
+	cat.mu.Lock()
+	defer cat.mu.Unlock()
+	if len(cat.params) == 0 || cat.params[0] != "wAEB8gECGAE%3D" {
+		t.Fatalf("params sent: %v", cat.params)
+	}
+}
+
+// A list shorter than the caller asked for is refused without touching the
+// queue, so a small artist's three-song shuffle can be replaced by a shuffle
+// of their songs rather than drifting into other artists' radio.
+func TestAShortMixIsRefusedUntouched(t *testing.T) {
+	s, hub, cat, _ := radioServer(t)
+	_, _ = hub.Command(context.Background(), "d", session.Command{Kind: session.CmdPlay, Tracks: []domain.Track{track("before")}, Origin: "Before"})
+	cat.mu.Lock()
+	cat.short = 3
+	cat.mu.Unlock()
+	body, _ := json.Marshal(map[string]any{"deviceId": "d", "playlistId": "RDAOx", "videoId": "seed", "minTracks": 20})
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/session/radio", bytes.NewReader(body)))
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"short":true`) {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	// Autoplay may top the one-song queue up with its own radio meanwhile;
+	// what matters is that the refused list replaced nothing.
+	ids := queueIDs(hub)
+	if len(ids) == 0 || ids[0] != "before" || hub.Projection().State.Queue.Index != 0 {
+		t.Fatalf("queue changed to %v", ids)
+	}
+	for _, id := range ids {
+		if strings.Contains(id, "-short-") {
+			t.Fatalf("the refused list reached the queue: %v", ids)
+		}
+	}
+}
+
+// Playing the artist after shuffling them starts from the same song, so the
+// two queues must differ by origin; otherwise autoplay took the new queue for
+// the shuffle and kept extending the shuffle's list into it.
+func TestPlayingAfterAMixDoesNotContinueTheMix(t *testing.T) {
+	s, hub, cat, _ := radioServer(t)
+	body, _ := json.Marshal(map[string]any{"deviceId": "d", "playlistId": "RDAOx", "videoId": "seed", "origin": "Artist · Shuffle"})
+	s.mux.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/session/radio", bytes.NewReader(body)))
+	waitQueue(t, hub, 11)
+
+	songs := []domain.Track{track("seed")}
+	for i := range 6 {
+		songs = append(songs, track(fmt.Sprintf("song%d", i)))
+	}
+	_, _ = hub.Command(context.Background(), "d", session.Command{Kind: session.CmdPlay, Tracks: songs, Origin: "Artist"})
+	before := len(cat.asked())
+	_, _ = hub.Command(context.Background(), "d", session.Command{Kind: session.CmdJump, At: 4})
+	ids := waitQueue(t, hub, 8)
+	if !strings.HasPrefix(ids[7], "song5-r0-") {
+		t.Fatalf("continued with %s, want the radio of the queue's last song", ids[7])
+	}
+	for _, p := range cat.asked()[before:] {
+		if strings.HasPrefix(p, "RDAOx:") {
+			t.Errorf("asked the shuffle for %q after the queue changed", p)
+		}
 	}
 }
