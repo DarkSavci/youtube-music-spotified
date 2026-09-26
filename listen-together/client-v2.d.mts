@@ -24,6 +24,8 @@ export interface Entry {
   addedAt: number;
   /** The request this entry was accepted from, if it was one. */
   request?: string;
+  /** Added by the room's radio: songs people add go ahead of it. */
+  radio?: boolean;
 }
 /** A song a guest asked for, waiting for the leader or a DJ. */
 export interface SongRequest {

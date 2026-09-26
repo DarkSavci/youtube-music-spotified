@@ -151,9 +151,9 @@ function RoomRequests({
       <span className="room-track__meta">
         <strong>{r.track.title}</strong>
         <span>
-          {answers
-            ? `${artistNames(r.track.artists)} · from ${r.by.name}`
-            : artistNames(r.track.artists)}
+          {[artistNames(r.track.artists), answers ? `from ${r.by.name}` : ""]
+            .filter(Boolean)
+            .join(" · ")}
         </span>
       </span>
       {answers ? (

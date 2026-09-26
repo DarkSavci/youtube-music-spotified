@@ -26,6 +26,7 @@ For remote access, put this listener behind an HTTPS reverse proxy that forwards
 - History and deliberate save to a personal playlist; optional ready check/countdown with override and timeout.
 - Shared song/video selection and independent picture visibility, with opt-in remote display changes.
 - Public artwork metadata allowlist and broken/missing artwork fallback.
+- Song radio: an enqueue with `radio: true` is marked as radio. Songs people add or accept go ahead of it, it does not count toward anyone's contribution limit, it skips songs already coming up, at most 50 radio songs wait at once, and a person choosing a song the radio would have played replaces its radio copy. A guest in a Take requests room cannot add radio.
 - Leaving or a room ending carries on with the room's queue (same song, position and play state); the queue from before the room comes back only when switching to another room or when the room had nothing queued. While a room is active the room's queue is the saved resume point, so quitting mid-room reopens where the room was, paused.
 
 Every listener needs their own playable YouTube session; rooms transmit no audio or signed stream URLs. Profile names/pictures are display choices, not verified identities. Kick revokes the seat's credential and rotates the PIN, but does not permanently identify/ban an anonymous person who is given a new PIN.
