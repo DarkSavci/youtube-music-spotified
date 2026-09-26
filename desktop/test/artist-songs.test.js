@@ -160,3 +160,27 @@ test('a song the list carries twice keeps its place, on its original release', (
   const out = withReleases([on('1', 'Wicked Games', 'The Highlights'), on('2', 'Other', 'X'), on('3', 'Wicked Games', 'House of Balloons')], [], me);
   assert.deepEqual(Array.from(out, (t) => `${t.id}@${t.album.name}`), ['3@House of Balloons', '2@X']);
 });
+
+test('releases open albums first, then singles, and a single whose song is known last', () => {
+  const { releasePlan } = load();
+  const rel = (id, title) => ({ id, title, artists: by('Me') });
+  const albums = [rel('a1', 'After Hours'), rel('comp', 'The Highlights'), rel('a2', 'Starboy (Deluxe)')];
+  const singles = [
+    rel('s1', 'Blinding Lights'),
+    rel('s2', 'Save Your Tears (feat. Someone)'),
+    rel('s3', 'Brand New Song'),
+    rel('s4', 'Earned It [Remastered]'),
+  ];
+  const known = [{ id: 'x', title: 'Blinding Lights' }, { id: 'y', title: 'save your tears' }, { id: 'z', title: 'Earned It' }];
+  const plan = releasePlan(['undated'], albums, singles, known);
+  assert.deepEqual(Array.from(plan.order), ['undated', 'a1', 'a2', 's3', 's1', 's2', 's4']);
+  assert.deepEqual([...plan.covered].sort(), ['s1', 's2', 's4']);
+});
+
+test('a release listed as both album and single, or needed for a year, is planned once and not deferred', () => {
+  const { releasePlan } = load();
+  const rel = (id, title) => ({ id, title, artists: by('Me') });
+  const plan = releasePlan(['s1'], [rel('a1', 'One')], [rel('s1', 'Hit'), rel('a1', 'One')], [{ id: 'h', title: 'Hit' }, { id: 'o', title: 'One' }]);
+  assert.deepEqual(Array.from(plan.order), ['s1', 'a1']);
+  assert.equal(plan.covered.size, 0);
+});
