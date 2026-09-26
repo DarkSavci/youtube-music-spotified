@@ -652,6 +652,13 @@ func (c *Core) handleFailure(reason string) []LogEntry {
 	if cur == nil {
 		return nil
 	}
+	// Paused, nobody is waiting on the track: a load that failed in the
+	// background (a restored session, a refused stream) must not move on and
+	// start the next one. It stays where it is; pressing play tries it again,
+	// and a failure then walks the ladder as usual.
+	if c.state.State == domain.StatePaused {
+		return nil
+	}
 	c.state.Degraded = append(c.state.Degraded, domain.TrackFault{
 		Index:  c.state.Queue.Index,
 		Reason: reason,
