@@ -263,3 +263,31 @@ test('embedded: errors are reported once per track, and a track that never start
   h.handlers().onStateChange({ data: 1 });
   assert.equal(h.timers.size, 0);
 });
+
+test('a failing preload of the next track is retried twice at most, later each time', async () => {
+  const h = nativeHarness();
+  const preloads = () => h.decks.reduce((n, d) => n + (d.pointed ?? 0), 0);
+  // Count every time a deck is pointed at the next track's preload URL.
+  for (const d of h.decks) {
+    let src = d.src;
+    Object.defineProperty(d, 'src', {
+      get: () => src,
+      set: (v) => { src = v; if (String(v).includes('next1234567')) d.pointed = (d.pointed ?? 0) + 1; },
+    });
+  }
+  const t = h.target({ videoId: 'live1234567', preloadVideoId: 'next1234567' });
+  h.native.apply(t);
+  assert.equal(preloads(), 1, 'the next track is warmed');
+  const idle = h.decks.find((d) => d.src.includes('next1234567'));
+  // Every attempt is refused. The core keeps reconciling meanwhile.
+  for (let round = 0; round < 10; round++) {
+    idle.error = { code: 4 };
+    idle.fire('error');
+    for (let i = 0; i < 20; i++) h.native.apply({ ...t, volume: 1 - i / 100 });
+    h.clock.now += 60_000;
+    h.runTimeouts();
+    await flush();
+  }
+  assert.equal(preloads(), 3, 'one warm-up and two retries, then no more');
+  assert.equal(h.failures().length, 0, 'a failed preload is not the playing track failing');
+});
