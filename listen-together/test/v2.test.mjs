@@ -88,7 +88,8 @@ test("shared timeline deduplicates commands and rejects stale concurrent skips",
 });
 test("permissions distinguish contributions, transport, DJ and moderation", () => {
   const { room, leader, guest, send } = setup();
-  send(leader, { kind: "settings", mode: "contributions" });
+  // Auto-accept keeps the direct additions these permissions are about.
+  send(leader, { kind: "settings", mode: "contributions", autoAccept: true });
   send(leader, { kind: "enqueue", tracks: [track(0)] });
   send(guest, { kind: "enqueue", tracks: [track(1)] });
   assert.throws(() => send(guest, { kind: "pause" }), /leader/);
@@ -490,7 +491,7 @@ test("replacing the queue only counts the new songs against a contribution limit
 });
 test("the undo offer names who may take it", () => {
   const { room, leader, guest, send } = setup();
-  send(leader, { kind: "settings", mode: "contributions" });
+  send(leader, { kind: "settings", mode: "contributions", autoAccept: true });
   send(leader, { kind: "enqueue", tracks: [song(1)] });
   send(guest, { kind: "enqueue", tracks: [song(2)] });
   send(guest, { kind: "remove", entry: room.queue[1].id });

@@ -13,6 +13,7 @@ import {
   event,
   transfer,
   tick,
+  dropRequests,
 } from "./v2.mjs";
 
 // Per-IP limits key IPv6 clients by /64, since one host usually holds a
@@ -159,6 +160,8 @@ export function createRoomServerV2({
     member.disconnectedAt = Date.now();
     if (deliberate) {
       room.members.delete(member.id);
+      // Requests wait for their requester; someone who left wants nothing.
+      dropRequests(room, member.id);
       if (room.owner === member.id) transfer(room);
       event(room, `${member.name} left.`);
     }
@@ -429,6 +432,7 @@ export function createRoomServerV2({
             const target = room.members.get(c.member),
               socket = target.socket;
             room.members.delete(target.id);
+            dropRequests(room, target.id);
             if (socket) {
               socket.room = null;
               send(socket, {
@@ -499,6 +503,7 @@ export function createRoomServerV2({
       for (const m of room.members.values())
         if (!m.connected && now - m.disconnectedAt > graceMs) {
           room.members.delete(m.id);
+          dropRequests(room, m.id);
           if (room.owner === m.id) transfer(room);
           changed = true;
         }

@@ -94,6 +94,10 @@ export function makeRoom(pin, options = {}, now = Date.now()) {
     joinApproval: false,
     pending: [],
     countdown: null,
+    // Songs guests asked for in a "Take requests" room, waiting for the
+    // leader or a DJ. autoAccept restores adding them straight to the queue.
+    requests: [],
+    autoAccept: false,
   };
 }
 export function addMember(room, value) {
@@ -117,6 +121,20 @@ export function canControl(room, member) {
     member.role === "dj" ||
     room.mode === "collaborative"
   );
+}
+/** Whether this member's additions wait for approval instead of queueing. */
+export function requesting(room, member) {
+  return (
+    room.mode === "contributions" &&
+    !room.autoAccept &&
+    !canControl(room, member)
+  );
+}
+/** Forgets a member's pending requests, e.g. when they leave or are removed. */
+export function dropRequests(room, memberId) {
+  const before = room.requests.length;
+  room.requests = room.requests.filter((r) => r.by.id !== memberId);
+  return room.requests.length !== before;
 }
 export function snapshot(room) {
   const { creatorIP, ...publicRoom } = room;
@@ -192,12 +210,98 @@ function fair(room) {
     }
   room.queue = [...room.queue.slice(0, at + 1), ...result];
 }
+// Waiting requests: at most 50 per room, and no one guest may hold more than
+// 10 of them, so one guest cannot crowd everyone else out of the leader's
+// attention. Asking is also throttled, so a guest who requests and cancels in
+// a loop cannot flood the leader with notifications and activity.
+const REQUESTS_PER_ROOM = 50,
+  REQUESTS_PER_GUEST = 10,
+  REQUEST_BURST = 10,
+  REQUEST_WINDOW_MS = 60000;
+const requestTimes = new WeakMap();
+// Moves requests into the queue. Each one is judged on its own, so one
+// duplicate does not hold back the rest; the first refusal is reported only
+// when nothing could be accepted. The per-guest queue limit is deliberately
+// not applied here: it was checked when the guest asked, and a leader or DJ
+// accepting a request is choosing to let that song in.
+function acceptRequests(room, ids, placement, member, now) {
+  let refusal = null;
+  const accepted = [];
+  // Like an addition, only a few played songs stay behind the current one,
+  // so the history does not count toward the 500-song cap. The trim is kept
+  // only if something is accepted: a refused accept leaves the room as it was.
+  const untrimmed = room.queue;
+  const played = room.queue.findIndex((e) => e.id === room.current);
+  if (played > 20) room.queue = room.queue.slice(played - 20);
+  for (const requestId of ids) {
+    const request = room.requests.find((r) => r.id === requestId);
+    if (!request) {
+      refusal ??= "That request was already handled.";
+      continue;
+    }
+    const at = room.queue.findIndex((e) => e.id === room.current);
+    if (room.queue.length >= 500) {
+      refusal ??= "The room queue is full (500 songs).";
+      break;
+    }
+    if (
+      !room.duplicates &&
+      room.queue.slice(at + 1).some((e) => e.track.id === request.track.id)
+    ) {
+      refusal ??= "That song is already in the queue.";
+      continue;
+    }
+    const entry = {
+      id: id(),
+      track: request.track,
+      addedBy: request.by,
+      addedAt: now,
+      request: request.id,
+    };
+    if (placement === "next") {
+      // Accepted together, "next" keeps them in the order they were chosen.
+      const previous = accepted.at(-1);
+      room.queue.splice(
+        previous ? room.queue.indexOf(previous) + 1 : at + 1,
+        0,
+        entry,
+      );
+    } else room.queue.push(entry);
+    room.requests = room.requests.filter((r) => r.id !== request.id);
+    accepted.push(entry);
+  }
+  if (!accepted.length) {
+    room.queue = untrimmed;
+    throw new Error(refusal || "Choose a request.");
+  }
+  if (!room.current) {
+    room.current = accepted[0].id;
+    room.positionMs = 0;
+    room.at = now;
+  }
+  // "Play next" is a deliberate position that taking turns must keep.
+  if (placement !== "next") fair(room);
+  event(
+    room,
+    accepted.length === 1
+      ? `${member.name} accepted ${accepted[0].addedBy.name}’s request for ${accepted[0].track.title}.`
+      : `${member.name} accepted ${accepted.length} requests.`,
+    now,
+  );
+}
 export function command(room, member, cmd, now = Date.now()) {
   if (!cmd || typeof cmd.op !== "string" || cmd.op.length > 100 || !cmd.op)
     throw new Error("Invalid operation.");
   if (member.operations.has(cmd.op)) return false;
   const owner = room.owner === member.id,
     control = canControl(room, member);
+  // Older apps add songs directly; in a room that takes requests the relay
+  // turns a guest's addition into a request instead of refusing it. And a
+  // request from someone who may add directly is simply an addition.
+  if (cmd.kind === "enqueue" && requesting(room, member))
+    cmd = { ...cmd, kind: "request" };
+  else if (cmd.kind === "request" && !requesting(room, member))
+    cmd = { ...cmd, kind: "enqueue", before: undefined };
   const admin = [
     "settings",
     "transfer",
@@ -209,6 +313,12 @@ export function command(room, member, cmd, now = Date.now()) {
     "deny",
     "countdown",
   ];
+  if (
+    ["acceptRequest", "declineRequest"].includes(cmd.kind) &&
+    !owner &&
+    member.role !== "dj"
+  )
+    throw new Error("Only the leader and DJs can answer requests.");
   const transport = [
     "play",
     "pause",
@@ -365,6 +475,108 @@ export function command(room, member, cmd, now = Date.now()) {
       );
       break;
     }
+    case "request": {
+      if (
+        !Array.isArray(cmd.tracks) ||
+        !cmd.tracks.length ||
+        cmd.tracks.length > 100
+      )
+        throw new Error("Request between 1 and 100 songs at a time.");
+      const tracks = cmd.tracks.map(cleanTrack);
+      const recent = (requestTimes.get(member) ?? []).filter(
+        (at) => now - at < REQUEST_WINDOW_MS,
+      );
+      if (recent.length >= REQUEST_BURST)
+        throw new Error("You're requesting quickly. Wait a moment, then try again.");
+      if (room.requests.length + tracks.length > REQUESTS_PER_ROOM)
+        throw new Error(
+          "The leader has too many requests waiting. Try again soon.",
+        );
+      if (
+        room.requests.filter((r) => r.by.id === member.id).length +
+          tracks.length >
+        REQUESTS_PER_GUEST
+      )
+        throw new Error(
+          `You can have ${REQUESTS_PER_GUEST} requests waiting at a time.`,
+        );
+      const future = room.queue.slice(
+        room.queue.findIndex((e) => e.id === room.current) + 1,
+      );
+      // Waiting requests count toward the same limit as queued songs, or
+      // the limit would only apply to what the leader already accepted.
+      if (
+        future.filter((e) => e.addedBy.id === member.id).length +
+          room.requests.filter((r) => r.by.id === member.id).length +
+          tracks.length >
+        room.limit
+      )
+        throw new Error("Your queue contribution limit has been reached.");
+      if (!room.duplicates) {
+        const seen = new Set([
+          ...future.map((e) => e.track.id),
+          ...room.requests.map((r) => r.track.id),
+        ]);
+        for (const track of tracks) {
+          if (seen.has(track.id))
+            throw new Error("That song is already queued or requested.");
+          seen.add(track.id);
+        }
+      }
+      requestTimes.set(member, [...recent, now]);
+      const by = { id: member.id, name: member.name, avatar: member.avatar };
+      room.requests = [
+        ...room.requests,
+        ...tracks.map((track) => ({ id: id(), track, by, at: now })),
+      ];
+      event(
+        room,
+        `${member.name} requested ${tracks.length === 1 ? tracks[0].title : `${tracks.length} songs`}.`,
+        now,
+      );
+      // Waiting requests do not change what plays, so they must not make
+      // the leader's pending commands stale.
+      presence = true;
+      break;
+    }
+    case "acceptRequest": {
+      const ids = Array.isArray(cmd.requests) ? cmd.requests : [cmd.request];
+      if (
+        !ids.length ||
+        ids.length > 50 ||
+        ids.some((r) => typeof r !== "string")
+      )
+        throw new Error("Choose a request.");
+      if (
+        cmd.placement !== undefined &&
+        !["end", "next"].includes(cmd.placement)
+      )
+        throw new Error("Invalid queue position.");
+      acceptRequests(room, ids, cmd.placement, member, now);
+      break;
+    }
+    case "declineRequest":
+    case "cancelRequest": {
+      const ids = Array.isArray(cmd.requests) ? cmd.requests : [cmd.request];
+      const found = room.requests.filter((r) => ids.includes(r.id));
+      if (!found.length) throw new Error("That request was already handled.");
+      if (
+        cmd.kind === "cancelRequest" &&
+        found.some((r) => r.by.id !== member.id)
+      )
+        throw new Error("You can only cancel your own requests.");
+      room.requests = room.requests.filter((r) => !ids.includes(r.id));
+      if (cmd.kind === "declineRequest")
+        event(
+          room,
+          found.length === 1
+            ? `${member.name} declined ${found[0].by.name}’s request.`
+            : `${member.name} declined ${found.length} requests.`,
+          now,
+        );
+      presence = true;
+      break;
+    }
     case "remove":
     case "move": {
       if (!entry) throw new Error("That queue entry is gone.");
@@ -427,7 +639,13 @@ export function command(room, member, cmd, now = Date.now()) {
         !["off", "one", "all"].includes(cmd.repeat)
       )
         throw new Error("Invalid repeat mode.");
-      for (const key of ["locked", "duplicates", "voteSkip", "joinApproval"])
+      for (const key of [
+        "locked",
+        "duplicates",
+        "voteSkip",
+        "joinApproval",
+        "autoAccept",
+      ])
         if (cmd[key] !== undefined && typeof cmd[key] !== "boolean")
           throw new Error("Invalid setting.");
       if (
@@ -444,9 +662,26 @@ export function command(room, member, cmd, now = Date.now()) {
         "voteSkip",
         "limit",
         "joinApproval",
+        "autoAccept",
       ])
         if (cmd[key] !== undefined) room[key] = cmd[key];
       fair(room);
+      // Requests only wait in a room that takes them. Where guests may add
+      // directly they are accepted; in a listen-only room they are dropped.
+      if (room.requests.length && room.mode === "listen") {
+        room.requests = [];
+        event(room, "Waiting song requests were cleared.", now);
+      } else if (
+        room.requests.length &&
+        (room.mode === "collaborative" || room.autoAccept)
+      ) {
+        try {
+          acceptRequests(room, room.requests.map((r) => r.id), "end", member, now);
+        } catch {}
+        // Whatever could not be queued (full, duplicates) is dropped rather
+        // than left waiting for an approval nobody will give.
+        room.requests = [];
+      }
       event(room, `${member.name} updated room settings.`, now);
       break;
     }

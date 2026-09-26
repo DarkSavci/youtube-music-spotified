@@ -22,6 +22,15 @@ export interface Entry {
   track: RoomTrack;
   addedBy: Pick<Member, "id" | "name" | "avatar">;
   addedAt: number;
+  /** The request this entry was accepted from, if it was one. */
+  request?: string;
+}
+/** A song a guest asked for, waiting for the leader or a DJ. */
+export interface SongRequest {
+  id: string;
+  track: RoomTrack;
+  by: Pick<Member, "id" | "name" | "avatar">;
+  at: number;
 }
 export type RoomMode = "collaborative" | "contributions" | "listen";
 export interface RoomState {
@@ -53,6 +62,9 @@ export interface RoomState {
   votes: string[];
   voteSkip: boolean;
   undo: { revision: number; expires: number; by: string } | null;
+  requests: SongRequest[];
+  /** Guests' additions skip approval in a "Take requests" room. */
+  autoAccept: boolean;
 }
 export interface ConnectOptions {
   server: string;

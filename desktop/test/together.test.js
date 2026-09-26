@@ -323,11 +323,13 @@ test("listeners without permission are answered locally instead of sending doome
   h.route("remove", { at: 1 });
   h.route("remove", { at: 0 });
   h.route("enqueueNext", { tracks: [h.player.getState().track] });
+  // A guest's additions are requests the leader answers, "play next" too.
   assert.deepEqual(
     c.commands.map((x) => [x.kind, x.entry]),
     [
-      ["enqueue", undefined],
+      ["request", undefined],
       ["remove", "entry2"],
+      ["request", undefined],
     ],
   );
 });
@@ -349,7 +351,7 @@ test("play next with nothing queued after the current song is an append guests m
   const h = await setup(t);
   await h.api.connectTogether(options);
   const c = h.clients[0];
-  const r = room(1, { mode: "contributions" });
+  const r = room(1, { mode: "contributions", autoAccept: true });
   r.queue = r.queue.slice(0, 1);
   c.onState(r);
   await h.flush();
@@ -501,4 +503,128 @@ test("creating a room from a playing song keeps it playing until the room has it
   assert.equal(h.calls.length, 1);
   assert.equal(h.calls[0].playing, true);
   assert.ok(h.calls[0].positionMs >= 42000);
+});
+
+const request = (id, by, title = "Wanted") => ({
+  id,
+  by: { id: by, name: by === "self" ? "Self" : "Friend" },
+  at: Date.now(),
+  track: {
+    id: `wanted${id}`.padEnd(11, "x").slice(0, 11),
+    title,
+    durationMs: 1000,
+    artists: [],
+    artwork: [],
+  },
+});
+test("in a room that takes requests a guest's song is sent as a request", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  // Like the relay: the state carrying the outcome arrives before the ack.
+  let answer = () => null;
+  c.command = (x) => {
+    c.commands.push(x);
+    const next = answer(x);
+    if (next) c.onState(next);
+    return Promise.resolve(true);
+  };
+  c.onState(room(1, { mode: "contributions", requests: [] }));
+  await h.flush();
+  answer = () =>
+    room(1, { mode: "contributions", requests: [request("n", "self")] });
+  h.route("enqueue", { tracks: [h.player.getState().track] });
+  await h.flush();
+  assert.deepEqual(
+    c.commands.map((x) => x.kind),
+    ["request"],
+  );
+  assert.match(h.toasts.at(-1), /Request sent/);
+  // Auto-accept was switched on while it travelled: the relay added it, so
+  // the guest is not told it was requested.
+  c.onState(room(2, { mode: "contributions", requests: [] }));
+  await h.flush();
+  answer = () => room(3, { mode: "contributions", autoAccept: true, requests: [] });
+  const before = h.toasts.length;
+  await h.api.roomAddTracks([h.player.getState().track]);
+  assert.equal(h.toasts.length, before);
+  // And the other way round: it looked direct, but became a request.
+  answer = () =>
+    room(3, { mode: "contributions", requests: [request("m", "self")] });
+  h.route("enqueue", { tracks: [h.player.getState().track] });
+  await h.flush();
+  assert.equal(c.commands.at(-1).kind, "enqueue");
+  assert.match(h.toasts.at(-1), /Request sent/);
+});
+test("several answers at once are told in one toast", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  const base = { mode: "contributions" };
+  c.onState(
+    room(1, {
+      ...base,
+      requests: ["a", "b", "c", "d"].map((id) => request(id, "self", id)),
+    }),
+  );
+  await h.flush();
+  const accepted = room(2, base);
+  for (const id of ["a", "b", "c"])
+    accepted.queue.push({
+      id: `entry-${id}`,
+      track: request(id, "self").track,
+      addedBy: { id: "self", name: "Self" },
+      request: id,
+    });
+  const before = h.toasts.length;
+  c.onState({ ...accepted, requests: [] });
+  await h.flush();
+  assert.deepEqual(h.toasts.slice(before), [
+    "3 of your requests were added to the queue, 1 wasn’t.",
+  ]);
+});
+test("a guest hears whether their request was added or declined, but not about one they withdrew", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  const base = { mode: "contributions" };
+  c.onState(
+    room(1, {
+      ...base,
+      requests: [
+        request("a", "self", "Added"),
+        request("b", "self", "Declined"),
+        request("c", "self", "Withdrawn"),
+      ],
+    }),
+  );
+  await h.flush();
+  await h.api.cancelRoomRequest("c");
+  const accepted = room(2, base);
+  accepted.queue.push({
+    id: "entry3",
+    track: request("a", "self").track,
+    addedBy: { id: "self", name: "Self" },
+    request: "a",
+  });
+  const before = h.toasts.length;
+  c.onState({ ...accepted, requests: [] });
+  await h.flush();
+  assert.deepEqual(h.toasts.slice(before), [
+    "1 of your requests was added to the queue, 1 wasn’t.",
+  ]);
+});
+test("the leader is told about new requests once", async (t) => {
+  const h = await setup(t);
+  await h.api.connectTogether(options);
+  const c = h.clients[0];
+  const base = { mode: "contributions", owner: "self" };
+  c.onState(room(1, { ...base, requests: [] }));
+  await h.flush();
+  const before = h.toasts.length;
+  c.onState(room(1, { ...base, requests: [request("a", "other", "Wish")] }));
+  await h.flush();
+  c.onState(room(1, { ...base, requests: [request("a", "other", "Wish")] }));
+  await h.flush();
+  assert.deepEqual(h.toasts.slice(before), ["Friend requested “Wish”."]);
 });

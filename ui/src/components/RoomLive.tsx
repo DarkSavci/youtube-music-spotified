@@ -5,6 +5,7 @@ import {
   roomCanControl,
   roomCommand,
   roomNow,
+  roomRequesting,
 } from "../lib/together";
 import { toast } from "../lib/toast";
 import { artistNames, artworkAtLeast } from "../lib/types";
@@ -156,7 +157,9 @@ function NowPlaying({ room, control }: { room: RoomState; control: boolean }) {
           {current
             ? artistNames(current.track.artists)
             : canAdd
-              ? "Add a song below, or use search anywhere in the app."
+              ? roomRequesting()
+                ? "Request a song below. The leader picks what plays."
+                : "Add a song below, or use search anywhere in the app."
               : "The leader will pick the first song."}
         </p>
         {current && (

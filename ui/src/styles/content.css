@@ -1803,10 +1803,19 @@ li[data-state="active"] .lyrics__line {
 .room-ready { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
 .room-ready span { color: var(--text-secondary); font-size: 12px; }
 .room-waiting { border-bottom: 1px solid #ffffff20; padding-bottom: 20px; margin-bottom: 20px; }
+/* Song requests waiting for the leader, above the queue they would join. */
+.room-requests { border: 1px solid #c5aded33; border-radius: 12px; background: #b99aec0b; padding: 8px 8px 4px; margin-bottom: 16px; }
+.room-requests header { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 0; }
+.room-requests h3 { font-size: 13px; font-weight: 650; margin: 0; display: flex; align-items: center; gap: 8px; }
+.room-requests h3 span { font-size: 11px; color: var(--text-secondary); font-weight: 500; }
+.room-requests .room-tracklist { margin: 0; }
+.room-request .room-textbtn { padding: 6px 10px; white-space: nowrap; }
+.room-request__status { font-size: 11px; color: #c5aded; white-space: nowrap; }
+.room-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px; border-radius: 9px; background: #c5aded; color: #211834; font-size: 10px; font-weight: 700; vertical-align: 1px; }
 .room-waiting > div { display: flex; align-items: center; gap: 6px; font-size: 11px; }
 .rooms-page { container-type: inline-size; }
 @container (max-width: 650px) { .rooms-lobby { grid-template-columns: 1fr; } .room-sessionhead { flex-wrap: wrap; } .room-pinshare { margin-left: 0; } .room-serverbar { flex-wrap: wrap; } .room-identity { flex-wrap: wrap; } .room-identity .room-check { margin-left: 0; } .room-livegrid { grid-template-columns: minmax(0,1fr); } }
-@container (max-width: 430px) { .room-now { gap: 14px; padding: 16px; } .room-now__art { width: 75px; height: 75px; } .room-now__body h2 { font-size: 18px; } .room-track__duration, .room-track__number { display: none; } }
+@container (max-width: 430px) { .room-now { gap: 14px; padding: 16px; } .room-now__art { width: 75px; height: 75px; } .room-now__body h2 { font-size: 18px; } .room-track__duration, .room-track__number { display: none; } .room-request { flex-wrap: wrap; } .room-request .room-track__by { display: none; } }
 .room-attribution { display: inline-flex; flex-shrink: 0; width: 22px; height: 22px; align-items: center; justify-content: center; border-radius: 50%; overflow: hidden; background: #504061; color: #eee; font-size: 10px; }
 .room-attribution img, .room-attribution .artwork-fallback { width: 100%; height: 100%; object-fit: cover; }
 .rooms-page .room-search input:focus-visible { outline: none; box-shadow: none; }

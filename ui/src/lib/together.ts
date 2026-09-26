@@ -105,6 +105,110 @@ export function roomCanControl() {
       room.members.find((m) => m.id === member)?.role === "dj")
   );
 }
+/**
+ * Whether songs this listener adds wait for the leader's approval: a guest in
+ * a "Take requests" room, unless the leader accepts everything.
+ */
+export function roomRequesting() {
+  const { room } = useTogether.getState();
+  return (
+    !!room &&
+    room.mode === "contributions" &&
+    !room.autoAccept &&
+    !roomCanControl()
+  );
+}
+/**
+ * Adds songs to the room, or asks for them where the leader approves.
+ *
+ * Whether they were queued or became requests is the relay's decision: the
+ * leader may switch auto-accept or the mode while this is on its way. So the
+ * answer is read from the room state the relay sends before acknowledging.
+ */
+export async function roomAddTracks(tracks: unknown[], before?: unknown) {
+  const { member, room } = useTogether.getState();
+  const waiting = new Set((room?.requests ?? []).map((r) => r.id));
+  const requesting = roomRequesting();
+  const ok = await roomCommand(
+    requesting ? { kind: "request", tracks } : { kind: "enqueue", tracks, before },
+  );
+  const sent = (useTogether.getState().room?.requests ?? []).filter(
+    (r) => r.by.id === member && !waiting.has(r.id),
+  ).length;
+  if (ok && sent)
+    toast(
+      sent === 1
+        ? "Request sent. The leader decides what plays."
+        : `${sent} requests sent. The leader decides what plays.`,
+    );
+  return ok;
+}
+// Requests this listener withdrew, so their disappearance is not reported
+// as the leader declining them.
+const cancelledRequests = new Set<string>();
+export async function cancelRoomRequest(request: string) {
+  cancelledRequests.add(request);
+  const ok = await roomCommand({ kind: "cancelRequest", request });
+  if (!ok) cancelledRequests.delete(request);
+  return ok;
+}
+function requestOutcome(added: string[], refused: string[]) {
+  const [a] = added,
+    [r] = refused;
+  if (a && !r)
+    return added.length === 1
+      ? `“${a}” was added to the queue.`
+      : `${added.length} of your requests were added to the queue.`;
+  if (r && !a)
+    return refused.length === 1
+      ? `Your request for “${r}” wasn’t added.`
+      : `${refused.length} of your requests weren’t added.`;
+  if (a && r)
+    return `${added.length} of your requests ${added.length === 1 ? "was" : "were"} added to the queue, ${refused.length} ${refused.length === 1 ? "wasn’t" : "weren’t"}.`;
+  return null;
+}
+/**
+ * Tells the leader about new requests, and a guest what became of theirs.
+ * Returns whether it said anything, so the same news is not toasted twice.
+ */
+function reportRequests(previous: RoomState, room: RoomState, member: string) {
+  let said = false;
+  const before = new Set((previous.requests ?? []).map((r) => r.id));
+  const answers =
+    room.owner === member ||
+    room.members.find((m) => m.id === member)?.role === "dj";
+  const arrived = (room.requests ?? []).filter(
+    (r) => !before.has(r.id) && r.by.id !== member,
+  );
+  const [first] = arrived;
+  if (answers && first) {
+    toast(
+      arrived.length === 1
+        ? `${first.by.name} requested “${first.track.title}”.`
+        : `${arrived.length} new song requests.`,
+    );
+    said = true;
+  }
+  // Accept all, or a change of mode, answers several requests at once; they
+  // are told in one toast, since each toast replaces the one before it.
+  const now = new Set((room.requests ?? []).map((r) => r.id));
+  const added: string[] = [],
+    refused: string[] = [];
+  for (const request of previous.requests ?? []) {
+    if (request.by.id !== member || now.has(request.id)) continue;
+    if (cancelledRequests.delete(request.id)) continue;
+    const accepted = [...room.queue, ...(room.history ?? [])].some(
+      (e) => e.request === request.id,
+    );
+    (accepted ? added : refused).push(request.track.title);
+  }
+  const outcome = requestOutcome(added, refused);
+  if (outcome) {
+    toast(outcome);
+    said = true;
+  }
+  return said;
+}
 /** The relay's clock, for countdowns and expiries it sets. */
 export function roomNow() {
   return client?.serverNow() ?? Date.now();
@@ -231,6 +335,8 @@ function denied(room: RoomState, kind: string, data: Record<string, unknown>) {
     return "Only the leader can change room settings.";
   if (roomCanControl()) return null;
   if (kind === "enqueue" && room.mode === "contributions") return null;
+  // A request has no position yet; the leader chooses where it goes.
+  if (kind === "enqueueNext" && roomRequesting()) return null;
   // With nothing after the current song, "next" is an ordinary append.
   if (kind === "enqueueNext" && room.mode === "contributions")
     return room.queue[room.queue.findIndex((e) => e.id === room.current) + 1]
@@ -314,7 +420,10 @@ function route(kind: string, data: Record<string, unknown> = {}) {
       repeat:
         room.repeat === "off" ? "all" : room.repeat === "all" ? "one" : "off",
     };
-  void roomCommand(command);
+  // Additions go through the relay's decision to queue or request them.
+  if (command.kind === "enqueue" && Array.isArray(command.tracks))
+    void roomAddTracks(command.tracks, command.before);
+  else void roomCommand(command);
   return true;
 }
 /**
@@ -425,8 +534,11 @@ export async function connectTogether(options: ConnectOptions) {
             revision: useVideo.getState().revision + 1,
           });
       }
+      const told =
+        !!previous && reportRequests(previous, room, useTogether.getState().member);
       if (
         previous &&
+        !told &&
         useRoomPreferences.getState().notifications &&
         previous.activity.at(-1)?.id !== room.activity.at(-1)?.id
       )
