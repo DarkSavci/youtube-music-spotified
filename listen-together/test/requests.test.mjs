@@ -276,3 +276,60 @@ test("real sockets: request, accept, decline, and a kicked guest's requests go",
     (room) => room.requests.length === 0 && room.members.length === 1,
   );
 });
+
+const many = (n) => ({
+  id: `q${String(n).padStart(10, "0")}`,
+  title: `Many ${n}`,
+  artists: [{ name: "Artist" }],
+  durationMs: 10000,
+  artwork: [],
+});
+test("one guest cannot hold every waiting slot, or loop request and cancel", () => {
+  const { room, guest, send } = setup();
+  assert.throws(
+    () =>
+      send(guest, {
+        kind: "request",
+        tracks: Array.from({ length: 11 }, (_, n) => many(n)),
+      }),
+    /10 requests waiting/,
+  );
+  let op = 0;
+  const at = (now, data) =>
+    command(room, guest, { op: `loop-${++op}`, ...data }, now);
+  for (let n = 0; n < 10; n++) {
+    at(1000 + n, { kind: "request", tracks: [many(n)] });
+    at(1000 + n, { kind: "cancelRequest", request: room.requests[0].id });
+  }
+  assert.throws(
+    () => at(2000, { kind: "request", tracks: [many(10)] }),
+    /requesting quickly/,
+  );
+  // A refused attempt does not count, and the window moves on.
+  at(62000, { kind: "request", tracks: [many(10)] });
+  assert.equal(room.requests.length, 1);
+});
+test("accepting keeps only a few played songs, like adding does", () => {
+  const { room, leader, guest, send } = setup();
+  send(leader, {
+    kind: "enqueue",
+    tracks: Array.from({ length: 40 }, (_, n) => many(n)),
+  });
+  send(leader, { kind: "jump", entry: room.queue[30].id });
+  send(guest, { kind: "request", tracks: [song(1)] });
+  send(leader, { kind: "acceptRequest", request: room.requests[0].id });
+  // 20 played songs, the current one, 9 upcoming and the accepted request.
+  assert.equal(room.queue.length, 31);
+  assert.equal(room.queue.at(-1).track.id, song(1).id);
+  assert.equal(room.queue.findIndex((e) => e.id === room.current), 20);
+});
+test("an explicit accept lets a request in even past the guest's limit", () => {
+  const { room, leader, guest, send } = setup({ mode: "contributions", limit: 5 });
+  send(guest, { kind: "request", tracks: [song(1), song(2)] });
+  send(leader, { kind: "settings", limit: 1 });
+  send(leader, {
+    kind: "acceptRequest",
+    requests: room.requests.map((r) => r.id),
+  });
+  assert.equal(room.queue.filter((e) => e.addedBy.id === guest.id).length, 2);
+});

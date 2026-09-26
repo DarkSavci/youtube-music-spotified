@@ -118,18 +118,28 @@ export function roomRequesting() {
     !roomCanControl()
   );
 }
-/** Adds songs to the room, or asks for them where the leader approves. */
-export async function roomAddTracks(tracks: unknown[]) {
+/**
+ * Adds songs to the room, or asks for them where the leader approves.
+ *
+ * Whether they were queued or became requests is the relay's decision: the
+ * leader may switch auto-accept or the mode while this is on its way. So the
+ * answer is read from the room state the relay sends before acknowledging.
+ */
+export async function roomAddTracks(tracks: unknown[], before?: unknown) {
+  const { member, room } = useTogether.getState();
+  const waiting = new Set((room?.requests ?? []).map((r) => r.id));
   const requesting = roomRequesting();
-  const ok = await roomCommand({
-    kind: requesting ? "request" : "enqueue",
-    tracks,
-  });
-  if (ok && requesting)
+  const ok = await roomCommand(
+    requesting ? { kind: "request", tracks } : { kind: "enqueue", tracks, before },
+  );
+  const sent = (useTogether.getState().room?.requests ?? []).filter(
+    (r) => r.by.id === member && !waiting.has(r.id),
+  ).length;
+  if (ok && sent)
     toast(
-      tracks.length === 1
+      sent === 1
         ? "Request sent. The leader decides what plays."
-        : `${tracks.length} requests sent. The leader decides what plays.`,
+        : `${sent} requests sent. The leader decides what plays.`,
     );
   return ok;
 }
@@ -141,6 +151,21 @@ export async function cancelRoomRequest(request: string) {
   const ok = await roomCommand({ kind: "cancelRequest", request });
   if (!ok) cancelledRequests.delete(request);
   return ok;
+}
+function requestOutcome(added: string[], refused: string[]) {
+  const [a] = added,
+    [r] = refused;
+  if (a && !r)
+    return added.length === 1
+      ? `“${a}” was added to the queue.`
+      : `${added.length} of your requests were added to the queue.`;
+  if (r && !a)
+    return refused.length === 1
+      ? `Your request for “${r}” wasn’t added.`
+      : `${refused.length} of your requests weren’t added.`;
+  if (a && r)
+    return `${added.length} of your requests ${added.length === 1 ? "was" : "were"} added to the queue, ${refused.length} ${refused.length === 1 ? "wasn’t" : "weren’t"}.`;
+  return null;
 }
 /**
  * Tells the leader about new requests, and a guest what became of theirs.
@@ -164,18 +189,22 @@ function reportRequests(previous: RoomState, room: RoomState, member: string) {
     );
     said = true;
   }
+  // Accept all, or a change of mode, answers several requests at once; they
+  // are told in one toast, since each toast replaces the one before it.
   const now = new Set((room.requests ?? []).map((r) => r.id));
+  const added: string[] = [],
+    refused: string[] = [];
   for (const request of previous.requests ?? []) {
     if (request.by.id !== member || now.has(request.id)) continue;
     if (cancelledRequests.delete(request.id)) continue;
     const accepted = [...room.queue, ...(room.history ?? [])].some(
       (e) => e.request === request.id,
     );
-    toast(
-      accepted
-        ? `“${request.track.title}” was added to the queue.`
-        : `Your request for “${request.track.title}” wasn’t added.`,
-    );
+    (accepted ? added : refused).push(request.track.title);
+  }
+  const outcome = requestOutcome(added, refused);
+  if (outcome) {
+    toast(outcome);
     said = true;
   }
   return said;
@@ -372,14 +401,6 @@ function route(kind: string, data: Record<string, unknown> = {}) {
     command.tracks = data.tracks.slice(0, 100);
     toast("Using the first 100 songs. Add more in batches from your library.");
   }
-  if (
-    (kind === "enqueue" || kind === "enqueueNext") &&
-    roomRequesting() &&
-    Array.isArray(command.tracks)
-  ) {
-    void roomAddTracks(command.tracks);
-    return true;
-  }
   if (kind === "toggle") command = { kind: room.playing ? "pause" : "play" };
   if (kind === "jump" || kind === "remove")
     command.entry = room.queue[Number(data.at)]?.id;
@@ -399,7 +420,10 @@ function route(kind: string, data: Record<string, unknown> = {}) {
       repeat:
         room.repeat === "off" ? "all" : room.repeat === "all" ? "one" : "off",
     };
-  void roomCommand(command);
+  // Additions go through the relay's decision to queue or request them.
+  if (command.kind === "enqueue" && Array.isArray(command.tracks))
+    void roomAddTracks(command.tracks, command.before);
+  else void roomCommand(command);
   return true;
 }
 export async function leaveTogether(next?: string) {

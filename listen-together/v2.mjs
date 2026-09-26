@@ -210,12 +210,27 @@ function fair(room) {
     }
   room.queue = [...room.queue.slice(0, at + 1), ...result];
 }
+// Waiting requests: at most 50 per room, and no one guest may hold more than
+// 10 of them, so one guest cannot crowd everyone else out of the leader's
+// attention. Asking is also throttled, so a guest who requests and cancels in
+// a loop cannot flood the leader with notifications and activity.
+const REQUESTS_PER_ROOM = 50,
+  REQUESTS_PER_GUEST = 10,
+  REQUEST_BURST = 10,
+  REQUEST_WINDOW_MS = 60000;
+const requestTimes = new WeakMap();
 // Moves requests into the queue. Each one is judged on its own, so one
 // duplicate does not hold back the rest; the first refusal is reported only
-// when nothing could be accepted.
+// when nothing could be accepted. The per-guest queue limit is deliberately
+// not applied here: it was checked when the guest asked, and a leader or DJ
+// accepting a request is choosing to let that song in.
 function acceptRequests(room, ids, placement, member, now) {
   let refusal = null;
   const accepted = [];
+  // Like an addition, only a few played songs stay behind the current one,
+  // so the history does not count toward the 500-song cap.
+  const played = room.queue.findIndex((e) => e.id === room.current);
+  if (played > 20) room.queue = room.queue.slice(played - 20);
   for (const requestId of ids) {
     const request = room.requests.find((r) => r.id === requestId);
     if (!request) {
@@ -463,9 +478,22 @@ export function command(room, member, cmd, now = Date.now()) {
       )
         throw new Error("Request between 1 and 100 songs at a time.");
       const tracks = cmd.tracks.map(cleanTrack);
-      if (room.requests.length + tracks.length > 50)
+      const recent = (requestTimes.get(member) ?? []).filter(
+        (at) => now - at < REQUEST_WINDOW_MS,
+      );
+      if (recent.length >= REQUEST_BURST)
+        throw new Error("You're requesting quickly. Wait a moment, then try again.");
+      if (room.requests.length + tracks.length > REQUESTS_PER_ROOM)
         throw new Error(
           "The leader has too many requests waiting. Try again soon.",
+        );
+      if (
+        room.requests.filter((r) => r.by.id === member.id).length +
+          tracks.length >
+        REQUESTS_PER_GUEST
+      )
+        throw new Error(
+          `You can have ${REQUESTS_PER_GUEST} requests waiting at a time.`,
         );
       const future = room.queue.slice(
         room.queue.findIndex((e) => e.id === room.current) + 1,
@@ -490,6 +518,7 @@ export function command(room, member, cmd, now = Date.now()) {
           seen.add(track.id);
         }
       }
+      requestTimes.set(member, [...recent, now]);
       const by = { id: member.id, name: member.name, avatar: member.avatar };
       room.requests = [
         ...room.requests,
