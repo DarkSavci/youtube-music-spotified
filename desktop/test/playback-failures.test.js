@@ -465,3 +465,39 @@ test('a track that plays on after a retry gets its retries back', async () => {
   assert.equal(reloads, 2);
   assert.equal(h.failures().length, 1);
 });
+
+test('a seek into audio that does not come is reported as buffering again', async () => {
+  const h = nativeHarness();
+  const deck = playThenFreeze(h, 'seek1234567', 20);
+  for (let i = 0; i < 8; i++) h.tick();
+  assert.ok(h.events.some((e) => e.kind === 'stalled'));
+  // The listener seeks to 1:30; nothing arrives there either.
+  const mark = h.events.length;
+  h.native.apply(h.target({ videoId: 'seek1234567', startAtMs: 90_000 }));
+  assert.equal(deck.currentTime, 90);
+  for (let i = 0; i < 8; i++) h.tick();
+  assert.equal(h.events.slice(mark).filter((e) => e.kind === 'stalled').length, 1);
+});
+
+test('a seek forward during retries does not count as playing on', async () => {
+  const h = nativeHarness();
+  const deck = playThenFreeze(h, 'jump1234567', 30);
+  let src = deck.src;
+  while (deck.src === src) h.tick();
+  deck.fire('loadedmetadata');
+  deck.paused = false;
+  // Seek well ahead, then only a couple of seconds actually play.
+  h.native.apply(h.target({ videoId: 'jump1234567', startAtMs: 60_000 }));
+  for (let i = 1; i <= 8; i++) { deck.currentTime = 60 + i / 4; h.tick(); }
+  // It dies again: one retry is left, not two.
+  const frozeAt = h.clock.now;
+  let reloads = 0;
+  while (h.clock.now - frozeAt < 40_000 && !h.failures().length) {
+    src = deck.src;
+    h.tick();
+    if (deck.src !== src) { reloads++; reloadLikeABrowser(deck); }
+    await flush();
+  }
+  assert.equal(reloads, 1);
+  assert.equal(h.failures().length, 1);
+});

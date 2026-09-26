@@ -243,8 +243,8 @@ export class NativeEngine implements Engine {
   private stallShown = false;
   /** Set from a retry's reload until its metadata arrives; see recover(). */
   private reloading = false;
-  /** Where a retry picked the track up, to refill retries once it plays on. */
-  private resumedAt = 0;
+  /** Media time played since the last retry, to refill retries once it plays on. */
+  private playedSinceRetry = 0;
   /** Retry reloads of the current track, refills included. */
   private reloads = 0;
   /** Where each track's sound starts and ends, for timing crossfades. */
@@ -412,7 +412,7 @@ export class NativeEngine implements Engine {
     // Until the reload's metadata arrives the element sits at 0 and paused.
     // Neither is news: the position to come back to stays where it was.
     this.reloading = true;
-    this.resumedAt = at;
+    this.playedSinceRetry = 0;
     el.addEventListener(
       "loadedmetadata",
       () => {
@@ -594,9 +594,12 @@ export class NativeEngine implements Engine {
         // otherwise normal playback drift seeks on every reconcile.
         el.currentTime = target.startAtMs / 1000;
         // A seek is a new place to measure progress from, not progress.
+        // And a new wait: if the audio there does not come, the core has to
+        // hear "stalled" again, since the seek told it the track is playing.
         if (!this.reloading) {
           this.lastGoodAt = el.currentTime;
           this.progressAt = performance.now();
+          this.stallShown = false;
         }
       }
     }
@@ -939,13 +942,16 @@ export class NativeEngine implements Engine {
       this.lastGoodAt = el.currentTime;
       this.progressAt = now;
     } else if (!this.reloading && moved >= MIN_PROGRESS_S) {
+      // Playing, not jumping: a seek resets lastGoodAt, so only what
+      // actually played counts toward the refill below.
+      this.playedSinceRetry += moved;
       this.lastGoodAt = el.currentTime;
       this.progressAt = now;
       this.progressedSinceLoad = true;
       this.playedThisTrack = true;
       this.stallShown = false;
       // A hiccup it came back from should not use up the track's retries.
-      if (this.recoveries > 0 && this.lastGoodAt - this.resumedAt >= RETRY_REFILL_S) this.recoveries = 0;
+      if (this.recoveries > 0 && this.playedSinceRetry >= RETRY_REFILL_S) this.recoveries = 0;
       return false;
     }
     const still = now - this.progressAt;

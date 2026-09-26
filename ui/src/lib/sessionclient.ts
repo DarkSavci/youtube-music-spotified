@@ -111,9 +111,31 @@ export class SessionClient {
   private onProjection: (p: Projection) => void;
   private connected = false;
   private retryMs = 1000;
+  /*
+   * The newest state version applied. Projections arrive by several paths — a
+   * command's response, the event stream, a registration — and not in order:
+   * a command's response can land after the stream already delivered what
+   * happened next (a track stalling). Applying it would put the older state
+   * back on screen, with nothing to correct it until the state changes again.
+   */
+  private applied = -1;
+  /** Set until the stream's first snapshot: after a core restart versions start over. */
+  private resync = true;
 
   constructor(onProjection: (p: Projection) => void) {
     this.onProjection = onProjection;
+  }
+
+  /**
+   * Applies a projection unless a newer one has been applied already. A
+   * fresh snapshot (registration, the stream's first after connecting) is
+   * always taken, since a restarted core counts versions from the start.
+   */
+  private deliver(p: Projection | undefined, fresh = false) {
+    if (!p?.state) return;
+    if (!fresh && p.state.version < this.applied) return;
+    this.applied = p.state.version;
+    this.onProjection(p);
   }
 
   /** Announces this device and begins streaming projections. */
@@ -126,7 +148,7 @@ export class SessionClient {
       });
       if (!res.ok) return false;
       const body = (await res.json()) as { projection: Projection };
-      this.onProjection(body.projection);
+      this.deliver(body.projection, true);
       this.connect();
       return true;
     } catch {
@@ -151,7 +173,9 @@ export class SessionClient {
       this.connected = true;
       this.retryMs = 1000;
       try {
-        this.onProjection(JSON.parse((e as MessageEvent).data) as Projection);
+        const fresh = this.resync;
+        this.resync = false;
+        this.deliver(JSON.parse((e as MessageEvent).data) as Projection, fresh);
       } catch {
         /* a malformed frame is superseded by the next full snapshot */
       }
@@ -163,6 +187,7 @@ export class SessionClient {
       source.close();
       this.source = null;
       this.connected = false;
+      this.resync = true;
       setTimeout(() => this.connect(), this.retryMs);
       this.retryMs = Math.min(this.retryMs * 2, 15_000);
     };
@@ -188,7 +213,7 @@ export class SessionClient {
         // edit — not an error to surface.
         console.debug("[session] command rejected:", body.rejected);
       }
-      this.onProjection(body.projection);
+      this.deliver(body.projection);
       return !body.rejected;
     } catch {
       return false;
@@ -205,7 +230,7 @@ export class SessionClient {
       });
       if (!res.ok) return;
       const body = (await res.json()) as { projection: Projection };
-      this.onProjection(body.projection);
+      this.deliver(body.projection);
     } catch {
       /* the stream will deliver the authoritative state regardless */
     }
@@ -233,7 +258,7 @@ export class SessionClient {
       }
       if (!res.ok) return { result: "failed" };
       const body = (await res.json()) as { projection: Projection };
-      this.onProjection(body.projection);
+      this.deliver(body.projection);
       return { result: "ok" };
     } catch {
       return { result: "failed" };
