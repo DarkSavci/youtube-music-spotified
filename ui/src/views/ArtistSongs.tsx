@@ -10,7 +10,7 @@ import { transport } from "../lib/playback";
 import { artworkAtLeast } from "../lib/types";
 import type { Album, Track } from "../lib/types";
 import { useSettings } from "../lib/settings";
-import { withReleases, byAlbum, byPlays, missingAlbums, newestFirst, yearsByAlbum, type SongOrder } from "../lib/artistsongs";
+import { editions, isCompilation, withReleases, byAlbum, byPlays, missingAlbums, newestFirst, yearsByAlbum, type SongOrder } from "../lib/artistsongs";
 
 const ORDERS: { id: SongOrder; label: string }[] = [
   { id: "popular", label: "Popular" },
@@ -20,7 +20,7 @@ const ORDERS: { id: SongOrder; label: string }[] = [
 
 // How many releases are opened for their songs and years. Past it, the rest
 // of a very long discography is left out rather than spending more requests.
-const RELEASE_LIMIT = 120;
+const RELEASE_LIMIT = 60;
 
 /**
  * Opens releases for their songs, four at a time, reporting as they arrive
@@ -123,14 +123,18 @@ export function ArtistSongsView() {
     },
   });
 
-  // Every release: those the listed songs are on, the artist page's shelves
-  // and the discography behind them.
+  /*
+   * The releases to open, in order of need: first those a listed song is on
+   * whose year nothing else gives, then the artist's own releases for the
+   * songs the list lacks. Compilations are left out — their songs by the
+   * artist are on the releases they came from.
+   */
   const releaseIds = useMemo(() => {
     if (!dated || !complete || discography.isPending) return [];
-    const ids = [...(artist.data?.albums ?? []), ...(artist.data?.singles ?? []), ...(discography.data ?? [])].map((a) => a.id);
-    // The list's own releases first: past the limit, a missing year on a
-    // listed song costs more than a missing rarity.
-    return [...new Set([...missingAlbums(tracks, new Map()), ...ids])].filter(Boolean).slice(0, RELEASE_LIMIT);
+    const own = [...(artist.data?.albums ?? []), ...(artist.data?.singles ?? []), ...(discography.data ?? [])];
+    const undatedListed = missingAlbums(tracks, yearsByAlbum(own));
+    const originals = own.filter((a) => !isCompilation(a.title)).map((a) => a.id);
+    return [...new Set([...undatedListed, ...originals])].filter(Boolean).slice(0, RELEASE_LIMIT);
   }, [dated, complete, discography.isPending, discography.data, artist.data, tracks]);
   const releases = useReleases(releaseIds);
 
@@ -145,16 +149,19 @@ export function ArtistSongsView() {
     return out;
   }, [artist.data, discography.data, releases.albums]);
 
+  const canon = useMemo(() => editions([...albums.values()]), [albums]);
+
   // Dated orders show the whole discography; Popular is YouTube's list of
   // the most played, which is where it stops.
+  const who = useMemo(() => ({ id, name: artist.data?.name ?? "" }), [id, artist.data?.name]);
   const all = useMemo(() => {
     if (!dated) return tracks;
-    const merged = withReleases(tracks, releases.albums);
+    const merged = withReleases(tracks, releases.albums, who);
     return showVideos ? merged : merged.filter((t) => !t.isVideo);
-  }, [dated, tracks, releases.albums, showVideos]);
+  }, [dated, tracks, releases.albums, showVideos, who]);
 
-  const ordered = useMemo(() => (order === "newest" ? newestFirst(all, years) : all), [order, all, years]);
-  const groups = useMemo(() => (order === "album" ? byAlbum(all, years) : []), [order, all, years]);
+  const ordered = useMemo(() => (order === "newest" ? newestFirst(all, years, canon) : all), [order, all, years, canon]);
+  const groups = useMemo(() => (order === "album" ? byAlbum(all, years, canon) : []), [order, all, years, canon]);
   // What Play and a row click play: the list as it is shown.
   const shown = useMemo(() => (order === "album" ? groups.flatMap((g) => g.tracks) : ordered), [order, groups, ordered]);
 
@@ -172,11 +179,17 @@ export function ArtistSongsView() {
     if (playable.length > 0) transport.play(playable, Math.max(0, at), origin);
   };
   const resolving = dated && (!complete || discography.isFetching || releases.loading);
-  const undated = dated && complete && !resolving ? all.filter((t) => !(t.album?.id && years.has(t.album.id))).length : 0;
+  const undated =
+    dated && complete && !resolving
+      ? all.filter((t) => !(t.album?.id && (canon.get(t.album.id)?.year || years.has(t.album.id)))).length
+      : 0;
   const status = !complete
     ? `Loading songs… ${tracks.length} so far`
     : !dated
-      ? `The ${tracks.length} most played · Newest and By album add the rest of the discography`
+      ? // YouTube's list stops at about 150; a shorter one is not cut short.
+        tracks.length >= 100
+        ? `The ${tracks.length} most played · Newest and By album add the rest of the discography`
+        : `${tracks.length} songs · Newest and By album add any the list misses`
       : resolving
         ? `${all.length} songs · opening releases ${releases.done} of ${releaseIds.length}…`
         : [

@@ -45,32 +45,114 @@ export function shuffled<T>(items: T[], random: () => number = Math.random): T[]
   return out;
 }
 
-const titleKey = (t: string) => t.toLowerCase().replace(/\s+/g, " ").trim();
+const norm = (t: string) => t.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim();
+
+export interface ArtistIdentity { id: string; name: string }
+
+/** Whether a credit list names the artist: by id, or by name when it has none. */
+export function credits(artists: { id?: string; name: string }[] | undefined, who: ArtistIdentity): boolean {
+  return (artists ?? []).some((a) => (a.id && who.id ? a.id === who.id : norm(a.name) === norm(who.name)));
+}
+
+/*
+ * One song across editions, videos and releases: its title. Every song here
+ * credits the artist already, and the lead credit is not a safe second key —
+ * a single and its album can list the same song's artists differently.
+ */
+const songKey = (t: Track) => norm(t.title);
 
 /**
  * The songs list completed from the artist's releases.
  *
  * YouTube's list of an artist's songs stops at their most played 150 or so.
- * The rest are on the releases themselves, so every release's tracks that
- * the list does not already have are added after it. A song counts as
- * already there by its id, or by its title on the same release — the list
- * and the release page can name one recording by two videos.
+ * The rest are on the releases themselves, so their tracks are added after
+ * it — only those that credit the artist, since a compilation, soundtrack or
+ * someone else's album they feature on is mostly other people's songs.
+ *
+ * Each song appears once: a second video of it, or its copy on another
+ * edition, single or compilation, is dropped — from the list too, which
+ * carries a song once per release it is on. The first, most played, stays.
  */
-export function withReleases(tracks: Track[], releases: Album[]): Track[] {
-  const ids = new Set(tracks.map((t) => t.id));
-  const titles = new Set(tracks.map((t) => `${t.album?.id ?? ""}\u0000${titleKey(t.title)}`));
-  const out = [...tracks];
+export function withReleases(tracks: Track[], releases: Album[], who: ArtistIdentity): Track[] {
+  const ids = new Set<string>();
+  const songs = new Map<string, number>();
+  const out: Track[] = [];
+  const onCompilation = (t: Track) => isCompilation(t.album?.name ?? "");
+  for (const t of tracks) {
+    const key = songKey(t);
+    const at = songs.get(key);
+    if (at !== undefined) {
+      // The copy on the album it came from, not on a greatest-hits, is the
+      // one the album view should place — in the better-played one's slot.
+      if (onCompilation(out[at]!) && !onCompilation(t)) out[at] = t;
+      continue;
+    }
+    if (ids.has(t.id)) continue;
+    ids.add(t.id);
+    songs.set(key, out.length);
+    out.push(t);
+  }
   for (const release of releases) {
     for (const t of release.tracks ?? []) {
-      const album = t.album?.id ? t.album : { id: release.id, name: release.title };
-      const key = `${album.id}\u0000${titleKey(t.title)}`;
-      if (ids.has(t.id) || titles.has(key)) continue;
+      const artists = t.artists?.length ? t.artists : release.artists;
+      if (!credits(artists, who)) continue;
+      const song = { ...t, artists, album: t.album?.id ? t.album : { id: release.id, name: release.title } };
+      const key = songKey(song);
+      if (ids.has(t.id) || songs.has(key)) continue;
       ids.add(t.id);
-      titles.add(key);
-      out.push({ ...t, album });
+      songs.set(key, out.length);
+      out.push(song);
     }
   }
   return out;
+}
+
+// What editions add to a release's name: "(Deluxe)", "[Remastered 2011]",
+// "(10th Anniversary Edition)", "- Expanded Edition".
+const EDITION =
+  /\s*(?:[([][^)\]]*\b(?:deluxe|edition|expanded|remaster(?:ed)?|anniversary|bonus|complete|special|super|version|alternate|original motion picture)\b[^)\]]*[)\]]|-\s*(?:deluxe|expanded|remastered|special)\b.*)\s*$/i;
+
+/** A release's name without its edition, for putting editions together. */
+export function editionTitle(title: string): string {
+  let t = title;
+  for (let prev = ""; prev !== t; ) {
+    prev = t;
+    t = t.replace(EDITION, "");
+  }
+  return t.trim() || title.trim();
+}
+
+export interface Release { id: string; title: string; year?: number }
+
+/**
+ * Every edition mapped to the one that stands for it: the earliest, or the
+ * plainest-named of those from the same year. The deluxe edition's bonus
+ * songs then sit with the album they extend, under its name and year.
+ */
+export function editions(albums: Album[]): Map<string, Release> {
+  const byKey = new Map<string, Album[]>();
+  for (const a of albums) {
+    if (!a.id) continue;
+    const key = norm(editionTitle(a.title));
+    byKey.set(key, [...(byKey.get(key) ?? []), a]);
+  }
+  const out = new Map<string, Release>();
+  for (const list of byKey.values()) {
+    const year = (a: Album) => Number(a.year) || Infinity;
+    const main = [...list].sort((a, b) => year(a) - year(b) || a.title.length - b.title.length)[0]!;
+    const release = { id: main.id, title: editionTitle(main.title), year: Number(main.year) || undefined };
+    for (const a of list) out.set(a.id, release);
+  }
+  return out;
+}
+
+// Releases that are mostly other people's songs, or the artist's again.
+const COMPILATION = /\b(greatest hits|best of|the best|the highlights|collection|anthology|essentials|en iyileri|karaoke|tribute|various artists|compilation)\b/i;
+
+/** Whether a release's title says it gathers songs rather than releasing them. */
+export function isCompilation(title: string): boolean {
+  // Without accents, so "En İyileri" reads as "en iyileri".
+  return COMPILATION.test(title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
 }
 
 /** Album id → release year, from every album list at hand. */
@@ -99,14 +181,20 @@ export function missingAlbums(tracks: Track[], years: Map<string, number>): stri
   return out;
 }
 
+/** The year a song counts as from, through the release that stands for its edition. */
+function yearOf(t: Track, years: Map<string, number>, canon?: Map<string, Release>): number {
+  const id = t.album?.id;
+  if (!id) return 0;
+  return canon?.get(id)?.year ?? years.get(id) ?? 0;
+}
+
 /**
  * Newest first. Songs from the same year keep their order (the most played
  * first); songs with no known year go last, also in their order.
  */
-export function newestFirst(tracks: Track[], years: Map<string, number>): Track[] {
-  const year = (t: Track) => (t.album?.id ? years.get(t.album.id) ?? 0 : 0);
+export function newestFirst(tracks: Track[], years: Map<string, number>, canon?: Map<string, Release>): Track[] {
   return tracks
-    .map((t, i) => ({ t, i, y: year(t) }))
+    .map((t, i) => ({ t, i, y: yearOf(t, years, canon) }))
     .sort((a, b) => b.y - a.y || a.i - b.i)
     .map((x) => x.t);
 }
@@ -120,18 +208,21 @@ export interface AlbumGroup {
 }
 
 /**
- * The songs grouped album by album, newest album first.
+ * The songs grouped album by album, newest album first, the editions of one
+ * release together under it.
  *
  * Albums of unknown year follow the dated ones, and songs on no album at all
  * come last under one heading. Within an album the songs keep their order.
  */
-export function byAlbum(tracks: Track[], years: Map<string, number>): AlbumGroup[] {
+export function byAlbum(tracks: Track[], years: Map<string, number>, canon?: Map<string, Release>): AlbumGroup[] {
   const groups = new Map<string, AlbumGroup & { first: number }>();
   tracks.forEach((t, i) => {
-    const id = t.album?.id ?? "";
+    const release = t.album?.id ? canon?.get(t.album.id) : undefined;
+    const id = release?.id ?? t.album?.id ?? "";
     let g = groups.get(id);
     if (!g) {
-      g = { id, title: id ? t.album?.name || "Unknown album" : "Other songs", year: id ? years.get(id) : undefined, tracks: [], first: i };
+      const year = id ? yearOf(t, years, canon) || undefined : undefined;
+      g = { id, title: id ? release?.title || t.album?.name || "Unknown album" : "Other songs", year, tracks: [], first: i };
       groups.set(id, g);
     }
     g.tracks.push(t);
