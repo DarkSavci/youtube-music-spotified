@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"spotifier/internal/domain"
@@ -55,7 +56,22 @@ func (c *InnerTube) call(ctx context.Context, endpoint string, body map[string]a
 	return doc, nil
 }
 
+/*
+Home reads the Home page.
+
+On a cold start the homepage fetched for the client's config came with Home
+already on it, and that is read instead of asking again. Anything short of a
+page with sections in it falls back to the browse, as does every later visit.
+*/
 func (c *InnerTube) Home(ctx context.Context) (domain.BrowsePage, error) {
+	if raw, ok := c.client().InitialHome(ctx); ok {
+		if doc, err := renderers.Parse(raw); err == nil {
+			if page := renderers.ParseBrowsePage(doc, c.ctxFor(SurfaceHome)); len(page.Shelves) > 0 {
+				slog.Debug("home read from the homepage, not browsed", "shelves", len(page.Shelves))
+				return page, nil
+			}
+		}
+	}
 	return c.Browse(ctx, SurfaceHome, "")
 }
 

@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"spotifier/internal/ratelimit"
@@ -34,6 +35,10 @@ const (
 	// ClientName identifies the YouTube Music web client.
 	ClientName = "WEB_REMIX"
 
+	// clientNameID is ClientName as the web client's X-Youtube-Client-Name
+	// header numbers it.
+	clientNameID = "67"
+
 	defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
 		"(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -41,6 +46,11 @@ const (
 	// changes on YouTube's release cadence; a stale one is tolerated by the
 	// server for a while but not indefinitely.
 	configTTL = 6 * time.Hour
+
+	// homeFresh bounds how long the Home page embedded in a scraped homepage
+	// may stand in for a browse. It is a cold-start saving, not a cache: the
+	// response cache upstream of this package keeps answers for longer.
+	homeFresh = 60 * time.Second
 )
 
 // Config is the per-session configuration scraped from the web client.
@@ -53,6 +63,9 @@ type Config struct {
 	ClientVersion string
 	VisitorData   string
 	scrapedAt     time.Time
+
+	// home is the first page of Home the homepage came with, until taken.
+	home atomic.Pointer[json.RawMessage]
 }
 
 // Client performs InnerTube calls.
@@ -194,6 +207,8 @@ var (
 	reAPIKey      = regexp.MustCompile(`"INNERTUBE_API_KEY":"([^"]+)"`)
 	reClientVer   = regexp.MustCompile(`"INNERTUBE_CLIENT_VERSION":"([^"]+)"`)
 	reVisitorData = regexp.MustCompile(`"VISITOR_DATA":"([^"]+)"`)
+	rePageHL      = regexp.MustCompile(`"INNERTUBE_CONTEXT_HL":"([^"]+)"`)
+	rePageGL      = regexp.MustCompile(`"INNERTUBE_CONTEXT_GL":"([^"]+)"`)
 )
 
 // config returns a usable Config, scraping and caching as needed.
@@ -203,7 +218,10 @@ func (c *Client) config(ctx context.Context) (*Config, error) {
 
 // scrape fetches the homepage and reads the config out of it.
 func (c *Client) scrape(ctx context.Context) (*Config, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, Origin+"/", nil)
+	// Asked for in the locale every call is made in, so that the Home page it
+	// comes with is the one a browse would have answered with.
+	page := Origin + "/?" + url.Values{"hl": {c.language}, "gl": {c.region}}.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, page, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +267,39 @@ func (c *Client) scrape(ctx context.Context) (*Config, error) {
 	if next.ClientVersion == "" {
 		return nil, &scrapeFailure{fmt.Errorf("scrape config: no client version in %d bytes", len(html))}
 	}
+	// A page served in another locale than was asked for carries a Home the
+	// parsers would misread; a browse asks in the right one.
+	if strings.EqualFold(pick(rePageHL), c.language) && strings.EqualFold(pick(rePageGL), c.region) {
+		if home := embeddedBrowse(html, "FEmusic_home"); home != nil {
+			next.home.Store(&home)
+			// Kept no longer than it can be used: a restart served Home
+			// from the response cache never takes it.
+			time.AfterFunc(homeFresh, func() { next.home.Store(nil) })
+		}
+	}
 	return next, nil
+}
+
+/*
+InitialHome hands over the first page of Home the web client's homepage came
+with, as the raw browse response, if the homepage was fetched within the last
+minute and nobody has taken it yet.
+
+The homepage is fetched for the config anyway, and a cold start asks for Home
+straight after: taking it from there saves that browse. It is handed out once,
+so a later visit to Home asks YouTube as it always did.
+*/
+func (c *Client) InitialHome(ctx context.Context) (json.RawMessage, bool) {
+	cfg, err := c.config(ctx)
+	if err != nil {
+		return nil, false
+	}
+	// Taken either way: a stale one is of no further use.
+	home := cfg.home.Swap(nil)
+	if home == nil || time.Since(cfg.scrapedAt) >= homeFresh {
+		return nil, false
+	}
+	return *home, true
 }
 
 // ---------- calls ----------
@@ -297,6 +347,18 @@ func (c *Client) CallAs(ctx context.Context, endpoint string, body map[string]an
 	if err != nil {
 		return nil, err
 	}
+	asked := body
+
+	// Only the web client's shape is known well enough to copy; any other
+	// context keeps the one it has always had.
+	query := "alt=json"
+	if as == nil {
+		query = webQuery(endpoint, body)
+		if strings.HasPrefix(query, "ctoken=") {
+			// The token travels in the URL; the body is the context alone.
+			body = nil
+		}
+	}
 
 	payload := make(map[string]any, len(body)+1)
 	for k, v := range body {
@@ -337,14 +399,15 @@ func (c *Client) CallAs(ctx context.Context, endpoint string, body map[string]an
 		return nil, err
 	}
 
-	url := requestOrigin + "/youtubei/v1/" + endpoint + "?alt=json"
-	// The key belongs to the web client. Sending it with a mobile context is
-	// the contradiction upstream rejects with "invalid argument".
-	if cfg.APIKey != "" && as == nil {
-		url += "&key=" + cfg.APIKey
-	}
+	/*
+	 * No key. The web client stopped sending one, and a signed-out browse is
+	 * served without it; the scraped key is kept only in the Config. A mobile
+	 * context never had it: the key belongs to the web client, and upstream
+	 * answers that mix with "invalid argument".
+	 */
+	target := requestOrigin + "/youtubei/v1/" + endpoint + "?" + query
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +452,17 @@ func (c *Client) CallAs(ctx context.Context, endpoint string, body map[string]an
 		}
 	}
 
-	resp, err := c.send(req, endpoint, describe(body))
+	// The web client names itself in headers too, and says whether the page
+	// it runs in was signed in.
+	if as == nil {
+		req.Header.Set("X-Youtube-Client-Name", clientNameID)
+		req.Header.Set("X-Youtube-Client-Version", cfg.ClientVersion)
+		if c.creds.authenticated() {
+			req.Header.Set("X-Youtube-Bootstrap-Logged-In", "true")
+		}
+	}
+
+	resp, err := c.send(req, endpoint, describe(asked))
 	if resp != nil {
 		defer resp.Body.Close()
 	}
@@ -427,6 +500,23 @@ func (c *Client) Continue(ctx context.Context, endpoint, token string) (json.Raw
 		return nil, fmt.Errorf("innertube %s: empty continuation", endpoint)
 	}
 	return c.Call(ctx, endpoint, map[string]any{"continuation": token})
+}
+
+/*
+webQuery is the query string the web client sends a call with.
+
+A browse continuation goes the way the web client sends one: the token in the
+URL twice, as ctoken and continuation, with type=next, and nothing in the body
+but the context. Every other call carries only prettyPrint=false.
+*/
+func webQuery(endpoint string, body map[string]any) string {
+	if endpoint == "browse" && len(body) == 1 {
+		if tok, ok := body["continuation"].(string); ok && tok != "" {
+			t := url.QueryEscape(tok)
+			return "ctoken=" + t + "&continuation=" + t + "&type=next&prettyPrint=false"
+		}
+	}
+	return "prettyPrint=false"
 }
 
 // describe names what a call asked for, for the logs: the page, not the
