@@ -269,7 +269,7 @@ func (c *Cache) Put(ctx context.Context, key string, p Policy, e Entry) {
 // read refreshes them while still showing the old copy.
 func (c *Cache) Expire(ctx context.Context, prefix string) {
 	c.mu.Lock()
-	c.noteEdit(prefix)
+	c.noteEdit(prefix, c.opt.Clock.Now())
 	for k, el := range c.items {
 		if strings.HasPrefix(k, prefix) {
 			el.Value.(*item).entry.Expired = true
@@ -283,10 +283,21 @@ func (c *Cache) Expire(ctx context.Context, prefix string) {
 	}
 }
 
-// Invalidate drops every answer whose key starts with prefix.
+// Invalidate drops every answer whose key starts with prefix, after an edit:
+// a re-read in the next minute is kept only briefly (see Options.EditLag).
 func (c *Cache) Invalidate(ctx context.Context, prefix string) {
+	c.drop(ctx, prefix, c.opt.Clock.Now())
+}
+
+// Clear drops every answer whose key starts with prefix without treating it
+// as an edit YouTube may lag behind: for a change of account, or startup.
+func (c *Cache) Clear(ctx context.Context, prefix string) {
+	c.drop(ctx, prefix, time.Time{})
+}
+
+func (c *Cache) drop(ctx context.Context, prefix string, at time.Time) {
 	c.mu.Lock()
-	c.noteEdit(prefix)
+	c.noteEdit(prefix, at)
 	for k, el := range c.items {
 		if strings.HasPrefix(k, prefix) {
 			c.bytes -= len(el.Value.(*item).entry.Body)
@@ -302,12 +313,13 @@ func (c *Cache) Invalidate(ctx context.Context, prefix string) {
 	}
 }
 
-// noteEdit records an edit to the keys under prefix. Fetches already running
-// for them are detached, so a read after the edit starts its own rather than
-// joining one that may return the list as it was. c.mu is held.
-func (c *Cache) noteEdit(prefix string) {
+// noteEdit records an edit to the keys under prefix at the given time (zero
+// for one that starts no lag window). Fetches already running for them are
+// detached, so a read after the edit starts its own rather than joining one
+// that may return the list as it was. c.mu is held.
+func (c *Cache) noteEdit(prefix string, at time.Time) {
 	c.gen++
-	c.edits = append(c.edits, edit{prefix: prefix, gen: c.gen, at: c.opt.Clock.Now()})
+	c.edits = append(c.edits, edit{prefix: prefix, gen: c.gen, at: at})
 	if len(c.edits) > maxEdits {
 		c.edits = c.edits[len(c.edits)-maxEdits:]
 	}
@@ -328,7 +340,7 @@ func (c *Cache) editedSince(key string, gen uint64, now time.Time) (after, recen
 		if e.gen > gen {
 			after = true
 		}
-		if now.Sub(e.at) < c.opt.EditLag {
+		if !e.at.IsZero() && now.Sub(e.at) < c.opt.EditLag {
 			recent = true
 		}
 	}

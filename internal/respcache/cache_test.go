@@ -459,3 +459,16 @@ func TestPersistedAnswersArePrunedNowAndThen(t *testing.T) {
 		t.Fatalf("pruned %d times, want once an hour", db.prunes)
 	}
 }
+
+// Clearing for a change of account is not an edit YouTube lags behind.
+func TestClearStartsNoLagWindow(t *testing.T) {
+	clk := clock.NewManual()
+	c := New(Options{Clock: clk, EditLag: time.Minute})
+	c.Clear(context.Background(), "me|")
+	up := &upstream{body: "x"}
+	c.Get(context.Background(), "me|mixes", hour, up.fetch)
+	clk.Advance(5 * time.Minute)
+	if _, res, _ := c.Get(context.Background(), "me|mixes", hour, up.fetch); res != Hit {
+		t.Fatalf("after a clear the answer was kept only briefly: %s", res)
+	}
+}

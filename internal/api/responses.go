@@ -149,6 +149,16 @@ func (s *Server) forget(ctx context.Context, prefixes ...string) {
 	}
 }
 
+// clearKept drops kept answers after a change of account, not an edit.
+func (s *Server) clearKept(ctx context.Context, prefixes ...string) {
+	if s.deps.Responses == nil {
+		return
+	}
+	for _, p := range prefixes {
+		s.deps.Responses.Clear(ctx, p)
+	}
+}
+
 func (s *Server) expire(ctx context.Context, prefixes ...string) {
 	if s.deps.Responses == nil {
 		return

@@ -579,7 +579,7 @@ func (s *Server) handleAuthReload(w http.ResponseWriter, r *http.Request) {
 	s.failures.clear()
 	s.deps.Log.Info("credentials reloaded", "signedIn", signedIn)
 	// Whatever was kept for the previous session is not this one's.
-	s.forget(r.Context(), "me|", "lib|", cacheKey("cat", "home"))
+	s.clearKept(r.Context(), "me|", "lib|", cacheKey("cat", "home"))
 	s.write(w, http.StatusOK, map[string]any{"signedIn": signedIn})
 }
 
@@ -589,7 +589,7 @@ func (s *Server) handleAuthSignOut(w http.ResponseWriter, r *http.Request) {
 		s.deps.Account.Clear()
 	}
 	// Everything kept was read as that account, browsing included.
-	s.forget(r.Context(), "")
+	s.clearKept(r.Context(), "")
 	s.write(w, http.StatusOK, map[string]any{"signedIn": false})
 }
 

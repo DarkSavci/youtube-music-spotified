@@ -126,12 +126,12 @@ func main() {
 	credErr := acct.Reload()
 	// The session is checked once per launch rather than trusted from the
 	// last one: a sign-in that expired while the app was closed must show.
-	deps.Responses.Invalidate(context.Background(), "me|state")
+	deps.Responses.Clear(context.Background(), "me|state")
 	if !acct.SignedIn() {
 		// No account now: nothing kept for one may be shown, even if the
 		// shell could not delete the file.
-		deps.Responses.Invalidate(context.Background(), "me|")
-		deps.Responses.Invalidate(context.Background(), "lib|")
+		deps.Responses.Clear(context.Background(), "me|")
+		deps.Responses.Clear(context.Background(), "lib|")
 	}
 	deps.Account = acct
 
