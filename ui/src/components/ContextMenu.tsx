@@ -33,6 +33,8 @@ export interface MenuItem {
    * it gives the submenu; without, the entries that take this one's place.
    */
   live?: () => MenuItem[];
+  /** Leaves the menu open after choosing, for an action whose result shows in it. */
+  keepOpen?: boolean;
 }
 
 /** The menu as it stands now, with every live entry read. */
@@ -148,7 +150,7 @@ function MenuPanel({ items, x, y, onClose, onBack, anchor, label = "Actions", on
     const item = items[i];
     if (!item || item.disabled) return;
     if (item.children) openSub(i);
-    else { item.onSelect?.(); onClose(); }
+    else { item.onSelect?.(); if (!item.keepOpen) onClose(); }
   };
   return <div ref={ref} className="ctxmenu" role="menu" aria-label={label} onMouseEnter={() => { clearTimeout(hoverTimer.current); onHover?.(); }} style={{ left: pos.x, top: pos.y }} onContextMenu={e => e.preventDefault()}
     onKeyDown={e => {

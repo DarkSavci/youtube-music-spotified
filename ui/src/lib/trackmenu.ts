@@ -69,7 +69,7 @@ export function useTrackMenu(): (
       const own = ownPlaylists();
       if (own.status === "loading") return [{ label: "Loading your playlists…", disabled: true }];
       if (own.status === "error") {
-        return [{ label: "Couldn't load your playlists. Try again", onSelect: wantOwnPlaylists }];
+        return [{ label: "Couldn't load your playlists. Try again", onSelect: wantOwnPlaylists, keepOpen: true }];
       }
       return own.items.map((pl) => ({
         label: pl.title,

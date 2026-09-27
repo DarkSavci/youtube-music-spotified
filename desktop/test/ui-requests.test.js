@@ -100,7 +100,7 @@ function likedHarness(ok) {
   qc.invalidateQueries = (filters) => { invalidated.push(filters); return invalidate(filters); };
   const { ApiError } = load('api.ts', { './base': base });
   const liked = load('liked.ts', {
-    react: { useEffect: () => {} },
+    react: { useEffect: () => {}, useSyncExternalStore: () => false },
     '@tanstack/react-query': { useMutation: () => ({}), useQuery: () => ({}), useQueryClient: () => qc },
     './api': { api: {}, ApiError },
     './base': base,
@@ -224,4 +224,17 @@ test('a playlist played long after its pages loaded is read again from the start
   await mod.queryClient.invalidateQueries({ queryKey: key, refetchType: 'none' });
   await mod.completePlaylist('PL');
   assert.deepEqual(calls, ['', 'n1']);
+});
+
+test('the Liked Music count reads like the core writes it, down to none', async (t) => {
+  const { liked, qc } = likedHarness(true);
+  t.after(() => qc.clear());
+  qc.setQueryData(['library', '', 'recents'], [{ id: 'LM', kind: 'playlist', title: 'Liked Music', subtitle: '1 song' }]);
+  await liked.setLiked(qc, { id: 'kept0000001' }, false);
+  assert.equal(qc.getQueryData(['library', '', 'recents'])[0].subtitle, 'Auto playlist');
+  await liked.setLiked(qc, { id: 'kept0000001' }, true);
+  assert.equal(qc.getQueryData(['library', '', 'recents'])[0].subtitle, '1 song');
+  await liked.setLiked(qc, { id: 'new00000001' }, true);
+  assert.equal(qc.getQueryData(['library', '', 'recents'])[0].subtitle, '2 songs');
+  assert.equal(liked.songCount(1234), '1234 songs');
 });

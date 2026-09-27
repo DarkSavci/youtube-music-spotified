@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { api, ApiError } from "./api";
 import { apiUrl } from "./base";
 import type { LibraryItem, Track } from "./types";
@@ -36,12 +36,18 @@ export function useLikedIds(): Set<string> {
   // Something that shows hearts mounting after the read gave up tries again,
   // at most once a minute (or once YouTube's wait is over), so one bad
   // moment does not leave likes broken for the whole session.
-  const { isError, errorUpdatedAt, error, refetch } = query;
+  // That re-read is a single attempt: the retry chain above is for the first
+  // load only, or a lasting 429 would bring a fresh chain every minute.
+  const qc = useQueryClient();
+  const { isError, errorUpdatedAt, error } = query;
   useEffect(() => {
     if (!isError || (error instanceof ApiError && error.reauth)) return;
     const wait = Math.max(60_000, error instanceof ApiError && error.rateLimited ? error.retryAfter * 1000 : 0);
-    if (Date.now() - errorUpdatedAt >= wait) void refetch();
-  }, [isError, errorUpdatedAt, error, refetch]);
+    if (Date.now() - errorUpdatedAt < wait) return;
+    void qc
+      .fetchQuery({ queryKey: ["liked"], queryFn: ({ signal }) => api.liked(signal), retry: false, staleTime: 0 })
+      .catch(() => {});
+  }, [isError, errorUpdatedAt, error, qc]);
   return new Set((query.data?.tracks ?? []).map((t) => t.id));
 }
 
@@ -56,8 +62,15 @@ export function likedRetryDelay(count: number, err: unknown): number {
  * out session. It does not wait for the list — a like works without it.
  */
 export function useCanLike(): boolean {
-  const { error } = useQuery({ queryKey: ["liked"], enabled: false });
-  return !(error instanceof ApiError && error.reauth);
+  const qc = useQueryClient();
+  const signedOut = useSyncExternalStore(
+    (listener) => qc.getQueryCache().subscribe(listener),
+    () => {
+      const error = qc.getQueryState(["liked"])?.error;
+      return error instanceof ApiError && error.reauth;
+    },
+  );
+  return !signedOut;
 }
 
 /*
@@ -118,21 +131,31 @@ export function useToggleLike() {
   });
 }
 
-/** Moves the "N songs" in the library's Liked Music entry by `delta`. */
+/** Moves the song count in the library's Liked Music entry by `delta`. */
 function adjustLikedCount(qc: QueryClient, delta: number) {
   qc.setQueriesData<LibraryItem[]>({ queryKey: ["library"] }, (items) =>
     Array.isArray(items)
-      ? items.map((item) =>
-          item.id !== "LM" || !item.subtitle
-            ? item
-            : {
-                ...item,
-                subtitle: item.subtitle.replace(/(\d[\d,.]*)(\s+songs?)/i, (_m, n: string, word: string) => {
-                  const next = Math.max(0, Number(n.replace(/[,.]/g, "")) + delta);
-                  return `${next.toLocaleString()}${next === 1 ? word.replace(/s$/i, "") : word.replace(/songs?$/i, "songs")}`;
-                }),
-              },
-        )
+      ? items.map((item) => {
+          if (item.id !== "LM" || item.subtitle === undefined) return item;
+          const count = likedCount(item.subtitle);
+          return count === null ? item : { ...item, subtitle: songCount(Math.max(0, count + delta)) };
+        })
       : items,
   );
+}
+
+/*
+ * The core writes the count as "N songs", "1 song", or "Auto playlist" when
+ * nothing is liked yet; songCount writes it back the same way, so the entry
+ * reads the same whether the core or a like set it.
+ */
+function likedCount(subtitle: string): number | null {
+  if (subtitle === "Auto playlist") return 0;
+  const m = /^(\d[\d,.]*)\s+songs?$/i.exec(subtitle.trim());
+  return m?.[1] ? Number(m[1].replace(/[,.]/g, "")) : null;
+}
+
+export function songCount(n: number): string {
+  if (n === 0) return "Auto playlist";
+  return n === 1 ? "1 song" : `${n} songs`;
 }
