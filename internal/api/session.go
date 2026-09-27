@@ -324,11 +324,13 @@ func (s *Server) handleSessionSettings(w http.ResponseWriter, r *http.Request) {
 
 // mayBeNetwork is whether an engine's failure reason could be a lost
 // connection, and so worth a probe before the session judges the track: a
-// stall, a network media error, the embedded player never starting. A decode
-// error or a refused format is the track's own, and costs no probe.
+// stall, a network media error, the embedded player never starting, or an
+// unusable source (media_error_4), which is also what a cut connection looks
+// like when the stream bypasses the core. A decode error is the track's own,
+// and costs no probe.
 func mayBeNetwork(reason string) bool {
 	switch reason {
-	case "stalled", "media_error_2", "embedded_no_start", "network", "":
+	case "stalled", "media_error_2", "media_error_4", "embedded_no_start", "network", "":
 		return true
 	}
 	return false

@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"regexp"
 	"spotifier/internal/audiocache"
 	"strconv"
 	"strings"
@@ -211,6 +212,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+	// The page is always another origin, so these must be listed to be read.
+	w.Header().Set("Access-Control-Expose-Headers", "Retry-After, X-Cache")
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -386,8 +389,21 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		// A lost connection is noticed from any request, not only a stream.
 		s.net.Failed(err)
 		s.deps.Log.Warn("request failed", "path", r.URL.Path, "err", err)
-		s.write(w, http.StatusBadGateway, apiError{Error: err.Error()})
+		s.write(w, http.StatusBadGateway, apiError{Error: withoutQueries(err.Error())})
 	}
+}
+
+// queryString matches a URL's query, up to the quote or space that ends it.
+var queryString = regexp.MustCompile(`\?[^"'\s]*`)
+
+// withoutQueries drops the query strings from URLs quoted in an upstream error,
+// such as Go's `Post "https://…?key=…": …`, so the UI shows what failed
+// without the request's key and parameters.
+func withoutQueries(msg string) string {
+	if !strings.Contains(msg, "://") {
+		return msg
+	}
+	return queryString.ReplaceAllString(msg, "")
 }
 
 // account reads the live signed-in state. Every Identity-plane handler goes

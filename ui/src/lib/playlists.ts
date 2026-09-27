@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { queryClient } from "./queryclient";
-import { api } from "./api";
+import { api, ApiError } from "./api";
 import { apiUrl } from "./base";
 import type { LibraryItem, Track } from "./types";
+import { toast } from "./toast";
+import { libraryFailure } from "./signin";
 
 /**
  * Editing playlists.
@@ -23,8 +25,13 @@ async function send(path: string, method: string, body?: unknown): Promise<Respo
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(`status ${res.status}`);
+  if (!res.ok) throw new ApiError(`status ${res.status}`, res.status, res.status === 401);
   return res;
+}
+
+/** Says why a playlist change failed, rather than failing silently. */
+function playlistFailed(err: unknown) {
+  toast(libraryFailure(err, "Couldn't update the playlist. Try again."));
 }
 
 /*
@@ -53,15 +60,20 @@ export function wantOwnPlaylists(): void {
  * The user's own playlists as they stand now: loaded, still loading, or
  * failed. Read by menus when they render, not when they are built.
  */
-export function ownPlaylists(): { status: "loading" | "error" | "ready"; items: LibraryItem[] } {
+export function ownPlaylists(): { status: "loading" | "error" | "signedOut" | "ready"; items: LibraryItem[] } {
   const state = queryClient.getQueryState<LibraryItem[]>(OWN_KEY);
   if (state?.data) {
     // Liked Music is a generated list and cannot be added to; offering it
     // would produce an error the user cannot act on.
     return { status: "ready", items: state.data.filter((p) => p.id !== "LM") };
   }
-  return { status: state?.status === "error" ? "error" : "loading", items: [] };
+  if (state?.status !== "error") return { status: "loading", items: [] };
+  // Signed out there is nothing to retry: saying so beats "try again".
+  return { status: state.error instanceof ApiError && state.error.reauth ? "signedOut" : "error", items: [] };
 }
+
+/** The menu entry shown in place of the playlists when signed out. */
+export const SIGNED_OUT_PLAYLISTS = { label: "Sign in to add to your playlists", disabled: true } as const;
 
 export function useCreatePlaylist() {
   const qc = useQueryClient();
@@ -80,6 +92,7 @@ export function useCreatePlaylist() {
       }
       return id;
     },
+    onError: playlistFailed,
     onSettled: () => qc.invalidateQueries({ queryKey: ["library"] }),
   });
 }
@@ -91,6 +104,7 @@ export function useAddToPlaylist() {
       send(`/v1/me/playlists/${encodeURIComponent(v.playlistId)}/tracks`, "POST", {
         trackIds: v.trackIds,
       }),
+    onError: playlistFailed,
     onSettled: (_d, _e, v) => {
       void qc.invalidateQueries({ queryKey: ["playlist", v.playlistId] });
       void qc.invalidateQueries({ queryKey: ["library"] });
@@ -105,6 +119,7 @@ export function useRemoveFromPlaylist() {
       send(`/v1/me/playlists/${encodeURIComponent(v.playlistId)}/tracks`, "DELETE", {
         items: v.items,
       }),
+    onError: playlistFailed,
     onSettled: (_d, _e, v) => qc.invalidateQueries({ queryKey: ["playlist", v.playlistId] }),
   });
 }
@@ -114,6 +129,7 @@ export function useDeletePlaylist() {
   return useMutation({
     mutationFn: (playlistId: string) =>
       send(`/v1/me/playlists/${encodeURIComponent(playlistId)}`, "DELETE"),
+    onError: playlistFailed,
     onSettled: () => qc.invalidateQueries({ queryKey: ["library"] }),
   });
 }

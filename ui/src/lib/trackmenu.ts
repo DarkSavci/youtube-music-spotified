@@ -8,9 +8,10 @@ import type { Track } from "./types";
 import { transport } from "./playback";
 import { api } from "./api";
 import { toast } from "./toast";
+import { libraryFailure } from "./signin";
 import { setLiked, useLikedIds } from "./liked";
 import {
-  ownPlaylists, useAddToPlaylist, useCreatePlaylist, useRemoveFromPlaylist, wantOwnPlaylists,
+  ownPlaylists, SIGNED_OUT_PLAYLISTS, useAddToPlaylist, useCreatePlaylist, useRemoveFromPlaylist, wantOwnPlaylists,
 } from "./playlists";
 import { usePrompt } from "../components/Prompt";
 
@@ -68,6 +69,7 @@ export function useTrackMenu(): (
     const ownDestinations = (): MenuItem[] => {
       const own = ownPlaylists();
       if (own.status === "loading") return [{ label: "Loading your playlists…", disabled: true }];
+      if (own.status === "signedOut") return [SIGNED_OUT_PLAYLISTS];
       if (own.status === "error") {
         return [{ label: "Couldn't load your playlists. Try again", onSelect: wantOwnPlaylists, keepOpen: true }];
       }
@@ -129,7 +131,7 @@ export function useTrackMenu(): (
       label: isLiked ? "Remove from your library" : "Save to your library",
       separated: true,
       onSelect: () => {
-        void setLiked(qc, track, !isLiked).catch(() => toast("Couldn't update your library."));
+        void setLiked(qc, track, !isLiked).catch((err) => toast(libraryFailure(err, "Couldn't update your library.")));
       },
     });
 

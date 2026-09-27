@@ -406,7 +406,7 @@ func (s *Server) handleTrackHealth(w http.ResponseWriter, r *http.Request) {
 		err, _ := v.(error)
 		out["rateLimited"] = errors.Is(err, resolver.ErrRateLimited)
 		if err != nil {
-			out["error"] = err.Error()
+			out["error"] = withoutQueries(err.Error())
 		}
 	}
 	s.write(w, http.StatusOK, out)
@@ -562,7 +562,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.deps.Log.Warn("stream resolve failed", "video", videoID, "err", err)
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		http.Error(w, withoutQueries(err.Error()), http.StatusBadGateway)
 		return
 	}
 	if e.stream.Kind != domain.StreamURL {
@@ -637,7 +637,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		fresh, rerr := s.resolveCached(r.Context(), videoID)
 		if rerr != nil {
 			s.deps.Log.Warn("stream re-resolve failed", "video", videoID, "err", rerr)
-			http.Error(w, rerr.Error(), http.StatusBadGateway)
+			http.Error(w, withoutQueries(rerr.Error()), http.StatusBadGateway)
 			return
 		}
 		resp, err = s.fetchUpstream(rctx, fresh.stream.URL, upstreamRange)

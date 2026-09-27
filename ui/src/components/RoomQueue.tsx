@@ -329,13 +329,8 @@ export function RoomQueue({
     if (title)
       createPlaylist.mutate(
         { title, tracks: room.history.map((e) => e.track) },
-        {
-          onSuccess: () => toast("Room history saved to your library."),
-          onError: () =>
-            onError(
-              "Could not save the playlist. Check your sign-in and try again.",
-            ),
-        },
+        // A failure is already said by the playlist change itself.
+        { onSuccess: () => toast("Room history saved to your library.") },
       );
   };
   return (

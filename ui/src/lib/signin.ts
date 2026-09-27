@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { desktop } from "./desktop";
+import { ApiError } from "./api";
 
 /**
  * Signing in, shared by every button that offers it.
@@ -51,4 +52,14 @@ export const useSignIn = create<SignInState>((set, get) => ({
 /** The button label, which also tells the person where to look. */
 export function signInLabel(signingIn: boolean): string {
   return signingIn ? "Finish in your browser…" : "Sign in";
+}
+
+/**
+ * What to tell someone whose change to their library failed.
+ *
+ * Signed out there is nothing to retry, so saying so beats a generic failure;
+ * anything else gets `fallback`.
+ */
+export function libraryFailure(err: unknown, fallback: string): string {
+  return err instanceof ApiError && err.reauth ? "Sign in to change your library." : fallback;
 }
