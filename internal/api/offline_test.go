@@ -76,3 +76,44 @@ func TestStreamWhileOfflineHoldsTheTrack(t *testing.T) {
 		t.Fatalf("track not held: index %d state %s degraded %v", s.Queue.Index, s.State, s.Degraded)
 	}
 }
+
+// countingResolver records whether anything tried to resolve.
+type countingResolver struct{ calls int }
+
+func (c *countingResolver) Name() string { return "counting" }
+func (c *countingResolver) Resolve(context.Context, string) (domain.Stream, resolver.Quality, error) {
+	c.calls++
+	return domain.Stream{}, resolver.Quality{}, errors.New(`yt-dlp: ERROR: Unable to download API page: ('Connection aborted.')`)
+}
+
+// Once offline, a stream request is answered at once, with no yt-dlp run
+// against the dead connection (#7): hundreds of them used to pile up.
+func TestStreamWhileKnownOfflineDoesNotResolve(t *testing.T) {
+	res := &countingResolver{}
+	srv := httptest.NewServer(api.New(api.Deps{
+		Recorder:     obs.NewRecorder(),
+		Resolver:     res,
+		NetworkProbe: func(context.Context) error { return errors.New("unreachable") },
+	}))
+	defer srv.Close()
+	get := func(path string) int {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := get("/v1/stream/abc"); code != http.StatusServiceUnavailable {
+		t.Fatalf("first request: %d", code)
+	}
+	first := res.calls
+	for _, path := range []string{"/v1/stream/abc", "/v1/stream/def", "/v1/stream/ghi?preload=1"} {
+		if code := get(path); code != http.StatusServiceUnavailable {
+			t.Fatalf("%s: %d, want 503", path, code)
+		}
+	}
+	if res.calls != first {
+		t.Fatalf("resolved %d more times while known offline", res.calls-first)
+	}
+}

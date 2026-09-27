@@ -101,3 +101,20 @@ func TestChainReportsThePreferredFailureWhenBothFail(t *testing.T) {
 		t.Fatalf("err = %v, want the preferred adapter's error", err)
 	}
 }
+
+// A connection dropping while yt-dlp resolves is not yt-dlp being broken
+// (#7): the fallback may answer this track, but the next one tries yt-dlp
+// again rather than downgrading until a restart.
+func TestChainDoesNotGiveUpOnTheAdapterOverALostConnection(t *testing.T) {
+	a := &stub{id: "ytdlp", err: errors.New(`yt-dlp: exit status 1: ERROR: [youtube] v: Unable to download API page: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))`)}
+	b := &stub{id: "library"}
+	c := NewChain(a, b, quiet())
+	if _, _, err := c.Resolve(context.Background(), "v"); err != nil {
+		t.Fatal(err)
+	}
+	a.err = nil
+	got, _, err := c.Resolve(context.Background(), "w")
+	if err != nil || got.URL != "https://x/ytdlp" {
+		t.Fatalf("after the connection came back resolved via %q (%v), want yt-dlp", got.URL, err)
+	}
+}

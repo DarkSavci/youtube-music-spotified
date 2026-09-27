@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"sync"
@@ -21,6 +22,7 @@ func TestIsNetworkErrorTellsALostConnectionFromAnAnswer(t *testing.T) {
 		errors.New(`yt-dlp: exit status 1: ERROR: [youtube] abc: Unable to download API page: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))`),
 		errors.New(`yt-dlp: exit status 1: ERROR: [youtube] abc: Unable to download webpage: <urlopen error [Errno 11001] getaddrinfo failed>`),
 		fmt.Errorf("innertube: %w", context.DeadlineExceeded),
+		fmt.Errorf("stream copy: %w", io.ErrUnexpectedEOF),
 	}
 	for _, err := range lost {
 		if !isNetworkError(err) {
@@ -114,5 +116,27 @@ func TestNetworkIgnoresFailuresTheProbeDisagreesWith(t *testing.T) {
 	calls := p.calls.Load()
 	if n.Failed(errors.New("HTTP 403: Forbidden")) || p.calls.Load() != calls {
 		t.Fatal("an answer from upstream was probed or counted")
+	}
+}
+
+// A cut-short transfer only means a lost connection when a probe agrees.
+func TestACutShortTransferNeedsTheProbeToAgree(t *testing.T) {
+	p := &probeStub{}
+	p.ok.Store(true)
+	n := newNetwork(p.probe, nil)
+	if n.Failed(fmt.Errorf("copy: %w", io.ErrUnexpectedEOF)) || n.Offline() {
+		t.Fatal("an unexpected EOF with the probe getting through marked the connection lost")
+	}
+}
+
+// The engine only waits on a probe for failures that could be the network.
+func TestOnlyNetworkShapedEngineFailuresAreProbed(t *testing.T) {
+	for reason, want := range map[string]bool{
+		"stalled": true, "media_error_2": true, "embedded_no_start": true,
+		"media_error_3": false, "media_error_4": false, "NotSupportedError": false, "player_error_150": false,
+	} {
+		if got := mayBeNetwork(reason); got != want {
+			t.Errorf("mayBeNetwork(%q) = %v, want %v", reason, got, want)
+		}
 	}
 }

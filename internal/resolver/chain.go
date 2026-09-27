@@ -95,8 +95,12 @@ func (c *Chain) Resolve(ctx context.Context, videoID string) (domain.Stream, Qua
 		return domain.Stream{}, Quality{}, err
 	}
 	// Only latch once the fallback has actually proven it can do the job,
-	// so one bad track does not permanently downgrade audio quality.
-	c.fellBack.Store(true)
+	// so one bad track does not permanently downgrade audio quality. A
+	// preferred adapter that could not reach upstream is not broken either:
+	// a connection dropping mid-resolve must not cost it until a restart.
+	if !IsTransportError(err) {
+		c.fellBack.Store(true)
+	}
 	return stream, quality, nil
 }
 

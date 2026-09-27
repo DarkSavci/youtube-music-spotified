@@ -84,6 +84,9 @@ const FALLBACK_NOTICE =
   "Tracks kept failing to load, so playback switched to YouTube’s embedded player. The equaliser and crossfade are off for now.";
 const OFFLINE_NOTICE =
   "You’re offline. Playback carries on from where it stopped when the connection is back.";
+const OFFLINE_PAUSED_NOTICE =
+  "You’re offline. Press Play once the connection is back to carry on from where it stopped.";
+const offlineNotices = new Set([OFFLINE_NOTICE, OFFLINE_PAUSED_NOTICE]);
 /** The epoch of the last target, to notice track changes; see retryNativeAtTrackChange(). */
 let targetEpoch: number | null = null;
 
@@ -116,16 +119,21 @@ function retryNativeAtTrackChange(epoch: number) {
  * forgets failures counted before the core knew: they were the outage, not
  * the tracks. Getting it back leaves a fallback the outage may have caused.
  */
-function noteConnection(offline: boolean) {
-  const was = usePlayer.getState().offline;
-  if (offline === was) return;
-  usePlayer.setState({ offline });
+function noteConnection(offline: boolean, paused: boolean) {
+  const { offline: was, notice } = usePlayer.getState();
   if (offline) {
-    ladder.loaded();
-    usePlayer.setState({ notice: OFFLINE_NOTICE });
+    // Paused, nothing resumes by itself: the wording says what will happen.
+    const wanted = paused ? OFFLINE_PAUSED_NOTICE : OFFLINE_NOTICE;
+    if (!was) ladder.loaded();
+    // Only the offline notice itself is reworded: a dismissed one stays gone.
+    if (!was || (notice !== null && notice !== wanted && offlineNotices.has(notice))) {
+      usePlayer.setState({ offline, notice: wanted });
+    }
     return;
   }
-  if (usePlayer.getState().notice === OFFLINE_NOTICE) usePlayer.setState({ notice: null });
+  if (!was) return;
+  usePlayer.setState({ offline });
+  if (notice !== null && offlineNotices.has(notice)) usePlayer.setState({ notice: null });
   if (ladder.fellBack && useSettings.getState().enginePreference !== "embedded") {
     console.info("[playback] connection back; retrying the native engine");
     ladder.reset();
@@ -380,7 +388,7 @@ function applyProjection(p: Projection) {
   // window is a remote for it: its speed is not ours to know, so interpolate
   // at 1× and let the core's projections correct it.
   const remote = (p.devices ?? []).some((d) => d.owner && d.id !== session?.deviceID);
-  noteConnection(Boolean(p.offline));
+  noteConnection(Boolean(p.offline), p.state.state === "paused" || p.state.state === "idle");
   usePlayer.setState({
     outputElsewhere: remote,
     followingRoom: Boolean(p.followingRoom),

@@ -3,10 +3,10 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +40,9 @@ type network struct {
 // probeTimeout bounds one reachability check; offline, DNS usually fails at
 // once, but a dropped route only times out.
 const probeTimeout = 4 * time.Second
+
+// ioUnexpectedEOF is a transfer cut short, which a probe decides the meaning of.
+var ioUnexpectedEOF = io.ErrUnexpectedEOF
 
 func newNetwork(probe func(context.Context) error, onChange func(bool)) *network {
 	return &network{probe: probe, onChange: onChange, every: 3 * time.Second}
@@ -148,9 +151,21 @@ func (n *network) poll() {
 	}
 }
 
-// probeYouTube asks YouTube's connectivity endpoint through the same
-// transport (and proxy) streams use. Any HTTP answer means it is reachable.
-func probeYouTube(client *http.Client) func(context.Context) error {
+// probeYouTube asks YouTube's connectivity endpoint. Any HTTP answer means it
+// is reachable. It has its own transport, with the same proxy settings but no
+// kept-alive connections: after a silent drop a pooled connection is frozen,
+// and a probe reusing it said nothing for as long as it stayed in the pool.
+func probeYouTube() func(context.Context) error {
+	client := &http.Client{
+		Timeout: probeTimeout,
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: 3 * time.Second}).DialContext,
+			TLSHandshakeTimeout:   3 * time.Second,
+			ResponseHeaderTimeout: 3 * time.Second,
+			DisableKeepAlives:     true,
+		},
+	}
 	return func(ctx context.Context) error {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://www.youtube.com/generate_204", nil)
 		if err != nil {
@@ -163,28 +178,6 @@ func probeYouTube(client *http.Client) func(context.Context) error {
 		_ = resp.Body.Close()
 		return nil
 	}
-}
-
-// networkPhrases are how a lost connection reads in yt-dlp's output and in
-// wrapped errors that no longer carry their Go type.
-var networkPhrases = []string{
-	"unable to download api page",
-	"unable to download webpage",
-	"connection aborted",
-	"remotedisconnected",
-	"getaddrinfo failed",
-	"failed to resolve",
-	"name resolution",
-	"no such host",
-	"connection refused",
-	"network is unreachable",
-	"no route to host",
-	"timed out",
-	"proxyconnect",
-	"unable to connect to proxy",
-	"connection reset",
-	"actively refused",
-	"forcibly closed",
 }
 
 // isNetworkError reports whether err is a failure to reach upstream at all,
@@ -211,13 +204,12 @@ func isNetworkError(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
-	msg := strings.ToLower(err.Error())
-	for _, p := range networkPhrases {
-		if strings.Contains(msg, p) {
-			return true
-		}
+	// A transfer cut short is a candidate too; Failed only believes it once a
+	// probe agrees.
+	if errors.Is(err, ioUnexpectedEOF) {
+		return true
 	}
-	return false
+	return resolver.IsTransportError(err)
 }
 
 // handleNetwork answers whether YouTube is reachable, for a client deciding

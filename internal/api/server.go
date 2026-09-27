@@ -157,7 +157,7 @@ func New(d Deps) *Server {
 	}
 	probe := d.NetworkProbe
 	if probe == nil {
-		probe = probeYouTube(s.streamClient)
+		probe = probeYouTube()
 	}
 	s.net = newNetwork(probe, func(online bool) {
 		if online {

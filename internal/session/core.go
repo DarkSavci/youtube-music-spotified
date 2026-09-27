@@ -680,9 +680,11 @@ func (c *Core) handleFailure(reason string) []LogEntry {
 	 * (#7). Walking the ladder then greyed out and skipped a run of the
 	 * queue, stopped on some later track, and the engine gave up on native
 	 * playback. Instead the track waits where it is, and SetOnline starts it
-	 * again, from the same place, once the connection is back.
+	 * again, from the same place, once the connection is back. A room's
+	 * follower is held the same way; the room's next state puts it back in
+	 * step once it plays again.
 	 */
-	if c.offline && !c.following {
+	if c.offline {
 		c.waitingForNetwork = true
 		if c.state.State != domain.StateStalled {
 			c.state.PositionMs = c.positionNow()

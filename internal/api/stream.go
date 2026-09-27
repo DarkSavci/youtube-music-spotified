@@ -466,6 +466,13 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	if s.serveCached(w, r, videoID, 0) {
 		return
 	}
+	// Offline, anything not on disk cannot come: say so now rather than run
+	// yt-dlp against a dead connection for every request (#7). The network
+	// poll notices the connection coming back.
+	if s.net.Offline() {
+		http.Error(w, "offline", http.StatusServiceUnavailable)
+		return
+	}
 
 	var (
 		e   resolvedEntry

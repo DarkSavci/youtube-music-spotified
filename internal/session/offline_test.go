@@ -107,3 +107,28 @@ func TestSkippingWhileOfflineHoldsTheNewTrack(t *testing.T) {
 		t.Fatalf("after skipping offline: %+v", s)
 	}
 }
+
+// A room's follower is held the same way while offline, not greyed out and
+// stopped, and plays again when the connection is back (#7).
+func TestAFollowerIsHeldOfflineAndPlaysAgainOnline(t *testing.T) {
+	c, _ := newCore(t)
+	room := tracks(3)
+	c.Apply(Command{Kind: CmdFollow, Tracks: room, ExpectedID: "e1", PositionMs: 30_000, Playing: true})
+	c.SetOnline(false)
+	epoch := c.State().Epoch
+	c.HandleEngine(EngineEvent{Kind: EvFailed, Epoch: epoch, Reason: "network"})
+	s := c.State()
+	if s.State != domain.StateStalled || len(s.Degraded) != 0 || !s.Queue.Items[0].Playable {
+		t.Fatalf("follower not held: state %s degraded %v", s.State, s.Degraded)
+	}
+	c.SetOnline(true)
+	s = c.State()
+	if s.State != domain.StatePlaying || s.Epoch == epoch || s.Queue.Index != 0 {
+		t.Fatalf("follower not restarted: %+v", s)
+	}
+	// The room's next state still puts it back in step.
+	c.Apply(Command{Kind: CmdFollow, Tracks: room, StartIndex: 1, ExpectedID: "e2", Playing: true})
+	if c.State().Queue.Index != 1 || c.State().State != domain.StatePlaying {
+		t.Fatalf("did not follow the room after reconnecting: %+v", c.State())
+	}
+}
