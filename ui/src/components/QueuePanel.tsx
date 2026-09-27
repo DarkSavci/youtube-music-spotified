@@ -7,6 +7,10 @@ import { transport } from "../lib/playback";
 import { artistNames, artworkAtLeast } from "../lib/types";
 import { IconClose, IconEqualizer, IconQueue } from "./Icon";
 import { useMenu } from "./ContextMenu";
+import { api } from "../lib/api";
+import { continueFromRemote } from "../lib/remotequeue";
+import { useSignedIn } from "../lib/signin";
+import { toast } from "../lib/toast";
 
 /**
  * The queue panel.
@@ -27,9 +31,42 @@ export function QueuePanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="nowplaying__body scroll">
+        <ContinueFromYouTubeMusic />
         <QueueList />
       </div>
     </aside>
+  );
+}
+
+/**
+ * Picks up the queue the account has on another device — the phone app, the
+ * website — and plays it here from where that device was.
+ *
+ * Signed in only: signed out there is no such queue. Read on the click and
+ * never before, since every read counts against the account's requests.
+ */
+function ContinueFromYouTubeMusic() {
+  const signedIn = useSignedIn();
+  const [busy, setBusy] = useState(false);
+  if (!signedIn) return null;
+  return (
+    <div className="queueremote">
+      <button
+        className="chip"
+        disabled={busy}
+        title="Replace this queue with the one on your other devices"
+        onClick={() => {
+          setBusy(true);
+          void continueFromRemote({
+            fetchQueue: () => api.remoteQueue(),
+            play: (tracks, index, origin) => transport.play(tracks, index, origin),
+            toast: (message) => toast(message),
+          }).finally(() => setBusy(false));
+        }}
+      >
+        {busy ? "Loading your queue…" : "Continue from YouTube Music"}
+      </button>
+    </div>
   );
 }
 

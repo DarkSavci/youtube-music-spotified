@@ -332,6 +332,27 @@ type SearchResults struct {
 	Continuation   string      `json:"continuation,omitempty"`
 }
 
+// SearchHistoryEntry is one of the account's past searches, as YouTube Music
+// offers them under an empty search box.
+//
+// Token is the opaque feedback token that removes the entry from the
+// account's history. It cannot be constructed, only echoed back.
+type SearchHistoryEntry struct {
+	Query string `json:"query"`
+	Token string `json:"token,omitempty"`
+}
+
+// RemoteQueue is the account's current queue as another device left it: the
+// phone app, or the website.
+//
+// Index is the entry that device was on. Title is what the queue is playing
+// from ("Liked Music", an album), when YouTube names it.
+type RemoteQueue struct {
+	Tracks []Track `json:"tracks"`
+	Index  int     `json:"index"`
+	Title  string  `json:"title,omitempty"`
+}
+
 // ---------- library ----------
 
 // LibraryItemKind tags a saved item's type.

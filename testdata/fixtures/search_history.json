@@ -1,0 +1,71 @@
+{
+  "responseContext": {},
+  "contents": [
+    {
+      "searchSuggestionsSectionRenderer": {
+        "contents": [
+          {
+            "historySuggestionRenderer": {
+              "icon": { "iconType": "SEARCH_HISTORY" },
+              "suggestion": { "runs": [ { "text": "daft punk" } ] },
+              "navigationEndpoint": {
+                "clickTrackingParams": "synthetic",
+                "searchEndpoint": { "query": "daft punk" }
+              },
+              "trackingParams": "synthetic",
+              "serviceEndpoint": {
+                "clickTrackingParams": "synthetic",
+                "feedbackEndpoint": {
+                  "feedbackToken": "TOKEN_DAFT_PUNK",
+                  "uiActions": { "hideEnclosingContainer": true },
+                  "actions": [
+                    { "hideEnclosingAction": { "hack": true } },
+                    {
+                      "addToToastAction": {
+                        "item": {
+                          "notificationTextRenderer": {
+                            "successResponseText": { "runs": [ { "text": "Removed from your history." } ] }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "historySuggestionRenderer": {
+              "icon": { "iconType": "SEARCH_HISTORY" },
+              "suggestion": { "runs": [ { "text": "Nils " }, { "text": "Frahm" } ] },
+              "navigationEndpoint": { "searchEndpoint": { "query": "Nils Frahm" } },
+              "serviceEndpoint": { "feedbackEndpoint": { "feedbackToken": "TOKEN_NILS_FRAHM" } }
+            }
+          },
+          {
+            "historySuggestionRenderer": {
+              "icon": { "iconType": "SEARCH_HISTORY" },
+              "suggestion": { "runs": [ { "text": "DAFT PUNK" } ] },
+              "navigationEndpoint": { "searchEndpoint": { "query": "DAFT PUNK" } },
+              "serviceEndpoint": { "feedbackEndpoint": { "feedbackToken": "TOKEN_DUPLICATE" } }
+            }
+          },
+          {
+            "historySuggestionRenderer": {
+              "icon": { "iconType": "SEARCH_HISTORY" },
+              "suggestion": { "runs": [ { "text": "şarkı sözleri" } ] },
+              "serviceEndpoint": { "feedbackEndpoint": { "feedbackToken": "TOKEN_UNICODE" } }
+            }
+          },
+          {
+            "historySuggestionRenderer": {
+              "icon": { "iconType": "SEARCH_HISTORY" },
+              "suggestion": { "runs": [ { "text": "   " } ] }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "trackingParams": "synthetic"
+}

@@ -98,6 +98,7 @@ func ClearSignedOut(ctx context.Context, c *respcache.Cache) {
 		cacheKey("me", "liked"), // the list and its sync mark
 		cacheKey("me", "channels"),
 		cacheKey("me", "state"),
+		searchHistoryKey,
 		"lib|",
 		playlistKeys("LM"), // Liked Music read as a playlist, VLLM included
 	} {

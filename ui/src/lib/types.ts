@@ -112,6 +112,12 @@ export type SessionState = "signed_in" | "logged_out" | "unknown";
 export interface Account { name: string; handle?: string; avatarUrl?: string }
 export interface Me { state: SessionState; account?: Account }
 
+/** One of the account's past searches; the token removes it from the account. */
+export interface SearchHistoryEntry { query: string; token?: string }
+
+/** The account's queue on another device, and the entry it is on. */
+export interface RemoteQueue { tracks: Track[]; index: number; title?: string }
+
 export interface Health {
   ok: boolean; uptime: string; haveCredentials: boolean;
   unknownNodes: { surface: string; type: string; count: number }[];

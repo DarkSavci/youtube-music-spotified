@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { WindowControls } from "./WindowControls";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { prefetchSearchHistory } from "../lib/searches";
 import { api } from "../lib/api";
 import { signInLabel, useSignIn } from "../lib/signin";
 import { IconBrowse, IconHome, IconChevronLeft, IconChevronRight, IconSearch, IconSettings } from "./Icon";
@@ -71,6 +72,7 @@ export function TopBar({
   }, [navigate]);
 
   const { signingIn, signIn } = useSignIn();
+  const qc = useQueryClient();
 
   const { data: me } = useQuery({
     queryKey: ["me"],
@@ -104,6 +106,12 @@ export function TopBar({
           type="search"
           placeholder="What do you want to listen to?"
           value={onQueryChange ? (query ?? "") : local}
+          onFocus={(e) => {
+            // YouTube Music reads the account's search history as its box is
+            // focused empty; so does this, signed in only, and the core keeps
+            // it for a while, so focusing again asks nothing.
+            if (!e.currentTarget.value && me?.state === "signed_in") prefetchSearchHistory(qc);
+          }}
           onChange={(e) => {
             const value = e.target.value;
             if (onQueryChange) onQueryChange(value);

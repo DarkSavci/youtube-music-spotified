@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { api } from "./api";
+import { mergeSearches, type RecentSearch } from "./searchmerge";
+import { useSignedIn } from "./signin";
+import { toast } from "./toast";
+import type { SearchHistoryEntry } from "./types";
 
 /**
  * Recent searches.
@@ -58,7 +64,9 @@ export function useRecentSearches() {
 
   const forget = useCallback((query: string) => {
     setRecent((prev) => {
-      const next = prev.filter((p) => p !== query);
+      // Without case, as remember() de-duplicates: a merged row may show
+      // the account's spelling of a search this list holds differently.
+      const next = prev.filter((p) => p.toLowerCase() !== query.trim().toLowerCase());
       write(next);
       return next;
     });
@@ -70,4 +78,83 @@ export function useRecentSearches() {
   }, []);
 
   return { recent, remember, forget, clear };
+}
+
+/*
+ * The account's own search history.
+ *
+ * YouTube Music asks for it whenever its search box is focused and empty.
+ * Here it is asked for only then too — the search page open with nothing
+ * typed, or the box focused while empty — never at start-up, and only signed
+ * in: signed out there is nothing to read, and the core would answer empty
+ * anyway. The core keeps the answer for a couple of minutes, and so does
+ * this cache, so reopening search does not ask YouTube again.
+ */
+export const SEARCH_HISTORY_KEY = ["search-history"] as const;
+const HISTORY_STALE_MS = 2 * 60_000;
+
+export const searchHistoryQuery = {
+  queryKey: SEARCH_HISTORY_KEY,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api.searchHistory(signal),
+  staleTime: HISTORY_STALE_MS,
+  // Every retry is another request to YouTube; the local list stands in.
+  retry: false,
+} as const;
+
+/** Readies the account's history, as the box is focused with nothing typed. */
+export function prefetchSearchHistory(qc: QueryClient) {
+  void qc.prefetchQuery(searchHistoryQuery);
+}
+
+/**
+ * The recent-searches list: the account's history merged with this device's.
+ * `active` is whether it is on screen, which is what lets the account's
+ * history be read at all.
+ */
+export function useRecentSearchList(active: boolean) {
+  const { recent, remember, forget, clear } = useRecentSearches();
+  const signedIn = useSignedIn();
+  const qc = useQueryClient();
+  const { data: account } = useQuery({ ...searchHistoryQuery, enabled: active && signedIn });
+  const items = useMemo(
+    () => mergeSearches(signedIn ? (account ?? []) : [], recent),
+    [signedIn, account, recent],
+  );
+
+  /** Removes a row from this device and, when it came from the account, there too. */
+  const remove = useCallback(
+    (item: RecentSearch) => {
+      forget(item.query);
+      if (!item.token) return;
+      const token = item.token;
+      qc.setQueryData<SearchHistoryEntry[]>(SEARCH_HISTORY_KEY, (old) => old?.filter((e) => e.token !== token));
+      api.forgetSearches([token]).then(
+        () => void qc.invalidateQueries({ queryKey: SEARCH_HISTORY_KEY, refetchType: "none" }),
+        () => {
+          toast("Couldn't remove that search from your YouTube Music history.");
+          void qc.invalidateQueries({ queryKey: SEARCH_HISTORY_KEY });
+        },
+      );
+    },
+    [forget, qc],
+  );
+
+  /** Clears this device's list and every account entry shown. */
+  const clearAll = useCallback(() => {
+    clear();
+    const tokens = (qc.getQueryData<SearchHistoryEntry[]>(SEARCH_HISTORY_KEY) ?? [])
+      .map((e) => e.token)
+      .filter((t): t is string => Boolean(t));
+    if (tokens.length === 0) return;
+    qc.setQueryData<SearchHistoryEntry[]>(SEARCH_HISTORY_KEY, []);
+    api.forgetSearches(tokens).then(
+      () => void qc.invalidateQueries({ queryKey: SEARCH_HISTORY_KEY, refetchType: "none" }),
+      () => {
+        toast("Couldn't clear your YouTube Music search history.");
+        void qc.invalidateQueries({ queryKey: SEARCH_HISTORY_KEY });
+      },
+    );
+  }, [clear, qc]);
+
+  return { items, remember, remove, clear: clearAll };
 }
