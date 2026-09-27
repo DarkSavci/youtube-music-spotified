@@ -13,10 +13,12 @@ import type { Playlist, Track } from "./types";
  * refetch everything on screen, and failures YouTube caused are not retried
  * (see shouldRetry).
  */
+const FRESH_MS = 5 * 60_000;
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 5 * 60_000,
+      staleTime: FRESH_MS,
       gcTime: 60 * 60_000,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
@@ -24,6 +26,10 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
+// Listening stats come from the local play log, not YouTube: free to read,
+// so they keep the old, short staleness and stay current.
+queryClient.setQueryDefaults(["stats"], { staleTime: 60_000, gcTime: 5 * 60_000 });
 
 type PlaylistPage = { playlist: Playlist; next?: string };
 
@@ -40,7 +46,12 @@ export const playlistPagesKey = (id: string) => ["playlist", id, "pages"] as con
  */
 export async function completePlaylist(id: string, signal?: AbortSignal): Promise<Track[]> {
   const key = playlistPagesKey(id);
-  const cached = queryClient.getQueryData<InfiniteData<PlaylistPage, string>>(key);
+  // Loaded pages are reused only while they are fresh: a playlist played
+  // from its card long after it was opened, or after it was edited, is read
+  // again from the start, so it plays what the playlist holds now.
+  const state = queryClient.getQueryState<InfiniteData<PlaylistPage, string>>(key);
+  const fresh = state?.data && !state.isInvalidated && Date.now() - state.dataUpdatedAt < FRESH_MS;
+  const cached = fresh ? state.data : undefined;
   const pages = cached ? [...cached.pages] : [await api.playlistPage(id, "", signal)];
   const params = cached ? [...cached.pageParams] : [""];
   const seen = new Set(pages.map((p) => p.next).filter(Boolean));

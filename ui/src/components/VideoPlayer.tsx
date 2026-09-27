@@ -21,7 +21,9 @@ export function useVideoControl() {
     : status === "error" ? "Could not check video availability. Click to retry."
     // "unknown": not asked yet; pressing the button finds out.
     : "Watch music video";
-  return { blocked: busy || !track || (following && !controlsRoom && !video) || status === "checking" || status === "unavailable", reason };
+  // Still checking is not a reason to refuse a press: pressing waits for the
+  // answer (setVideoEnabled shows busy meanwhile) and then switches.
+  return { blocked: busy || !track || (following && !controlsRoom && !video) || status === "unavailable", reason };
 }
 
 /** Song/video toggle: one icon, lit while the video shows, as in the mini player. */

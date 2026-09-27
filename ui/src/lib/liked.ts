@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { api, shouldRetry } from "./api";
+import { useEffect } from "react";
+import { api, ApiError } from "./api";
 import { apiUrl } from "./base";
-import type { Track } from "./types";
+import type { LibraryItem, Track } from "./types";
 
 /**
  * Whether a Track is in Liked Music, and how to change that.
@@ -15,7 +16,7 @@ import type { Track } from "./types";
  * rows, which is far cheaper than being wrong about whether a heart is filled.
  */
 export function useLikedIds(): Set<string> {
-  const { data } = useQuery({
+  const query = useQuery({
     queryKey: ["liked"],
     queryFn: ({ signal }) => api.liked(signal),
     // Fetched once. Likes made here change the cached list directly (see
@@ -25,16 +26,38 @@ export function useLikedIds(): Set<string> {
     // and after every like used to cost.
     staleTime: Infinity,
     refetchOnMount: false,
-    // Nor is a failed read tried again each time something that shows hearts
-    // mounts: with a list that fails every time (YouTube's Liked Music page
-    // not parsing, a rate limit), that was a burst of requests per page view.
-    // The next launch, or a like, tries again.
+    // A failed read is retried a few times with a growing wait — after a 429,
+    // no sooner than YouTube asked — rather than at once, and not by every
+    // component that mounts: see the effect below.
+    retry: (count, err) => !(err instanceof ApiError && err.reauth) && count < 3,
+    retryDelay: likedRetryDelay,
     retryOnMount: false,
-    // A failure YouTube caused (a 429, a response that did not parse) is not
-    // retried: it fails the same way again, one request per page each time.
-    retry: (count, err) => shouldRetry(count, err),
   });
-  return new Set((data?.tracks ?? []).map((t) => t.id));
+  // Something that shows hearts mounting after the read gave up tries again,
+  // at most once a minute (or once YouTube's wait is over), so one bad
+  // moment does not leave likes broken for the whole session.
+  const { isError, errorUpdatedAt, error, refetch } = query;
+  useEffect(() => {
+    if (!isError || (error instanceof ApiError && error.reauth)) return;
+    const wait = Math.max(60_000, error instanceof ApiError && error.rateLimited ? error.retryAfter * 1000 : 0);
+    if (Date.now() - errorUpdatedAt >= wait) void refetch();
+  }, [isError, errorUpdatedAt, error, refetch]);
+  return new Set((query.data?.tracks ?? []).map((t) => t.id));
+}
+
+/** 2 s, 4 s, 8 s…; after a 429, whatever YouTube asked for, at least 30 s. */
+export function likedRetryDelay(count: number, err: unknown): number {
+  if (err instanceof ApiError && err.rateLimited) return Math.max(30_000, err.retryAfter * 1000);
+  return Math.min(2_000 * 2 ** count, 30_000);
+}
+
+/**
+ * Whether liking can be offered at all: everywhere except a confirmed signed
+ * out session. It does not wait for the list — a like works without it.
+ */
+export function useCanLike(): boolean {
+  const { error } = useQuery({ queryKey: ["liked"], enabled: false });
+  return !(error instanceof ApiError && error.reauth);
 }
 
 /*
@@ -79,8 +102,11 @@ export async function setLiked(qc: QueryClient, track: Track | { id: string }, l
     throw err;
   }
   if (!before) void qc.invalidateQueries({ queryKey: ["liked"] });
-  void qc.invalidateQueries({ queryKey: ["playlist", "LM"], refetchType: "none" });
-  void qc.invalidateQueries({ queryKey: ["library"], refetchType: "none" });
+  // An open Liked Music page catches up now; closed, the next time it opens.
+  void qc.invalidateQueries({ queryKey: ["playlist", "LM"], refetchType: "active" });
+  // The sidebar's Liked Music entry carries the count; it is changed in
+  // place rather than by reading the library (three requests) again.
+  adjustLikedCount(qc, liked ? 1 : -1);
 }
 
 export function useToggleLike() {
@@ -90,4 +116,23 @@ export function useToggleLike() {
     mutationFn: ({ trackId, liked, track }: { trackId: string; liked: boolean; track?: Track }) =>
       setLiked(qc, track ?? { id: trackId }, !liked),
   });
+}
+
+/** Moves the "N songs" in the library's Liked Music entry by `delta`. */
+function adjustLikedCount(qc: QueryClient, delta: number) {
+  qc.setQueriesData<LibraryItem[]>({ queryKey: ["library"] }, (items) =>
+    Array.isArray(items)
+      ? items.map((item) =>
+          item.id !== "LM" || !item.subtitle
+            ? item
+            : {
+                ...item,
+                subtitle: item.subtitle.replace(/(\d[\d,.]*)(\s+songs?)/i, (_m, n: string, word: string) => {
+                  const next = Math.max(0, Number(n.replace(/[,.]/g, "")) + delta);
+                  return `${next.toLocaleString()}${next === 1 ? word.replace(/s$/i, "") : word.replace(/songs?$/i, "songs")}`;
+                }),
+              },
+        )
+      : items,
+  );
 }

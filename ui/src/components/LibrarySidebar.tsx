@@ -119,13 +119,20 @@ export function LibrarySidebar({ expanded, onExpand, onNavigate }: { expanded: b
   const dragging = useRef(false);
   const asideRef = useRef<HTMLElement>(null);
 
-  const { data, isPending, error } = useQuery({
+  const { data, isPending, error, refetch } = useQuery({
     queryKey: ["library", filter, sort],
     queryFn: ({ signal }) => api.library(filter, sort, signal),
-    // Never retried on a 429 or an upstream failure: the library is the page
-    // YouTube rate-limits most, and each retry is three more requests.
+    // Never retried at once on a 429 or an upstream failure: the library is
+    // the page YouTube rate-limits most, and each retry is three requests.
     retry: (count, err) => shouldRetry(count, err),
   });
+  // After a 429 it is tried again once YouTube's wait is over (at least a
+  // minute), so the sidebar comes back by itself.
+  useEffect(() => {
+    if (!(error instanceof ApiError && error.rateLimited)) return;
+    const timer = setTimeout(() => void refetch(), Math.max(60, error.retryAfter) * 1000);
+    return () => clearTimeout(timer);
+  }, [error, refetch]);
 
   // Drag to resize. Pointer events are captured on the window so the drag
   // survives the cursor leaving the thin handle.
@@ -263,6 +270,7 @@ export function LibrarySidebar({ expanded, onExpand, onNavigate }: { expanded: b
           folders={folders}
           isPending={isPending}
           error={error}
+          onRetry={() => void refetch()}
           onItemMenu={(e, item) => menu.open(e, itemMenu(item))}
           onFolderMenu={(e, folder) =>
             menu.open(e, [
@@ -311,6 +319,7 @@ function LibraryList({
   error,
   onItemMenu,
   onFolderMenu,
+  onRetry,
 }: {
   artworkSize: number;
   searching: boolean;
@@ -322,6 +331,8 @@ function LibraryList({
   /** Opens the row's menu. Passed down because the actions need the
       sidebar's hooks, and the rows are rendered here. */
   onItemMenu: (e: React.MouseEvent, item: LibraryItem) => void;
+  /** Reads the library again. */
+  onRetry: () => void;
 }) {
   if (isPending) {
     return (
@@ -345,13 +356,13 @@ function LibraryList({
     );
   }
   if (error instanceof ApiError && error.status === 0) {
-    return <EmptyState title="Offline" body="Cannot reach the player core." action="Retry" />;
+    return <EmptyState title="Offline" body="Cannot reach the player core." action="Retry" onAction={onRetry} />;
   }
   if (error instanceof ApiError && error.rateLimited) {
-    return <EmptyState title="YouTube is limiting requests" body="Your library will load again shortly." action="Retry" />;
+    return <EmptyState title="YouTube is limiting requests" body="Your library will load again shortly." action="Retry" onAction={onRetry} />;
   }
   if (error) {
-    return <EmptyState title="Could not load your library" body={String(error)} action="Retry" />;
+    return <EmptyState title="Could not load your library" body={String(error)} action="Retry" onAction={onRetry} />;
   }
   if (items.length === 0 && searching) return <p className="library-no-results">No matches in your library.</p>;
   if (items.length === 0) {
@@ -503,12 +514,12 @@ function SignedOutState() {
   );
 }
 
-function EmptyState({ title, body, action }: { title: string; body: string; action: string }) {
+function EmptyState({ title, body, action, onAction }: { title: string; body: string; action: string; onAction?: () => void }) {
   return (
     <div className="emptystate">
       <p className="emptystate__title">{title}</p>
       <p className="emptystate__body">{body}</p>
-      <button className="chip" onClick={() => window.location.reload()}>
+      <button className="chip" onClick={onAction ?? (() => window.location.reload())}>
         {action}
       </button>
     </div>

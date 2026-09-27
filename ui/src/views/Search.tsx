@@ -84,10 +84,12 @@ export function Search() {
   const topOthers = topItems.filter((i) => i.kind !== "track");
   // The top result and the first songs are what a search gets clicked for.
   useEffect(() => {
-    if (!data || settled !== debounced || !settled.trim()) return;
+    // Only the query as typed now, once it has stopped changing: never a
+    // prefix whose results arrived on the way.
+    if (!data || settled !== query || debounced !== query || !settled.trim()) return;
     if (data.topResult?.kind === "track") warmTrack(data.topResult.track?.id, "search");
     else warmFirst(songs, 1, "search");
-  }, [data, songs, settled, debounced]);
+  }, [data, songs, settled, debounced, query]);
 
   if (!debounced.trim()) {
     return (

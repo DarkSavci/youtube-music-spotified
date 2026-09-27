@@ -98,13 +98,16 @@ function likedHarness(ok) {
   const invalidated = [];
   const invalidate = qc.invalidateQueries.bind(qc);
   qc.invalidateQueries = (filters) => { invalidated.push(filters); return invalidate(filters); };
+  const { ApiError } = load('api.ts', { './base': base });
   const liked = load('liked.ts', {
+    react: { useEffect: () => {} },
     '@tanstack/react-query': { useMutation: () => ({}), useQuery: () => ({}), useQueryClient: () => qc },
-    './api': { api: {}, shouldRetry: () => false },
+    './api': { api: {}, ApiError },
     './base': base,
   }, { fetch });
   qc.setQueryData(['liked'], { tracks: [{ id: 'kept0000001' }] });
-  return { liked, qc, posts, invalidated };
+  qc.setQueryData(['library', '', 'recents'], [{ id: 'LM', kind: 'playlist', title: 'Liked Music', subtitle: '41 songs' }, { id: 'PL1', title: 'Mine', subtitle: '12 songs' }]);
+  return { liked, qc, posts, invalidated, ApiError };
 }
 
 test('a like changes the cached list at once and refetches nothing', async (t) => {
@@ -113,12 +116,17 @@ test('a like changes the cached list at once and refetches nothing', async (t) =
   await liked.setLiked(qc, { id: 'new00000001', title: 'New' }, true);
   assert.deepEqual(Array.from(qc.getQueryData(['liked']).tracks, (t) => t.id), ['new00000001', 'kept0000001']);
   assert.equal(JSON.parse(posts[0].body).rating, 'like');
-  // Nothing is refetched now: other lists are only marked stale.
-  assert.ok(invalidated.every((f) => f.refetchType === 'none'));
+  // Liked Music itself is not read again; only an open Liked Music page is.
   assert.ok(!invalidated.some((f) => f.queryKey[0] === 'liked'));
+  assert.ok(invalidated.every((f) => f.refetchType === 'active' && f.queryKey[1] === 'LM'));
+  // The sidebar's count moves in place, without reading the library.
+  const library = qc.getQueryData(['library', '', 'recents']);
+  assert.equal(library[0].subtitle, '42 songs');
+  assert.equal(library[1].subtitle, '12 songs');
   await liked.setLiked(qc, { id: 'kept0000001' }, false);
   assert.deepEqual(Array.from(qc.getQueryData(['liked']).tracks, (t) => t.id), ['new00000001']);
   assert.equal(JSON.parse(posts[1].body).rating, 'none');
+  assert.equal(qc.getQueryData(['library', '', 'recents'])[0].subtitle, '41 songs');
 });
 
 test('a like YouTube refuses is put back', async (t) => {
@@ -162,4 +170,58 @@ test('a like with no list loaded reads the list again instead of inventing one',
   await liked.setLiked(qc, { id: 'new00000001' }, true);
   assert.equal(qc.getQueryData(['liked']), undefined);
   assert.ok(invalidated.some((f) => f.queryKey[0] === 'liked' && f.refetchType === undefined));
+});
+
+test('a failed Liked Music read is retried later, after a 429 no sooner than YouTube asked', (t) => {
+  const { liked, qc, ApiError } = likedHarness(true);
+  t.after(() => qc.clear());
+  assert.equal(liked.likedRetryDelay(0, new ApiError('did not parse', 502)), 2000);
+  assert.equal(liked.likedRetryDelay(2, new ApiError('did not parse', 502)), 8000);
+  assert.equal(liked.likedRetryDelay(0, new ApiError('slow down', 429, false, 120)), 120000);
+  assert.equal(liked.likedRetryDelay(0, new ApiError('slow down', 429)), 30000);
+});
+
+function playlistsHarness(state) {
+  const prefetched = [];
+  const queryClient = { getQueryState: () => state, prefetchQuery: (o) => { prefetched.push(o); return Promise.resolve(); } };
+  const mod = load('playlists.ts', {
+    '@tanstack/react-query': { useMutation: () => ({}), useQuery: () => ({}), useQueryClient: () => ({}) },
+    './queryclient': { queryClient },
+    './api': { api: {} },
+    './base': base,
+  });
+  return { mod, prefetched };
+}
+
+test('the add-to menus read the playlists live: loading, failed with a retry, or ready', () => {
+  let h = playlistsHarness(undefined);
+  assert.equal(h.mod.ownPlaylists().status, 'loading');
+  h = playlistsHarness({ status: 'error', data: undefined });
+  assert.equal(h.mod.ownPlaylists().status, 'error');
+  // Asking again after a failure fetches again (prefetchQuery refetches a
+  // failed, empty query).
+  h.mod.wantOwnPlaylists();
+  assert.equal(h.prefetched.length, 1);
+  h = playlistsHarness({ status: 'success', data: [{ id: 'LM', title: 'Liked Music' }, { id: 'PL1', title: 'Mine' }] });
+  const ready = h.mod.ownPlaylists();
+  assert.equal(ready.status, 'ready');
+  assert.deepEqual(Array.from(ready.items, (p) => p.id), ['PL1']);
+});
+
+test('a playlist played long after its pages loaded is read again from the start', async (t) => {
+  const calls = [];
+  const page = (ids, next) => ({ playlist: { id: 'PL', title: 'List', tracks: ids.map((id) => ({ id })) }, next });
+  const api = { playlistPage: async (_id, cursor) => { calls.push(cursor); return cursor ? page(['z'], undefined) : page(['x', 'y'], 'n1'); } };
+  const mod = load('queryclient.ts', { '@tanstack/react-query': queryCore, './api': { api, shouldRetry: () => false } });
+  t.after(() => mod.queryClient.clear());
+  const key = mod.playlistPagesKey('PL');
+  mod.queryClient.setQueryData(key, { pages: [page(['old'], undefined)], pageParams: [''] }, { updatedAt: Date.now() - 10 * 60_000 });
+  const all = await mod.completePlaylist('PL');
+  assert.deepEqual(Array.from(all, (x) => x.id), ['x', 'y', 'z']);
+  assert.deepEqual(calls, ['', 'n1']);
+  // Marked stale by an edit: read again too.
+  calls.length = 0;
+  await mod.queryClient.invalidateQueries({ queryKey: key, refetchType: 'none' });
+  await mod.completePlaylist('PL');
+  assert.deepEqual(calls, ['', 'n1']);
 });
