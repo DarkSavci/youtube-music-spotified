@@ -51,6 +51,8 @@ export interface SessionDevice {
 
 export interface Projection {
   followingRoom?: boolean;
+  /** The core cannot reach YouTube (#7). */
+  offline?: boolean;
   room?: { entry: string; ended: boolean; durationMs: number };
   state: SessionState;
   target: SessionTarget;
@@ -275,6 +277,20 @@ export class SessionClient {
     }).catch(() => {
       /* position reports are frequent and individually disposable */
     });
+  }
+
+  /**
+   * Whether the core can reach YouTube right now, asked directly rather than
+   * read from the last projection, which may not have arrived yet.
+   */
+  async offline(): Promise<boolean> {
+    try {
+      const r = await fetch(apiUrl("/v1/network"));
+      if (!r.ok) return false;
+      return Boolean(((await r.json()) as { offline?: boolean }).offline);
+    } catch {
+      return false;
+    }
   }
 
   /** Updates capabilities, which change when an engine falls back. */

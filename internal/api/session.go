@@ -101,6 +101,13 @@ func (s *Server) handleSessionEngineEvent(w http.ResponseWriter, r *http.Request
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	// A track that failed while the connection is down is not broken (#7).
+	// The stream request usually told us already; if not (a partly cached
+	// track that ran out, the embedded player), check before the session
+	// decides what the failure means.
+	if body.Event.Kind == session.EvFailed && mayBeNetwork(body.Event.Reason) && !s.net.Offline() && !s.net.reachable() {
+		s.net.setOffline(true)
+	}
 	before := s.deps.Session.Projection().State
 	s.deps.Session.EngineEvent(r.Context(), body.DeviceID, body.Event)
 	s.logEngineEvent(body.Event, before, s.deps.Session.Projection().State)
@@ -158,6 +165,11 @@ func (s *Server) logEngineEvent(ev session.EngineEvent, before, after domain.Ses
 	}
 	switch ev.Kind {
 	case session.EvFailed:
+		if s.net.Offline() {
+			// Not the track's fault: the session holds it for the connection.
+			s.deps.Log.Info("track held until the connection is back", attrs...)
+			return
+		}
 		s.deps.Log.Warn("track failed", attrs...)
 		if after.State == domain.StatePaused && before.State != domain.StatePaused {
 			s.deps.Log.Warn("playback stopped after a failure", "failedInQueue", len(after.Degraded))
@@ -308,4 +320,16 @@ func (s *Server) handleSessionSettings(w http.ResponseWriter, r *http.Request) {
 		s.deps.Audio.SetMax(*body.CacheMaxMB << 20)
 	}
 	s.write(w, http.StatusOK, s.deps.Session.Projection())
+}
+
+// mayBeNetwork is whether an engine's failure reason could be a lost
+// connection, and so worth a probe before the session judges the track: a
+// stall, a network media error, the embedded player never starting. A decode
+// error or a refused format is the track's own, and costs no probe.
+func mayBeNetwork(reason string) bool {
+	switch reason {
+	case "stalled", "media_error_2", "embedded_no_start", "network", "":
+		return true
+	}
+	return false
 }

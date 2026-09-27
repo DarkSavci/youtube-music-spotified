@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync/atomic"
+	"time"
 
 	"spotifier/internal/domain"
 )
@@ -30,9 +32,31 @@ type Chain struct {
 	Fallback  Resolver
 	Log       *slog.Logger
 
-	// fellBack latches once the preferred adapter has proven unusable, so a
-	// broken binary costs one failed attempt rather than one per track.
-	fellBack atomic.Bool
+	// fellBackAt is when the preferred adapter last proved unusable, so a
+	// broken binary costs one failed attempt rather than one per track. It
+	// holds for a while, not for the session: one odd answer (a format error
+	// after a long outage) once left every later URL coming from the
+	// fallback, which upstream then refused.
+	fellBackAt atomic.Int64
+	// now is the clock; tests replace it.
+	now func() time.Time
+}
+
+// retryPreferredAfter is how long the fallback stands in before the
+// preferred adapter is tried again.
+const retryPreferredAfter = 5 * time.Minute
+
+func (c *Chain) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
+
+// fellBack is whether the fallback is standing in right now.
+func (c *Chain) fellBack() bool {
+	at := c.fellBackAt.Load()
+	return at != 0 && c.clock().Sub(time.Unix(0, at)) < retryPreferredAfter
 }
 
 // NewChain builds a Chain. Either adapter may be nil, in which case the other
@@ -50,7 +74,7 @@ func (c *Chain) Name() string {
 	if c.Preferred == nil {
 		return name(c.Fallback)
 	}
-	if c.fellBack.Load() {
+	if c.fellBack() {
 		return name(c.Fallback)
 	}
 	return name(c.Preferred)
@@ -64,7 +88,7 @@ func name(r Resolver) string {
 }
 
 func (c *Chain) Resolve(ctx context.Context, videoID string) (domain.Stream, Quality, error) {
-	if c.Preferred == nil || c.fellBack.Load() {
+	if c.Preferred == nil || c.fellBack() {
 		if c.Fallback == nil {
 			return domain.Stream{}, Quality{}, errors.New("resolver: none configured")
 		}
@@ -95,8 +119,12 @@ func (c *Chain) Resolve(ctx context.Context, videoID string) (domain.Stream, Qua
 		return domain.Stream{}, Quality{}, err
 	}
 	// Only latch once the fallback has actually proven it can do the job,
-	// so one bad track does not permanently downgrade audio quality.
-	c.fellBack.Store(true)
+	// so one bad track does not permanently downgrade audio quality. A
+	// preferred adapter that could not reach upstream is not broken either:
+	// a connection dropping mid-resolve must not cost it until a restart.
+	if !IsTransportError(err) && !trackSpecific(err) {
+		c.fellBackAt.Store(c.clock().UnixNano())
+	}
 	return stream, quality, nil
 }
 
@@ -109,4 +137,11 @@ func (c *Chain) ResolveVideo(ctx context.Context, id string) (domain.Stream, err
 		}
 	}
 	return domain.Stream{}, errors.New("resolver: video is not available with this playback adapter")
+}
+
+// trackSpecific is a failure about this one track rather than the adapter:
+// the fallback answers for it, and the next track tries the preferred again.
+func trackSpecific(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "requested format is not available")
 }

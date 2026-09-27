@@ -518,3 +518,35 @@ test('a track that plays from a warmed deck ends the run of failures too', () =>
   ladder.progress(4, 59000);
   assert.equal(ladder.failed(5), 'fallback');
 });
+
+test('the same track started again under a new epoch gets fresh retries and a fresh load (#7)', async () => {
+  const h = nativeHarness();
+  const deck = playThenFreeze(h, 'held1234567', 59);
+  // The connection is gone: both retries are spent and the track fails.
+  const frozeAt = h.clock.now;
+  while (h.clock.now - frozeAt < 60_000 && !h.failures().length) {
+    const src = deck.src;
+    h.tick();
+    if (deck.src !== src) { deck.paused = false; deck.currentTime = 59; }
+    await flush();
+  }
+  assert.equal(h.failures().length, 1, 'failed while offline');
+  // The core held it, and starts it again from 59 s once the connection is
+  // back: a new epoch for the same track.
+  const before = deck.src;
+  h.native.apply(h.target({ videoId: 'held1234567', epoch: 2, startAtMs: 59_000 }));
+  assert.notEqual(deck.src, before, 'the stuck deck was loaded afresh');
+  assert.equal(deck.currentTime, 59);
+  // It does not move yet: a fresh load, so it gets the patient first-load
+  // window and a retry, rather than failing on the retries already spent.
+  const again = h.clock.now;
+  let reloadedAt = null;
+  while (h.clock.now - again < 16_000) {
+    const src = deck.src;
+    h.tick();
+    if (deck.src !== src && reloadedAt === null) reloadedAt = h.clock.now - again;
+    await flush();
+    if (h.clock.now - again < 14_000) assert.equal(h.failures().length, 1, 'failed again at once');
+  }
+  assert.ok(reloadedAt !== null, 'retried after the restart');
+});

@@ -71,3 +71,11 @@ test('after the stream reconnects, a restarted core counting from 1 is followed'
   again.emit(projection(2, 'playing'));
   assert.deepEqual(h.applied.slice(-2), ['1:paused', '2:playing']);
 });
+
+test('the client asks the core directly whether it is offline (#7)', async () => {
+  const h = harness();
+  h.responses.push({ offline: true });
+  assert.equal(await h.client.offline(), true);
+  h.responses.push({ offline: false });
+  assert.equal(await h.client.offline(), false);
+});

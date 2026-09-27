@@ -531,7 +531,15 @@ export class NativeEngine implements Engine {
       if (target.videoId) this.learnEdges(target.videoId);
       if (target.preloadVideoId) this.learnEdges(target.preloadVideoId);
     }
-    if (changed) {
+    /*
+     * The same track under a new epoch is the core starting it again: after
+     * the connection came back (#7), or repeat-one. It gets a fresh set of
+     * retries, and a deck that had failed or stopped loading is loaded
+     * afresh, or the retries spent during the outage failed it at once.
+     */
+    const restarted = !changed && !!prev && prev.epoch !== target.epoch;
+    const stuck = restarted && (this.deck.error !== null || this.stallShown);
+    if (changed || restarted) {
       this.recoveries = 0;
       this.lastGoodAt = target.startAtMs / 1000;
       this.progressAt = performance.now();
@@ -540,6 +548,10 @@ export class NativeEngine implements Engine {
       this.stallShown = false;
       this.reloading = false;
       this.reloads = 0;
+    }
+    if (stuck && target.videoId && this.loaded(this.deck, target.videoId)) {
+      this.point(this.deck, target.videoId);
+      if (target.startAtMs > 0) this.deck.currentTime = target.startAtMs / 1000;
     }
     const ms = target.transition.ms ?? 0;
 

@@ -62,6 +62,12 @@ type Core struct {
 	loggedCurrent     bool
 	consecutiveFaults int
 
+	// offline is whether upstream is known to be unreachable (#7). A track
+	// that fails then is not broken: the connection is. waitingForNetwork
+	// marks the current track as held for the connection to come back.
+	offline           bool
+	waitingForNetwork bool
+
 	rng *rand.Rand
 }
 
@@ -277,10 +283,18 @@ func (c *Core) play(cmd Command) (Reject, []LogEntry) {
 
 func (c *Core) toggle() (Reject, []LogEntry) {
 	switch c.state.State {
-	case domain.StatePlaying:
+	// Buffering, or held for the connection, the player shows Pause, and
+	// that is what the button means. Resuming instead set "playing" over a
+	// track with nothing to play, and the timer ran on in silence (#7).
+	case domain.StatePlaying, domain.StateStalled, domain.StateLoading:
+		c.state.PositionMs = c.positionNow()
 		c.state.State = domain.StatePaused
-	case domain.StatePaused, domain.StateStalled:
+		c.waitingForNetwork = false
+	case domain.StatePaused:
 		c.state.State = domain.StatePlaying
+		// Pressed while offline: the track is waiting for the connection
+		// again, and is started afresh when it returns (#7).
+		c.waitingForNetwork = c.offline
 	default:
 		if c.state.Queue.Current() == nil {
 			return RejectEmptyQueue, nil
@@ -664,6 +678,25 @@ func (c *Core) handleFailure(reason string) []LogEntry {
 	if c.state.State == domain.StatePaused {
 		return nil
 	}
+	/*
+	 * Offline, every track fails the same way, and none of them is at fault
+	 * (#7). Walking the ladder then greyed out and skipped a run of the
+	 * queue, stopped on some later track, and the engine gave up on native
+	 * playback. Instead the track waits where it is, and SetOnline starts it
+	 * again, from the same place, once the connection is back. A room's
+	 * follower is held the same way; the room's next state puts it back in
+	 * step once it plays again.
+	 */
+	if c.offline {
+		c.waitingForNetwork = true
+		if c.state.State != domain.StateStalled {
+			c.state.PositionMs = c.positionNow()
+			c.state.PositionAt = c.clk.Now()
+			c.state.State = domain.StateStalled
+			c.bump()
+		}
+		return nil
+	}
 	c.state.Degraded = append(c.state.Degraded, domain.TrackFault{
 		Index:  c.state.Queue.Index,
 		Reason: reason,
@@ -706,6 +739,7 @@ func (c *Core) handleFailure(reason string) []LogEntry {
 // Every track change advances the Epoch, which is what invalidates reports
 // still in flight from the track being replaced.
 func (c *Core) startTrack(index int, ms int64) {
+	c.waitingForNetwork = false
 	c.state.Queue.Index = index
 	c.state.PositionMs = ms
 	c.state.PositionAt = c.clk.Now()
@@ -838,6 +872,39 @@ func (c *Core) positionNow() int64 {
 }
 
 func (c *Core) bump() { c.state.Version++ }
+
+// Offline reports whether upstream is known to be unreachable.
+func (c *Core) Offline() bool { return c.offline }
+
+/*
+SetOnline records whether upstream can be reached. Going back online starts
+the track that was held for the connection again, from where it stopped, if
+the listener still wants it playing. It reports whether anything changed.
+*/
+func (c *Core) SetOnline(online bool) bool {
+	if c.offline == !online {
+		return false
+	}
+	c.offline = !online
+	/*
+	 * Back online, a track meant to be playing that is held, or still
+	 * buffering from the outage, starts afresh under a new epoch. Otherwise a
+	 * stall timer the engine began while offline fires after the return, the
+	 * probe then says the connection works, and the track is judged broken
+	 * and skipped.
+	 */
+	if online {
+		held := c.waitingForNetwork
+		c.waitingForNetwork = false
+		stuck := c.state.State == domain.StateStalled || c.state.State == domain.StateLoading
+		if (held || stuck) && c.playIntent() && c.state.Queue.Current() != nil {
+			c.startTrack(c.state.Queue.Index, c.positionNow())
+			return true
+		}
+	}
+	c.bump()
+	return true
+}
 
 // MaxVolume is 200%: past full scale when the listener turns on volume
 // boost. Whether boost is on is the client's business; the core only keeps

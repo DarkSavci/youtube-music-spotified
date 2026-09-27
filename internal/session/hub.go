@@ -49,6 +49,9 @@ type Projection struct {
 	Target  Target         `json:"target"`
 	Devices []Device       `json:"devices"`
 	Caps    Capabilities   `json:"capabilities"`
+	// Offline is whether the core cannot reach YouTube. Playback waits
+	// rather than skipping while it is set (#7).
+	Offline bool `json:"offline"`
 }
 
 // LogSink receives play-log entries. Implemented by the Control plane; the Core
@@ -300,6 +303,16 @@ func (h *Hub) projectionLocked() Projection {
 		Target:         h.core.Target(),
 		Devices:        devices,
 		Caps:           h.core.Capabilities(),
+		Offline:        h.core.Offline(),
+	}
+}
+
+// SetOnline records whether upstream is reachable, and tells every device.
+func (h *Hub) SetOnline(online bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.core.SetOnline(online) {
+		h.broadcastLocked()
 	}
 }
 

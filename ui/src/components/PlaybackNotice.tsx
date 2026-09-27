@@ -1,5 +1,6 @@
 import { retryTogetherPlayback } from "../lib/together";
 import { usePlayer } from "../lib/player";
+import { dismissNotice } from "../lib/playback";
 import { IconClose } from "./Icon";
 
 /**
@@ -27,7 +28,7 @@ export function PlaybackNotice() {
         <button
           className="iconbtn playnotice__close"
           aria-label="Dismiss"
-          onClick={() => usePlayer.setState({ notice: null })}
+          onClick={dismissNotice}
         >
           <IconClose size={14} />
         </button>

@@ -170,6 +170,14 @@ func (p *prefetcher) claim(key string) bool {
 	return true
 }
 
+// forget drops every recent claim, so what failed while the connection was
+// down is fetched again as soon as it is back.
+func (p *prefetcher) forget() {
+	p.mu.Lock()
+	p.recent = map[string]time.Time{}
+	p.mu.Unlock()
+}
+
 // claimNow is claim for the playing track: a back-off for guesses does not
 // apply to it, and it may be asked again sooner.
 func (p *prefetcher) claimNow(key string) bool {
@@ -218,6 +226,11 @@ started — used to go on downloading for up to five minutes, holding one of
 the few download slots the tracks that are coming up needed.
 */
 func (s *Server) PrefetchQueue(ids []string) {
+	// Offline every guess fails, and each failure holds its track back for
+	// ten minutes; wait for the connection instead (#7).
+	if s.net.Offline() {
+		return
+	}
 	wanted := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		wanted[id] = true
@@ -397,7 +410,7 @@ func (s *Server) haveResolution(ctx context.Context, videoID string) bool {
 // fillPlaying brings the rest of the playing track onto disk, ahead of all
 // speculative work: playback reads it as it arrives.
 func (s *Server) fillPlaying(videoID string) {
-	if s.deps.Audio == nil || s.deps.Resolver == nil {
+	if s.deps.Audio == nil || s.deps.Resolver == nil || s.net.Offline() {
 		return
 	}
 	if m, ok := s.deps.Audio.Get(videoID); ok && m.Complete() {
@@ -447,6 +460,11 @@ func (s *Server) fill(ctx context.Context, videoID string, limit int64, speculat
 	refusals, failures := 0, 0
 	windowed := false
 	for {
+		// A download already under way stops when the connection goes; it
+		// carries on from where it got to once the queue is fetched again.
+		if s.net.Offline() {
+			return errOffline
+		}
 		off, size := w.Offset(), w.Size()
 		if (size > 0 && off >= size) || (limit > 0 && off >= limit) {
 			return nil
@@ -795,6 +813,9 @@ func (s *Server) serveCached(w http.ResponseWriter, r *http.Request, videoID str
 func (s *Server) relayRest(ctx context.Context, w io.Writer, videoID string, pos, end int64) {
 	retried := false
 	for pos <= end {
+		if s.net.Offline() {
+			return
+		}
 		e, err := s.resolveCached(ctx, videoID)
 		if err != nil {
 			return
