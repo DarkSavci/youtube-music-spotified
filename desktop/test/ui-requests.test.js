@@ -93,6 +93,7 @@ test('a page warms its first playable track only', () => {
 
 function likedHarness(ok) {
   const posts = [];
+  const toasts = [];
   const fetch = async (url, init) => { posts.push({ url, body: init?.body }); return { ok, status: ok ? 200 : 500 }; };
   const qc = new queryCore.QueryClient();
   const invalidated = [];
@@ -104,10 +105,11 @@ function likedHarness(ok) {
     '@tanstack/react-query': { useMutation: () => ({}), useQuery: () => ({}), useQueryClient: () => qc },
     './api': { api: {}, ApiError },
     './base': base,
+    './toast': { toast: (m) => toasts.push(m) },
   }, { fetch });
   qc.setQueryData(['liked'], { tracks: [{ id: 'kept0000001' }] });
   qc.setQueryData(['library', '', 'recents'], [{ id: 'LM', kind: 'playlist', title: 'Liked Music', subtitle: '41 songs' }, { id: 'PL1', title: 'Mine', subtitle: '12 songs' }]);
-  return { liked, qc, posts, invalidated, ApiError };
+  return { liked, qc, posts, invalidated, ApiError, toasts };
 }
 
 test('a like changes the cached list at once and refetches nothing', async (t) => {
@@ -181,13 +183,17 @@ test('a failed Liked Music read is retried later, after a 429 no sooner than You
   assert.equal(liked.likedRetryDelay(0, new ApiError('slow down', 429)), 30000);
 });
 
+class StubApiError extends Error {
+  constructor(message, status, reauth) { super(message); this.status = status; this.reauth = reauth; }
+}
+
 function playlistsHarness(state) {
   const prefetched = [];
   const queryClient = { getQueryState: () => state, prefetchQuery: (o) => { prefetched.push(o); return Promise.resolve(); } };
   const mod = load('playlists.ts', {
     '@tanstack/react-query': { useMutation: () => ({}), useQuery: () => ({}), useQueryClient: () => ({}) },
     './queryclient': { queryClient },
-    './api': { api: {} },
+    './api': { api: {}, ApiError: StubApiError },
     './base': base,
   });
   return { mod, prefetched };
@@ -202,6 +208,9 @@ test('the add-to menus read the playlists live: loading, failed with a retry, or
   // failed, empty query).
   h.mod.wantOwnPlaylists();
   assert.equal(h.prefetched.length, 1);
+  // Signed out there is nothing to retry; the menus say so instead.
+  h = playlistsHarness({ status: 'error', data: undefined, error: new StubApiError('signed out', 401, true) });
+  assert.equal(h.mod.ownPlaylists().status, 'signedOut');
   h = playlistsHarness({ status: 'success', data: [{ id: 'LM', title: 'Liked Music' }, { id: 'PL1', title: 'Mine' }] });
   const ready = h.mod.ownPlaylists();
   assert.equal(ready.status, 'ready');

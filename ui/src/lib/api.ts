@@ -57,14 +57,17 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   if (!res.ok) {
     let message = res.statusText;
     let reauth = false;
+    let bodyRetryAfter = 0;
     try {
       const body = await res.json();
       message = body.error ?? message;
       reauth = Boolean(body.reauth);
+      bodyRetryAfter = Number(body.retryAfter) || 0;
     } catch {
       /* non-JSON error body; keep the status text */
     }
-    const retryAfter = Number(res.headers.get("Retry-After")) || 0;
+    // The header when the browser lets us read it, else the core's body field.
+    const retryAfter = Number(res.headers.get("Retry-After")) || bodyRetryAfter;
     throw new ApiError(message, res.status, reauth, retryAfter);
   }
   return res.json() as Promise<T>;

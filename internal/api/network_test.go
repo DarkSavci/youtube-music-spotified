@@ -137,7 +137,8 @@ func TestACutShortTransferNeedsTheProbeToAgree(t *testing.T) {
 func TestOnlyNetworkShapedEngineFailuresAreProbed(t *testing.T) {
 	for reason, want := range map[string]bool{
 		"stalled": true, "media_error_2": true, "embedded_no_start": true,
-		"media_error_3": false, "media_error_4": false, "NotSupportedError": false, "player_error_150": false,
+		"media_error_4": true,
+		"media_error_3": false, "NotSupportedError": false, "player_error_150": false,
 	} {
 		if got := mayBeNetwork(reason); got != want {
 			t.Errorf("mayBeNetwork(%q) = %v, want %v", reason, got, want)
@@ -270,5 +271,19 @@ func TestAnAnswerFromBeforeTheOutageDoesNotEndIt(t *testing.T) {
 	n.AnsweredSince(time.Now())
 	if n.Offline() {
 		t.Fatal("an answer to a request sent during the outage did not end it")
+	}
+}
+
+// An upstream error shown to the UI keeps what failed but not the request's
+// key and parameters.
+func TestUpstreamErrorsLoseTheirQueryStrings(t *testing.T) {
+	msg := `Post "https://music.youtube.com/youtubei/v1/browse?key=AIzaSecret&prettyPrint=false": dial tcp: lookup music.youtube.com: no such host`
+	got := withoutQueries(msg)
+	want := `Post "https://music.youtube.com/youtubei/v1/browse": dial tcp: lookup music.youtube.com: no such host`
+	if got != want {
+		t.Fatalf("got %q", got)
+	}
+	if plain := "what? no url here"; withoutQueries(plain) != plain {
+		t.Fatal("a message without a URL was changed")
 	}
 }

@@ -10,7 +10,7 @@ import { api } from "./api";
 import { toast } from "./toast";
 import { setLiked, useLikedIds } from "./liked";
 import {
-  ownPlaylists, useAddToPlaylist, useCreatePlaylist, useRemoveFromPlaylist, wantOwnPlaylists,
+  ownPlaylists, SIGNED_OUT_PLAYLISTS, useAddToPlaylist, useCreatePlaylist, useRemoveFromPlaylist, wantOwnPlaylists,
 } from "./playlists";
 import { usePrompt } from "../components/Prompt";
 
@@ -68,6 +68,7 @@ export function useTrackMenu(): (
     const ownDestinations = (): MenuItem[] => {
       const own = ownPlaylists();
       if (own.status === "loading") return [{ label: "Loading your playlists…", disabled: true }];
+      if (own.status === "signedOut") return [SIGNED_OUT_PLAYLISTS];
       if (own.status === "error") {
         return [{ label: "Couldn't load your playlists. Try again", onSelect: wantOwnPlaylists, keepOpen: true }];
       }

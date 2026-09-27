@@ -6,7 +6,7 @@ import { usePrompt } from "./Prompt";
 import { IconMore } from "./Icon";
 import { transport } from "../lib/playback";
 import { share } from "../lib/share";
-import { ownPlaylists, useAddToPlaylist, useCreatePlaylist, useDeletePlaylist, wantOwnPlaylists } from "../lib/playlists";
+import { ownPlaylists, SIGNED_OUT_PLAYLISTS, useAddToPlaylist, useCreatePlaylist, useDeletePlaylist, wantOwnPlaylists } from "../lib/playlists";
 import type { Track } from "../lib/types";
 
 /**
@@ -82,6 +82,7 @@ export function EntityActions({
         live: () => {
           const own = ownPlaylists();
           if (own.status === "loading") return [{ label: "Loading your playlists…", disabled: true }];
+          if (own.status === "signedOut") return [SIGNED_OUT_PLAYLISTS];
           if (own.status === "error") return [{ label: "Couldn't load your playlists. Try again", onSelect: wantOwnPlaylists, keepOpen: true }];
           return own.items.filter((pl) => pl.id !== id).slice(0, 6).map((pl) => ({
             label: `Add all to ${pl.title}`,

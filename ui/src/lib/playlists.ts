@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { queryClient } from "./queryclient";
-import { api } from "./api";
+import { api, ApiError } from "./api";
 import { apiUrl } from "./base";
 import type { LibraryItem, Track } from "./types";
 
@@ -53,15 +53,20 @@ export function wantOwnPlaylists(): void {
  * The user's own playlists as they stand now: loaded, still loading, or
  * failed. Read by menus when they render, not when they are built.
  */
-export function ownPlaylists(): { status: "loading" | "error" | "ready"; items: LibraryItem[] } {
+export function ownPlaylists(): { status: "loading" | "error" | "signedOut" | "ready"; items: LibraryItem[] } {
   const state = queryClient.getQueryState<LibraryItem[]>(OWN_KEY);
   if (state?.data) {
     // Liked Music is a generated list and cannot be added to; offering it
     // would produce an error the user cannot act on.
     return { status: "ready", items: state.data.filter((p) => p.id !== "LM") };
   }
-  return { status: state?.status === "error" ? "error" : "loading", items: [] };
+  if (state?.status !== "error") return { status: "loading", items: [] };
+  // Signed out there is nothing to retry: saying so beats "try again".
+  return { status: state.error instanceof ApiError && state.error.reauth ? "signedOut" : "error", items: [] };
 }
+
+/** The menu entry shown in place of the playlists when signed out. */
+export const SIGNED_OUT_PLAYLISTS = { label: "Sign in to add to your playlists", disabled: true } as const;
 
 export function useCreatePlaylist() {
   const qc = useQueryClient();

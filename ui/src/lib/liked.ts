@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tansta
 import { useEffect, useSyncExternalStore } from "react";
 import { api, ApiError } from "./api";
 import { apiUrl } from "./base";
+import { toast } from "./toast";
 import type { LibraryItem, Track } from "./types";
 
 /**
@@ -109,7 +110,7 @@ export async function setLiked(qc: QueryClient, track: Track | { id: string }, l
       // "none" clears a like; there is no separate unlike.
       body: JSON.stringify({ rating: liked ? "like" : "none" }),
     });
-    if (!res.ok) throw new Error(`status ${res.status}`);
+    if (!res.ok) throw new ApiError(`status ${res.status}`, res.status, res.status === 401);
   } catch (err) {
     if (before) qc.setQueryData(["liked"], before);
     throw err;
@@ -128,6 +129,13 @@ export function useToggleLike() {
     // `liked` is whether it is liked now; the click flips it.
     mutationFn: ({ trackId, liked, track }: { trackId: string; liked: boolean; track?: Track }) =>
       setLiked(qc, track ?? { id: trackId }, !liked),
+    // The heart has already sprung back; say why rather than fail silently.
+    onError: (err) =>
+      toast(
+        err instanceof ApiError && err.reauth
+          ? "Sign in to save songs to your library."
+          : "Couldn't update your library. Try again.",
+      ),
   });
 }
 
