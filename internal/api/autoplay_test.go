@@ -93,6 +93,8 @@ func radioServer(t *testing.T) (*Server, *session.Hub, *radioCatalog, context.Ca
 	hub := session.NewHub(clock.System{}, session.DefaultSettings(), nil)
 	cat := &radioCatalog{}
 	s := New(Deps{Session: hub, Catalog: cat})
+	// Real pacing is seconds apart; these tests are about what is fetched.
+	s.autoplay.gap = 20 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	go s.RunAutoplay(ctx)
 	t.Cleanup(cancel)

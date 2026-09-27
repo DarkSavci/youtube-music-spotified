@@ -14,6 +14,7 @@ import (
 	"spotifier/internal/domain"
 	"spotifier/internal/identity"
 	"spotifier/internal/obs"
+	"spotifier/internal/renderers"
 )
 
 /*
@@ -230,3 +231,46 @@ func TestHealthSurvivesTotalFailure(t *testing.T) {
 }
 
 var _ = identity.ErrLoggedOut
+
+// Liked Music without its header or tracks is YouTube throttling the
+// account, so it is answered as a throttle: the client waits instead of
+// retrying at once or showing the page as broken.
+func TestThrottledLikedMusicIsA429(t *testing.T) {
+	s := serverWith(api.Deps{Catalog: brokenCatalog{err: renderers.ErrLikedShape}})
+	if rec := do(t, s, http.MethodGet, "/v1/playlists/LM"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("throttled liked music = %d, want 429", rec.Code)
+	}
+}
+
+// Signed out, Liked Music asks for sign-in like /v1/me/liked does; another
+// message is an error in YouTube's words; only the empty shape is a 429.
+func TestLikedMusicFailuresAreToldApart(t *testing.T) {
+	cases := []struct {
+		err    error
+		code   int
+		reauth bool
+	}{
+		{renderers.ErrLikedSignedOut, http.StatusUnauthorized, true},
+		{renderers.ErrLikedShape, http.StatusTooManyRequests, false},
+		{&renderers.LikedMessageError{Text: "Something went wrong"}, http.StatusBadGateway, false},
+	}
+	for _, c := range cases {
+		rec := do(t, serverWith(api.Deps{Catalog: brokenCatalog{err: c.err}}), http.MethodGet, "/v1/playlists/LM")
+		if rec.Code != c.code {
+			t.Fatalf("%v: status %d, want %d", c.err, rec.Code, c.code)
+		}
+		var body struct {
+			Error  string `json:"error"`
+			Reauth bool   `json:"reauth"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Reauth != c.reauth {
+			t.Fatalf("%v: reauth %v, want %v", c.err, body.Reauth, c.reauth)
+		}
+		if c.code == http.StatusBadGateway && !strings.Contains(body.Error, "Something went wrong") {
+			t.Fatalf("message lost: %q", body.Error)
+		}
+	}
+}

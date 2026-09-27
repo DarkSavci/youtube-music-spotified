@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"spotifier/internal/domain"
+	"spotifier/internal/ratelimit"
 	"spotifier/internal/resolver"
 )
 
@@ -139,6 +141,24 @@ func (s *Server) resolve(ctx context.Context, videoID string, speculative bool) 
 		s.streams.put(videoID, e)
 		return e, nil
 	}
+	// A track that just failed fails again the same way: not worth another
+	// yt-dlp run. Someone pressing play is owed a fresh attempt, though,
+	// unless one was made for them moments ago; a failed guess never stands
+	// in the way of a play.
+	if err := s.failures.recall(videoID, !speculative); err != nil {
+		return resolvedEntry{}, err
+	}
+	// A rate limit holds for everyone — except for one probe per cooldown
+	// for a track someone is waiting for, which may find it already over.
+	cooling, left := s.streamGov.Cooling()
+	probe := cooling && !speculative && s.streamGov.Probe()
+	if cooling && !probe {
+		err := fmt.Errorf("%w: %w", resolver.ErrRateLimited, &ratelimit.Error{RetryAfter: left})
+		// Recorded, so the health check says "rate limited" rather than
+		// leaving the client to take this track for a dead one.
+		s.lastFailure.Store(videoID, err)
+		return resolvedEntry{}, err
+	}
 	key := videoID
 	if !speculative {
 		s.preemptSpeculative(videoID)
@@ -190,8 +210,21 @@ func (s *Server) resolve(ctx context.Context, videoID string, speculative bool) 
 	s.pendingMu.Lock()
 	f.cancel = cancel
 	s.pendingMu.Unlock()
+	started := time.Now()
 	stream, quality, err := s.deps.Resolver.Resolve(rctx, videoID)
 	cancel()
+	switch {
+	case err == nil:
+		// Upstream answered: whatever cooldown was running is over — if this
+		// lookup began after it did, or was its probe.
+		s.streamGov.Succeeded(started, probe)
+	case errors.Is(err, resolver.ErrRateLimited):
+		d := s.streamGov.CoolDown(0)
+		err = fmt.Errorf("%w: %w", err, &ratelimit.Error{RetryAfter: d})
+	}
+	s.failures.remember(videoID, err, !speculative)
+	s.deps.Log.Info("resolve", "video", videoID, "reason", resolveReason(ctx, speculative),
+		"took", time.Since(started).Round(time.Millisecond), "err", err)
 
 	if err == nil {
 		f.entry = resolvedEntry{stream: stream, quality: quality, at: time.Now()}
@@ -479,14 +512,14 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		err error
 	)
 	if preload {
-		e, err = s.resolveSpeculative(r.Context(), videoID)
+		e, err = s.resolveSpeculative(withReason(r.Context(), "preload"), videoID)
 	} else {
 		// Someone is listening for this one: speculative resolutions wait.
 		resolved := s.haveResolution(r.Context(), videoID)
 		if !resolved {
 			s.prefetch.waiting.Add(1)
 		}
-		e, err = s.resolveCached(r.Context(), videoID)
+		e, err = s.resolveCached(withReason(r.Context(), "play"), videoID)
 		if !resolved {
 			s.prefetch.waiting.Add(-1)
 		}
@@ -496,6 +529,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		// client marks every track unplayable on the way down the queue.
 		if errors.Is(err, resolver.ErrRateLimited) {
 			s.deps.Log.Warn("stream rate limited", "video", videoID)
+			w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(retryAfter(err).Seconds()))))
 			http.Error(w, "rate limited by YouTube", http.StatusTooManyRequests)
 			return
 		}
