@@ -137,6 +137,13 @@ export function SettingsView() {
           onChange={(v) => prefs.set("resumeOnLaunch", v)}
         />
 
+        <Toggle
+          label="Continue from YouTube Music"
+          hint="When the app starts, pick up the queue from your phone or the YouTube Music website, paused where it was. Only when nothing is playing here. Needs you to be signed in."
+          checked={prefs.continueFromYouTubeMusic}
+          onChange={(v) => prefs.set("continueFromYouTubeMusic", v)}
+        />
+
         {desktop.available && (
           <Toggle
             label={desktop.isMac ? "Close to menu bar" : "Close to tray"}

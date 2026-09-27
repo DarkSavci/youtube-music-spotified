@@ -278,6 +278,10 @@ func (c *Core) play(cmd Command) (Reject, []LogEntry) {
 	}
 	c.userChange = true
 	c.startTrack(idx, 0)
+	if cmd.Paused {
+		c.state.State = domain.StatePaused
+		c.bump()
+	}
 	return RejectNone, logs
 }
 

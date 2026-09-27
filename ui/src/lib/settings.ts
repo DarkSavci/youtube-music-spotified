@@ -70,6 +70,13 @@ export interface Settings {
   resumeOnLaunch: boolean;
 
   /**
+   * At launch, pick up the queue the account has on another device — the
+   * phone app, the website — as YouTube Music's own website does. It is put
+   * in place paused, and only when nothing is playing here. Signed in only.
+   */
+  continueFromYouTubeMusic: boolean;
+
+  /**
    * The close button hides the window to the notification area and the music
    * keeps playing; quitting is from the tray icon's menu. Desktop only.
    *
@@ -149,6 +156,10 @@ Left off deliberately:
                   default would answer it for the listener
   eq              flat, because a tone control that arrives already shaping
                   the sound is not a neutral starting point
+  continueFromYouTubeMusic
+                  it replaces the queue this app kept with another device's,
+                  and costs a request on every launch; that is for the
+                  listener to choose
 */
 export const DEFAULT_SETTINGS: Settings = {
   crossfadeMs: 6000,
@@ -160,6 +171,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   reduceMotion: false,
   resumeOnLaunch: true,
+  continueFromYouTubeMusic: false,
   closeToTray: true,
   reportToYouTube: true,
   volumeBoost: false,

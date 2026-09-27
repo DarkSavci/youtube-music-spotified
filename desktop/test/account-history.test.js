@@ -118,3 +118,49 @@ test('an empty or failed read says so and leaves the queue alone', async () => {
   await limited.run();
   assert.match(limited.toasts[0], /limiting requests/);
 });
+
+function launchHarness(answer, { idle = [true, true], current } = {}) {
+  const loaded = [];
+  const toasts = [];
+  const idles = [...idle];
+  const { continueOnLaunch } = load('remotequeue.ts');
+  const run = () => continueOnLaunch({
+    fetchQueue: typeof answer === 'function' ? answer : async () => answer,
+    idle: async () => (idles.length ? idles.shift() : true),
+    currentId: () => current,
+    load: async (tracks, index, origin) => { loaded.push(plain({ ids: tracks.map((t) => t.id), index, origin })); return true; },
+    toast: (m) => toasts.push(m),
+  });
+  return { run, loaded, toasts };
+}
+
+test('at launch the remote queue is loaded where the other device was, with a note', async () => {
+  const h = launchHarness({ tracks: [track('a'), track('b')], index: 1, title: 'Mix' });
+  assert.equal(await h.run(), 'loaded');
+  assert.deepEqual(h.loaded, [{ ids: ['a', 'b'], index: 1, origin: 'Mix' }]);
+  assert.match(h.toasts[0], /Picked up your queue/);
+});
+
+test('at launch nothing is asked or changed while something is playing here', async () => {
+  let asked = 0;
+  const h = launchHarness(async () => { asked++; return { tracks: [track('a')], index: 0 }; }, { idle: [false] });
+  assert.equal(await h.run(), 'busy');
+  assert.equal(asked, 0);
+  // Started playing while the queue was being read: left alone.
+  const late = launchHarness({ tracks: [track('a')], index: 0 }, { idle: [true, false] });
+  assert.equal(await late.run(), 'busy');
+  assert.equal(late.loaded.length, 0);
+});
+
+test('at launch a failed, empty or same-song read changes nothing and says nothing', async () => {
+  const failed = launchHarness(async () => { throw Object.assign(new Error('x'), { status: 429 }); });
+  assert.equal(await failed.run(), 'failed');
+  const empty = launchHarness({ tracks: [], index: 0 });
+  assert.equal(await empty.run(), 'empty');
+  const same = launchHarness({ tracks: [track('a'), track('b')], index: 1 }, { current: 'b' });
+  assert.equal(await same.run(), 'same');
+  for (const h of [failed, empty, same]) {
+    assert.equal(h.loaded.length, 0);
+    assert.deepEqual(h.toasts, []);
+  }
+});

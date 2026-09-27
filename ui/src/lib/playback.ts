@@ -68,6 +68,9 @@ let unsubscribe: (() => void) | null = null;
  */
 let session: SessionClient | null = null;
 let serverAuthoritative = false;
+// Settles once startPlayback knows whether the core owns playback.
+let resolveSessionReady: (ok: boolean) => void = () => {};
+const sessionReady = new Promise<boolean>((resolve) => { resolveSessionReady = resolve; });
 
 /**
  * Failures on distinct tracks before falling back to the embedded engine; see
@@ -466,6 +469,7 @@ export function startPlayback() {
         console.debug("[playback] session core unreachable; driving playback locally");
         session = null;
       }
+      resolveSessionReady(ok);
     });
 
   const sync = () => {
@@ -491,6 +495,29 @@ export function startPlayback() {
     sync();
   });
   sync();
+}
+
+/**
+ * Puts a queue in place at index without playing it.
+ *
+ * For a queue picked up at launch: it is there to press play on, not started
+ * at someone who has not asked. The core does this; without it (playback
+ * driven locally) nothing is loaded, and false says so.
+ */
+export async function loadQueuePaused(tracks: Track[], index: number, origin: string): Promise<boolean> {
+  if (!(await sessionReady) || !session) return false;
+  return session.command({ Kind: "play", Tracks: tracks, StartIndex: index, Origin: origin, Paused: true });
+}
+
+/**
+ * Whether nothing is going on here that a queue from elsewhere would
+ * interrupt: nothing playing or about to, and no Listen Together room.
+ */
+export async function idleForRemoteQueue(): Promise<boolean> {
+  if (!(await sessionReady)) return false;
+  const s = usePlayer.getState();
+  if (s.followingRoom) return false;
+  return !(s.state === "playing" || s.state === "loading" || s.state === "stalled");
 }
 
 /** The level to come back to when a mute is lifted. */
