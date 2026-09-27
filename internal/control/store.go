@@ -144,7 +144,41 @@ func (s *Store) migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM stream_urls WHERE expires_at <= ?`, time.Now().UTC()); err != nil {
 		return fmt.Errorf("control: prune stream urls: %w", err)
 	}
+	if err := s.repairLibraryArtistIDs(ctx); err != nil {
+		return err
+	}
 	return s.repairArtists(ctx)
+}
+
+/*
+repairLibraryArtistIDs moves library rows kept under an artist's library id
+("MPLA" plus the channel id) to the channel id the library now reports, so a
+pin, a folder or a first-seen date made before the change still applies. Where
+both keys exist the two rows are merged: pinned if either was, the folder that
+was set, the earlier first-seen date. Idempotent: nothing matches afterwards.
+*/
+func (s *Store) repairLibraryArtistIDs(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("control: repair library artist ids: %w", err)
+	}
+	defer tx.Rollback()
+	// GLOB rather than LIKE: LIKE ignores case, and ids are case-sensitive.
+	// "WHERE true" keeps SQLite from reading ON CONFLICT as a join clause.
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO library_meta (user_id, item_kind, item_id, folder_id, pinned, first_seen_at)
+		SELECT user_id, item_kind, substr(item_id, 5), folder_id, pinned, first_seen_at
+		FROM library_meta WHERE item_id GLOB 'MPLAUC*' AND true
+		ON CONFLICT(user_id, item_kind, item_id) DO UPDATE SET
+			pinned = MAX(library_meta.pinned, excluded.pinned),
+			folder_id = CASE WHEN library_meta.folder_id = '' THEN excluded.folder_id ELSE library_meta.folder_id END,
+			first_seen_at = MIN(library_meta.first_seen_at, excluded.first_seen_at)`); err != nil {
+		return fmt.Errorf("control: repair library artist ids: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM library_meta WHERE item_id GLOB 'MPLAUC*'`); err != nil {
+		return fmt.Errorf("control: repair library artist ids: %w", err)
+	}
+	return tx.Commit()
 }
 
 /*

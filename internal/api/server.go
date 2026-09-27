@@ -29,6 +29,7 @@ import (
 	"spotifier/internal/lyrics"
 	"spotifier/internal/mixes"
 	"spotifier/internal/obs"
+	"spotifier/internal/renderers"
 	"spotifier/internal/report"
 	"spotifier/internal/resolver"
 	"spotifier/internal/session"
@@ -263,7 +264,7 @@ type apiError struct {
 
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, identity.ErrLoggedOut):
+	case errors.Is(err, identity.ErrLoggedOut), errors.Is(err, renderers.ErrLikedSignedOut):
 		s.write(w, http.StatusUnauthorized, apiError{Error: "signed out", Reauth: true})
 	case errors.Is(err, context.Canceled):
 		// The client went away; nothing to report.
@@ -273,6 +274,18 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		s.deps.Log.Warn("upstream rate limited", "path", r.URL.Path)
 		s.write(w, http.StatusTooManyRequests,
 			apiError{Error: "rate limited by YouTube; wait a few minutes"})
+	case errors.Is(err, renderers.ErrLikedMessage):
+		// YouTube's generic wording, shown as it is, as an error the UI can
+		// retry: it is not an empty library.
+		s.deps.Log.Warn("liked music message page", "path", r.URL.Path, "err", err)
+		s.write(w, http.StatusBadGateway, apiError{Error: err.Error()})
+	case errors.Is(err, renderers.ErrLikedShape):
+		// Liked Music without its header or tracks only comes back while
+		// YouTube throttles the account, so it is answered as the throttle it
+		// is: waiting helps, retrying at once does not.
+		s.deps.Log.Warn("liked music throttled", "path", r.URL.Path)
+		s.write(w, http.StatusTooManyRequests,
+			apiError{Error: "YouTube is throttling this account's Liked Music; wait a few minutes"})
 	default:
 		s.deps.Log.Warn("request failed", "path", r.URL.Path, "err", err)
 		s.write(w, http.StatusBadGateway, apiError{Error: err.Error()})

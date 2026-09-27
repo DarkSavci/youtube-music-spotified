@@ -62,6 +62,9 @@ func main() {
 		level = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	// Packages without a logger of their own (library, identity) log through
+	// the default, which should read like the rest of the core's output.
+	slog.SetDefault(log)
 
 	rec := obs.NewRecorder()
 	// The token comes through the environment rather than a flag, so it does
@@ -119,13 +122,24 @@ func main() {
 		deps.Audio = cache
 	}
 
+	/*
+	 * The catalog reads through the account's current client, so a session
+	 * the shell refreshes (auth/reload) or ends (sign-out) applies to browsing
+	 * at once instead of at the next restart. Signed out, a client without
+	 * credentials serves public metadata.
+	 */
+	public := innertubeClient(nil)
+	currentClient := func() *innertube.Client {
+		if c := acct.Current().Client; c != nil {
+			return c
+		}
+		return public
+	}
 	switch *catalogMode {
 	case "fixture":
 		deps.Catalog = mustFixture(*fixtureDir, rec, log)
-	case "innertube":
-		deps.Catalog = catalog.NewInnerTube(innertubeClient(creds), rec)
-	default: // auto
-		deps.Catalog = catalog.NewInnerTube(innertubeClient(creds), rec)
+	default: // innertube, auto
+		deps.Catalog = catalog.NewInnerTubeFrom(currentClient, rec)
 	}
 
 	/*
