@@ -84,8 +84,13 @@ export interface Shelf {
 
 export interface MoodChip { id: string; params?: string; title: string; color?: string }
 
+/** One of Home's mood pills ("Energize", "Relax"…); params re-reads Home. */
+export interface HomeChip { title: string; params: string; selected?: boolean }
+
 export interface BrowsePage {
   title?: string; shelves: Shelf[]; moods?: MoodChip[]; continuation?: string;
+  /** Home's mood row; other surfaces have none. */
+  chips?: HomeChip[];
 }
 
 export interface SearchResults {

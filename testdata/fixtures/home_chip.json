@@ -1,0 +1,311 @@
+{
+ "contents": {
+  "singleColumnBrowseResultsRenderer": {
+   "tabs": [
+    {
+     "tabRenderer": {
+      "endpoint": {
+       "browseEndpoint": {
+        "browseId": "FEmusic_home"
+       }
+      },
+      "title": "Home",
+      "selected": true,
+      "content": {
+       "sectionListRenderer": {
+        "header": {
+         "chipCloudRenderer": {
+          "chips": [
+           {
+            "chipCloudChipRenderer": {
+             "style": {
+              "styleType": "STYLE_LARGE_TRANSLUCENT_AND_SELECTED_WHITE"
+             },
+             "text": {
+              "runs": [
+               {
+                "text": "Energize"
+               }
+              ]
+             },
+             "navigationEndpoint": {
+              "browseEndpoint": {
+               "browseId": "FEmusic_home",
+               "params": "PARAMS_ENERGIZE"
+              }
+             },
+             "isSelected": true,
+             "onDeselectedCommand": {
+              "browseEndpoint": {
+               "browseId": "FEmusic_home",
+               "params": "PARAMS_PLAIN_HOME"
+              }
+             }
+            }
+           },
+           {
+            "chipCloudChipRenderer": {
+             "style": {
+              "styleType": "STYLE_LARGE_TRANSLUCENT_AND_SELECTED_WHITE"
+             },
+             "text": {
+              "runs": [
+               {
+                "text": "Relax"
+               }
+              ]
+             },
+             "navigationEndpoint": {
+              "browseEndpoint": {
+               "browseId": "FEmusic_home",
+               "params": "PARAMS_RELAX"
+              }
+             },
+             "isSelected": false,
+             "onDeselectedCommand": {
+              "browseEndpoint": {
+               "browseId": "FEmusic_home",
+               "params": "PARAMS_PLAIN_HOME"
+              }
+             }
+            }
+           },
+           {
+            "chipCloudChipRenderer": {
+             "style": {
+              "styleType": "STYLE_LARGE_TRANSLUCENT_AND_SELECTED_WHITE"
+             },
+             "text": {
+              "runs": [
+               {
+                "text": "Workout"
+               }
+              ]
+             },
+             "navigationEndpoint": {
+              "browseEndpoint": {
+               "browseId": "FEmusic_home",
+               "params": "PARAMS_WORKOUT"
+              }
+             },
+             "isSelected": false,
+             "onDeselectedCommand": {
+              "browseEndpoint": {
+               "browseId": "FEmusic_home",
+               "params": "PARAMS_PLAIN_HOME"
+              }
+             }
+            }
+           },
+           {
+            "chipCloudChipRenderer": {
+             "style": {
+              "styleType": "STYLE_LARGE_TRANSLUCENT_AND_SELECTED_WHITE"
+             },
+             "text": {
+              "runs": [
+               {
+                "text": "Relax again"
+               }
+              ]
+             },
+             "navigationEndpoint": {
+              "browseEndpoint": {
+               "browseId": "FEmusic_home",
+               "params": "PARAMS_RELAX"
+              }
+             },
+             "isSelected": false,
+             "onDeselectedCommand": {
+              "browseEndpoint": {
+               "browseId": "FEmusic_home",
+               "params": "PARAMS_PLAIN_HOME"
+              }
+             }
+            }
+           }
+          ]
+         }
+        },
+        "contents": [
+         {
+          "musicCarouselShelfRenderer": {
+           "header": {
+            "musicCarouselShelfBasicHeaderRenderer": {
+             "title": {
+              "runs": [
+               {
+                "text": "Upbeat picks"
+               }
+              ]
+             }
+            }
+           },
+           "contents": [
+            {
+             "musicTwoRowItemRenderer": {
+              "thumbnailRenderer": {
+               "musicThumbnailRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://i.ytimg.com/synthetic/PLsynthA1.jpg",
+                   "width": 226,
+                   "height": 226
+                  }
+                 ]
+                }
+               }
+              },
+              "title": {
+               "runs": [
+                {
+                 "text": "Energy one"
+                }
+               ]
+              },
+              "subtitle": {
+               "runs": [
+                {
+                 "text": "Playlist"
+                }
+               ]
+              },
+              "navigationEndpoint": {
+               "browseEndpoint": {
+                "browseId": "VLPLsynthA1",
+                "browseEndpointContextSupportedConfigs": {
+                 "browseEndpointContextMusicConfig": {
+                  "pageType": "MUSIC_PAGE_TYPE_PLAYLIST"
+                 }
+                }
+               }
+              }
+             }
+            },
+            {
+             "musicTwoRowItemRenderer": {
+              "thumbnailRenderer": {
+               "musicThumbnailRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://i.ytimg.com/synthetic/PLsynthA2.jpg",
+                   "width": 226,
+                   "height": 226
+                  }
+                 ]
+                }
+               }
+              },
+              "title": {
+               "runs": [
+                {
+                 "text": "Energy two"
+                }
+               ]
+              },
+              "subtitle": {
+               "runs": [
+                {
+                 "text": "Playlist"
+                }
+               ]
+              },
+              "navigationEndpoint": {
+               "browseEndpoint": {
+                "browseId": "VLPLsynthA2",
+                "browseEndpointContextSupportedConfigs": {
+                 "browseEndpointContextMusicConfig": {
+                  "pageType": "MUSIC_PAGE_TYPE_PLAYLIST"
+                 }
+                }
+               }
+              }
+             }
+            }
+           ],
+           "continuations": [
+            {
+             "nextContinuationData": {
+              "continuation": "SHELF_TOKEN_NOT_THE_PAGE"
+             }
+            }
+           ]
+          }
+         },
+         {
+          "musicCarouselShelfRenderer": {
+           "header": {
+            "musicCarouselShelfBasicHeaderRenderer": {
+             "title": {
+              "runs": [
+               {
+                "text": "Morning boost"
+               }
+              ]
+             }
+            }
+           },
+           "contents": [
+            {
+             "musicTwoRowItemRenderer": {
+              "thumbnailRenderer": {
+               "musicThumbnailRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://i.ytimg.com/synthetic/PLsynthB1.jpg",
+                   "width": 226,
+                   "height": 226
+                  }
+                 ]
+                }
+               }
+              },
+              "title": {
+               "runs": [
+                {
+                 "text": "Boost one"
+                }
+               ]
+              },
+              "subtitle": {
+               "runs": [
+                {
+                 "text": "Playlist"
+                }
+               ]
+              },
+              "navigationEndpoint": {
+               "browseEndpoint": {
+                "browseId": "VLPLsynthB1",
+                "browseEndpointContextSupportedConfigs": {
+                 "browseEndpointContextMusicConfig": {
+                  "pageType": "MUSIC_PAGE_TYPE_PLAYLIST"
+                 }
+                }
+               }
+              }
+             }
+            }
+           ]
+          }
+         }
+        ],
+        "continuations": [
+         {
+          "nextContinuationData": {
+           "continuation": "PAGE_TOKEN_2",
+           "clickTrackingParams": "x"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   ]
+  }
+ }
+}

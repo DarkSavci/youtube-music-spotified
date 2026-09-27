@@ -311,8 +311,56 @@ func ParseBrowsePage(doc Node, pc ParseContext) domain.BrowsePage {
 	}
 
 	page.Moods = ParseMoodChips(doc)
-	page.Continuation = Continuation(doc)
+	page.Chips = ParseHomeChips(doc)
+	page.Continuation = SectionListContinuation(doc)
 	return page
+}
+
+// SectionListContinuation is the token for a surface's next few shelves.
+//
+// A first page carries it on its sectionListRenderer and each later page on
+// its sectionListContinuation. Those are read first: shelves can hold
+// continuations of their own, and a search of the whole document visits
+// objects in no fixed order, so it may land on one of those instead.
+func SectionListContinuation(doc Node) string {
+	for _, key := range []string{"sectionListContinuation", "sectionListRenderer"} {
+		if list := Find(doc, key); list != nil {
+			if tok := Continuation(list.List("continuations")); tok != "" {
+				return tok
+			}
+		}
+	}
+	// Newer shapes append items through onResponseReceivedActions, with the
+	// token on a trailing continuationItemRenderer.
+	if action := Find(doc, "appendContinuationItemsAction"); action != nil {
+		return Continuation(action)
+	}
+	if Find(doc, "sectionListContinuation") != nil || Find(doc, "sectionListRenderer") != nil {
+		// A list with no continuations of its own is the end of the page.
+		return ""
+	}
+	return Continuation(doc)
+}
+
+// ParseHomeChips reads the mood row across the top of Home: "Energize",
+// "Relax", "Workout"... Each chip re-reads Home with its own params.
+func ParseHomeChips(doc Node) []domain.HomeChip {
+	cloud := Find(doc, "chipCloudRenderer")
+	if cloud == nil {
+		return nil
+	}
+	var out []domain.HomeChip
+	seen := map[string]bool{}
+	for _, n := range FindAll(cloud, "chipCloudChipRenderer") {
+		title := textOf(n.Child("text"))
+		params := n.Child("navigationEndpoint").Child("browseEndpoint").Str("params")
+		if title == "" || params == "" || seen[params] {
+			continue
+		}
+		seen[params] = true
+		out = append(out, domain.HomeChip{Title: title, Params: params, Selected: n.Bool("isSelected")})
+	}
+	return out
 }
 
 // ParseMoodChips reads the mood-and-genre grid.

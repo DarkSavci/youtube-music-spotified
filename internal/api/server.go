@@ -429,7 +429,37 @@ func (s *Server) requireIdentity(w http.ResponseWriter) (identity.Identity, bool
 
 // ---------- catalog ----------
 
+/*
+handleHome serves Home and its two variants, all kept under "cat|home" so a
+change of account drops every one:
+
+	?mood=<params>         Home re-read through one of its mood chips
+	?continuation=<token>  the next few shelves of either, as the page scrolls
+
+A continuation token already names the chip it came from, so it needs no mood.
+*/
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if cont := q.Get("continuation"); cont != "" {
+		s.serveKept(w, r, cacheKey("cat", "home", "more", cont), policyHome, func(ctx context.Context) (produced, error) {
+			page, err := s.deps.Catalog.BrowseMore(ctx, catalog.SurfaceHome, cont)
+			if err != nil {
+				return produced{}, err
+			}
+			return okBody(normalizeBrowsePage(page))
+		})
+		return
+	}
+	if mood := q.Get("mood"); mood != "" {
+		s.serveKept(w, r, cacheKey("cat", "home", "mood", mood), policyHome, func(ctx context.Context) (produced, error) {
+			page, err := s.deps.Catalog.Browse(ctx, catalog.SurfaceHome, mood)
+			if err != nil {
+				return produced{}, err
+			}
+			return okBody(normalizeBrowsePage(page))
+		})
+		return
+	}
 	s.serveKept(w, r, cacheKey("cat", "home"), policyHome, func(ctx context.Context) (produced, error) {
 		page, err := s.deps.Catalog.Home(ctx)
 		if err != nil {
@@ -619,7 +649,8 @@ func (s *Server) handleAuthReload(w http.ResponseWriter, r *http.Request) {
 	// play now.
 	s.failures.clear()
 	s.deps.Log.Info("credentials reloaded", "signedIn", signedIn)
-	// Whatever was kept for the previous session is not this one's.
+	// Whatever was kept for the previous session is not this one's. The
+	// home prefix covers its mood chips and later pages too.
 	s.clearKept(r.Context(), "me|", "lib|", cacheKey("cat", "home"))
 	s.write(w, http.StatusOK, map[string]any{"signedIn": signedIn})
 }

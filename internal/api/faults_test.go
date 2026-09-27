@@ -34,6 +34,9 @@ func (b brokenCatalog) Home(context.Context) (domain.BrowsePage, error) {
 func (b brokenCatalog) Browse(context.Context, string, string) (domain.BrowsePage, error) {
 	return domain.BrowsePage{}, b.err
 }
+func (b brokenCatalog) BrowseMore(context.Context, string, string) (domain.BrowsePage, error) {
+	return domain.BrowsePage{}, b.err
+}
 func (b brokenCatalog) Search(context.Context, string, domain.SearchFilter) (domain.SearchResults, error) {
 	return domain.SearchResults{}, b.err
 }

@@ -106,6 +106,11 @@ func (f *Fixture) Browse(ctx context.Context, surfaceID, _ string) (domain.Brows
 	return f.browseFixture(name, surfaceID)
 }
 
+// BrowseMore ends every surface: fixtures record first pages only.
+func (f *Fixture) BrowseMore(ctx context.Context, surfaceID, _ string) (domain.BrowsePage, error) {
+	return domain.BrowsePage{}, nil
+}
+
 func (f *Fixture) browseFixture(name, surfaceID string) (domain.BrowsePage, error) {
 	doc, err := f.load(name)
 	if err != nil {
