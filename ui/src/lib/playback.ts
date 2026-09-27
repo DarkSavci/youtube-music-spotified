@@ -82,6 +82,8 @@ const RETRY_NATIVE_AFTER_MS = 10 * 60_000;
 const ladder = failureLadder(FALLBACK_AFTER_FAILURES, RETRY_NATIVE_AFTER_MS);
 const FALLBACK_NOTICE =
   "Tracks kept failing to load, so playback switched to YouTube’s embedded player. The equaliser and crossfade are off for now.";
+const OFFLINE_NOTICE =
+  "You’re offline. Playback carries on from where it stopped when the connection is back.";
 /** The epoch of the last target, to notice track changes; see retryNativeAtTrackChange(). */
 let targetEpoch: number | null = null;
 
@@ -107,6 +109,30 @@ function retryNativeAtTrackChange(epoch: number) {
   swapEngine();
   if (serverAuthoritative && session) session.setCapabilities(engine!.capabilities);
   if (usePlayer.getState().notice === FALLBACK_NOTICE) usePlayer.setState({ notice: null });
+}
+
+/**
+ * Follows the core's view of the connection (#7). Losing it says so, and
+ * forgets failures counted before the core knew: they were the outage, not
+ * the tracks. Getting it back leaves a fallback the outage may have caused.
+ */
+function noteConnection(offline: boolean) {
+  const was = usePlayer.getState().offline;
+  if (offline === was) return;
+  usePlayer.setState({ offline });
+  if (offline) {
+    ladder.loaded();
+    usePlayer.setState({ notice: OFFLINE_NOTICE });
+    return;
+  }
+  if (usePlayer.getState().notice === OFFLINE_NOTICE) usePlayer.setState({ notice: null });
+  if (ladder.fellBack && useSettings.getState().enginePreference !== "embedded") {
+    console.info("[playback] connection back; retrying the native engine");
+    ladder.reset();
+    swapEngine();
+    if (serverAuthoritative && session) session.setCapabilities(engine!.capabilities);
+    if (usePlayer.getState().notice === FALLBACK_NOTICE) usePlayer.setState({ notice: null });
+  }
 }
 
 /** Builds the engine the settings ask for, or the best available. */
@@ -238,10 +264,20 @@ function onEngineEvent(e: EngineEvent) {
       // A report for a track already moved past (a preload, or a load the
       // queue has left) is stale to the core, so it is not counted here
       // either: only the track now playing can tip the engine into fallback.
+      // A lost connection fails every track, and the embedded player cannot
+      // help with that either (#7): it is the core's to wait out, not a
+      // reason to leave the native engine.
+      if (usePlayer.getState().offline) return;
       const step = ladder.failed(e.epoch, targetEpoch);
       if (step === "stale") return;
-      if (step === "fallback") fallBack();
-      else if (usePlayer.getState().followingRoom) {
+      if (step === "fallback") {
+        // The projection saying so may still be on its way: ask the core.
+        const s = session;
+        void s.offline().then((offline) => {
+          if (offline) ladder.reset();
+          else fallBack();
+        });
+      } else if (usePlayer.getState().followingRoom) {
         usePlayer.setState({ notice: "This track could not play on your account. Waiting for the room’s next track." });
       } else if (step === "counted" && usePlayer.getState().notice !== FALLBACK_NOTICE) {
         usePlayer.setState({ notice: null });
@@ -344,6 +380,7 @@ function applyProjection(p: Projection) {
   // window is a remote for it: its speed is not ours to know, so interpolate
   // at 1× and let the core's projections correct it.
   const remote = (p.devices ?? []).some((d) => d.owner && d.id !== session?.deviceID);
+  noteConnection(Boolean(p.offline));
   usePlayer.setState({
     outputElsewhere: remote,
     followingRoom: Boolean(p.followingRoom),

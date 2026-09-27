@@ -43,6 +43,9 @@ type Deps struct {
 	// to its own requests. The video routes require it, so a web page cannot
 	// drive them through the open CORS policy.
 	ClientToken string
+	// NetworkProbe checks that YouTube can be reached; nil asks YouTube's
+	// connectivity endpoint. Tests replace it.
+	NetworkProbe func(ctx context.Context) error
 
 	// Account holds the signed-in state and everything derived from it. It is
 	// read per request rather than captured here, because signing in happens
@@ -123,6 +126,8 @@ type Server struct {
 	// Separate client from the API one: audio transfers are long-lived and
 	// must not be cut short by a timeout sized for JSON requests.
 	streamClient *http.Client
+	// net is whether YouTube can be reached; see network.go.
+	net *network
 }
 
 func New(d Deps) *Server {
@@ -150,6 +155,27 @@ func New(d Deps) *Server {
 			ForceAttemptHTTP2:     true,
 		}},
 	}
+	probe := d.NetworkProbe
+	if probe == nil {
+		probe = probeYouTube(s.streamClient)
+	}
+	s.net = newNetwork(probe, func(online bool) {
+		if online {
+			s.deps.Log.Info("connection back")
+			s.prefetch.forget()
+			// Connections from before the outage are dead; reusing one failed
+			// the first request after it.
+			s.streamClient.CloseIdleConnections()
+			if t, ok := http.DefaultTransport.(*http.Transport); ok {
+				t.CloseIdleConnections()
+			}
+		} else {
+			s.deps.Log.Warn("connection lost; playback waits for it")
+		}
+		if s.deps.Session != nil {
+			s.deps.Session.SetOnline(online)
+		}
+	})
 	s.routes()
 	return s
 }
@@ -172,6 +198,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/home", s.handleHome)
 	s.mux.HandleFunc("GET /v1/browse/{surface}", s.handleBrowse)
 	s.mux.HandleFunc("GET /v1/search", s.handleSearch)
+	s.mux.HandleFunc("GET /v1/network", s.handleNetwork)
 	s.mux.HandleFunc("GET /v1/suggest", s.handleSuggest)
 	s.mux.HandleFunc("GET /v1/albums/{id}", s.handleAlbum)
 	s.mux.HandleFunc("GET /v1/artists/{id}", s.handleArtist)
@@ -274,6 +301,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		s.write(w, http.StatusTooManyRequests,
 			apiError{Error: "rate limited by YouTube; wait a few minutes"})
 	default:
+		// A lost connection is noticed from any request, not only a stream.
+		s.net.Failed(err)
 		s.deps.Log.Warn("request failed", "path", r.URL.Path, "err", err)
 		s.write(w, http.StatusBadGateway, apiError{Error: err.Error()})
 	}

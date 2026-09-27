@@ -492,6 +492,13 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "rate limited by YouTube", http.StatusTooManyRequests)
 			return
 		}
+		// Checked before answering, so the session knows the connection is
+		// gone by the time the engine reports this track failed (#7).
+		if s.net.Failed(err) {
+			s.deps.Log.Warn("stream unavailable: offline", "video", videoID)
+			http.Error(w, "offline", http.StatusServiceUnavailable)
+			return
+		}
 		s.deps.Log.Warn("stream resolve failed", "video", videoID, "err", err)
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -532,10 +539,16 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	resp, err := s.fetchUpstream(rctx, e.stream.URL, upstreamRange)
 	if err != nil {
+		if s.net.Failed(err) {
+			s.deps.Log.Warn("stream unavailable: offline", "video", videoID)
+			http.Error(w, "offline", http.StatusServiceUnavailable)
+			return
+		}
 		s.deps.Log.Warn("stream fetch failed", "video", videoID, "err", err)
 		http.Error(w, "upstream unreachable", http.StatusBadGateway)
 		return
 	}
+	s.net.Succeeded()
 	// The body is bound now, not read from resp when the function returns:
 	// the retry below reassigns resp, to nil when it cannot connect, and a
 	// deferred resp.Body then panicked on every such request.

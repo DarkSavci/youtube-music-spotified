@@ -414,7 +414,7 @@ func prefetchQueue(ctx context.Context, hub *session.Hub, srv *api.Server) {
 	// Every projection would otherwise re-ask; only a change in what is
 	// coming up is worth acting on.
 	last := ""
-	handle := func(s domain.Session) {
+	handle := func(s domain.Session, offline bool) {
 		items, at := s.Queue.Items, s.Queue.Index
 		if at < 0 || at >= len(items) {
 			return
@@ -423,14 +423,16 @@ func prefetchQueue(ctx context.Context, hub *session.Hub, srv *api.Server) {
 		for i := at; i < len(items) && len(ids) < 4; i++ {
 			ids = append(ids, items[i].ID)
 		}
-		key := strings.Join(ids, ",")
+		// Coming back online asks again: nothing could be fetched meanwhile.
+		key := strings.Join(ids, ",") + fmt.Sprint(offline)
 		if key == last {
 			return
 		}
 		last = key
 		srv.PrefetchQueue(ids)
 	}
-	handle(hub.Projection().State)
+	first := hub.Projection()
+	handle(first.State, first.Offline)
 	for {
 		select {
 		case <-ctx.Done():
@@ -439,7 +441,7 @@ func prefetchQueue(ctx context.Context, hub *session.Hub, srv *api.Server) {
 			if !ok {
 				return
 			}
-			handle(p.State)
+			handle(p.State, p.Offline)
 		}
 	}
 }

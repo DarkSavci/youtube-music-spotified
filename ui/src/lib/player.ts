@@ -43,6 +43,8 @@ export interface PlayerDevice {
 
 interface PlayerState {
   followingRoom: boolean;
+  /** Whether the core cannot reach YouTube; playback waits meanwhile (#7). */
+  offline: boolean;
   /**
    * What this player knows about the room's current entry: whether it played
    * to the end here and how long it measured. Null outside a room.
@@ -123,6 +125,7 @@ const idleCapabilities: Capabilities = {
 
 export const usePlayer = create<PlayerState>((set, get) => ({
   followingRoom: false,
+  offline: false,
   roomPlayback: null,
   state: "idle",
   track: null,
