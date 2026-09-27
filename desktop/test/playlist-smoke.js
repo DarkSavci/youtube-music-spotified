@@ -68,7 +68,10 @@ app.whenReady().then(async()=>{
  await waitFor(`!document.querySelector('.playlist-more')`);
  await read(`document.querySelector('.main__scroll').scrollTop=100000`);
  await waitFor(`document.body.textContent.includes('Fixture song 120')`);
- assert.equal(next,3);assert.equal(full,0);
+ // One failed request, not retried by itself (a server error is not retried
+ // automatically, so it cannot pile onto a struggling upstream), then the
+ // user's retry.
+ assert.equal(next,2);assert.equal(full,0);
  assert.equal(await read(`!!document.querySelector('.playlist-more')`),false);
  console.log('PLAYLIST PASS',JSON.stringify({first,next,full,start,scrolled}));
  win.destroy();server.close();app.exit(0);
