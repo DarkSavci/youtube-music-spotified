@@ -130,9 +130,9 @@ func (c *InnerTube) Playlist(ctx context.Context, id string) (domain.Playlist, e
 	if err != nil {
 		return domain.Playlist{}, err
 	}
-	pl, ok := renderers.ParsePlaylist(doc, browseID, c.ctxFor("playlist"))
-	if !ok {
-		return domain.Playlist{ID: id}, fmt.Errorf("catalog: playlist %s did not parse", id)
+	pl, err := c.parsePlaylist(doc, browseID)
+	if err != nil {
+		return domain.Playlist{ID: id}, err
 	}
 	err = renderers.AppendPlaylistPages(&pl, doc, func(token string) (renderers.Node, error) {
 		return c.call(ctx, "browse", map[string]any{"continuation": token})
@@ -245,9 +245,9 @@ func (c *InnerTube) PlaylistPage(ctx context.Context, id, token string) (domain.
 	if err != nil {
 		return domain.PlaylistPage{}, err
 	}
-	pl, ok := renderers.ParsePlaylist(doc, browseID, c.ctxFor("playlist"))
-	if !ok {
-		return domain.PlaylistPage{}, fmt.Errorf("catalog: playlist %s did not parse", id)
+	pl, err := c.parsePlaylist(doc, browseID)
+	if err != nil {
+		return domain.PlaylistPage{}, err
 	}
 	next := renderers.PlaylistNext(doc)
 	if next != "" {
@@ -265,4 +265,18 @@ func (c *InnerTube) TrackVersions(ctx context.Context, id string) ([]domain.Trac
 		return nil, err
 	}
 	return renderers.ParseTrackVersions(doc, id), nil
+}
+
+// parsePlaylist reads a playlist's first page. Liked Music has a known name,
+// so it reads without its header, and a page with neither header nor tracks
+// is reported as renderers.ErrLikedShape, the shape of a throttled answer.
+func (c *InnerTube) parsePlaylist(doc renderers.Node, browseID string) (domain.Playlist, error) {
+	if renderers.IsLikedID(browseID) {
+		return renderers.ParseLikedPlaylist(doc, c.ctxFor("playlist"))
+	}
+	pl, ok := renderers.ParsePlaylist(doc, browseID, c.ctxFor("playlist"))
+	if !ok {
+		return domain.Playlist{}, fmt.Errorf("catalog: playlist %s did not parse", strings.TrimPrefix(browseID, "VL"))
+	}
+	return pl, nil
 }

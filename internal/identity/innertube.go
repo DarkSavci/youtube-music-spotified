@@ -2,13 +2,9 @@ package identity
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
-	"sort"
 	"strings"
-	"sync"
 
 	"spotifier/internal/domain"
 	"spotifier/internal/innertube"
@@ -267,8 +263,12 @@ func LibraryItemsFrom(doc renderers.Node, hint domain.LibraryItemKind, pc render
 		switch {
 		case strings.Contains(pageType, "ARTIST"), strings.HasPrefix(browseID, "UC"), strings.HasPrefix(browseID, "MPLA"):
 			// The library links an artist to its own view of them, "MPLA" plus
-			// the channel id. The artist page reads the channel itself.
-			return domain.LibArtist, strings.TrimPrefix(browseID, "MPLA")
+			// the channel id. The artist page reads the channel itself. Only
+			// that form is unwrapped, as the share links do (lib/share.ts).
+			if strings.HasPrefix(browseID, "MPLAUC") {
+				return domain.LibArtist, strings.TrimPrefix(browseID, "MPLA")
+			}
+			return domain.LibArtist, browseID
 		case strings.Contains(pageType, "ALBUM"), strings.HasPrefix(browseID, "MPRE"):
 			return domain.LibAlbum, browseID
 		case strings.Contains(pageType, "PLAYLIST"), strings.HasPrefix(browseID, "VL"):
@@ -309,54 +309,12 @@ func (i *InnerTube) LikedSongsSummary(ctx context.Context) (domain.Playlist, err
 	return pl, nil
 }
 
-// ErrLikedShape means Liked Music came back in a shape that could not be read:
-// no header and no tracks. It has only been seen in bursts beside the library's
-// HTTP 429s, so it is treated as a refusal to wait out, not as a parser gap.
-var ErrLikedShape = errors.New("identity: liked songs did not parse")
+// ErrLikedShape is renderers.ErrLikedShape: Liked Music came back without its
+// header or tracks, the shape seen while YouTube throttles the account.
+var ErrLikedShape = renderers.ErrLikedShape
 
-// likedShapeOnce keeps the shape report to one per run.
-var likedShapeOnce sync.Once
-
-// ParseLikedSongs reads the first page of Liked Music.
-//
-// The playlist's name is known, so a page that has the tracks but no header
-// still reads. A page with neither is reported once, by its shape only: the
-// top-level keys, its size and the renderers in it, never its content.
+// ParseLikedSongs reads the first page of Liked Music; see
+// renderers.ParseLikedPlaylist.
 func ParseLikedSongs(doc renderers.Node, pc renderers.ParseContext) (domain.Playlist, error) {
-	pl, ok := renderers.ParsePlaylistTitled(doc, SurfaceLikedSongs, "Liked Music", pc)
-	if !ok {
-		likedShapeOnce.Do(func() { logLikedShape(doc) })
-		return domain.Playlist{}, ErrLikedShape
-	}
-	pl.ID = "LM"
-	if pl.Title == "" {
-		pl.Title = "Liked Music"
-	}
-	return pl, nil
-}
-
-func logLikedShape(doc renderers.Node) {
-	keys := make([]string, 0, len(doc))
-	for k := range doc {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	types := renderers.RendererTypes(map[string]any(doc))
-	names := make([]string, 0, len(types))
-	for name := range types {
-		names = append(names, name)
-	}
-	sort.Slice(names, func(a, b int) bool { return types[names[a]] > types[names[b]] || (types[names[a]] == types[names[b]] && names[a] < names[b]) })
-	if len(names) > 15 {
-		names = names[:15]
-	}
-	top := make([]string, len(names))
-	for n, name := range names {
-		top[n] = fmt.Sprintf("%s=%d", name, types[name])
-	}
-	size := 0
-	if raw, err := json.Marshal(doc); err == nil {
-		size = len(raw)
-	}
-	slog.Warn("liked songs came back in an unreadable shape", "bytes", size, "keys", keys, "renderers", top)
+	return renderers.ParseLikedPlaylist(doc, pc)
 }

@@ -3,6 +3,7 @@ package catalog_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -70,5 +71,63 @@ func TestPlaylistPageDoesNotFetchTheTail(t *testing.T) {
 	}
 	if next.Playlist.Tracks[0].ID != next.Playlist.Tracks[1].ID {
 		t.Fatal("repeated playlist entries were lost")
+	}
+}
+
+// servePage answers every InnerTube call with page, and the config scrape
+// with a usable client version.
+func servePage(page []byte) *innertube.Client {
+	return innertube.New(innertube.WithHTTPClient(&http.Client{Transport: pagingTransport(func(r *http.Request) (*http.Response, error) {
+		body := []byte(`{"INNERTUBE_CLIENT_VERSION":"1.20260901.01.00","INNERTUBE_API_KEY":"test"}`)
+		if r.Method == "POST" {
+			body = page
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+	})}))
+}
+
+// The Liked Music page reads without its header, as the library's summary
+// does, and a page with neither header nor tracks is the throttle shape.
+func TestLikedMusicPageUsesTheLikedParse(t *testing.T) {
+	raw, err := os.ReadFile("../../testdata/fixtures/playlist.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range renderers.FindAll(doc, "sectionListRenderer") {
+		contents := h.List("contents")
+		kept := contents[:0]
+		for _, c := range contents {
+			if m, ok := c.(map[string]any); ok && m["musicResponsiveHeaderRenderer"] != nil {
+				continue
+			}
+			kept = append(kept, c)
+		}
+		h["contents"] = kept
+	}
+	headerless, _ := json.Marshal(doc)
+	if strings.Contains(string(headerless), "musicResponsiveHeaderRenderer") {
+		t.Skip("fixture keeps its header elsewhere; covered by the renderers tests")
+	}
+
+	page, err := catalog.NewInnerTube(servePage(headerless), nil).PlaylistPage(context.Background(), "LM", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Playlist.Title != renderers.LikedTitle || len(page.Playlist.Tracks) == 0 {
+		t.Fatalf("got title=%q tracks=%d", page.Playlist.Title, len(page.Playlist.Tracks))
+	}
+
+	_, err = catalog.NewInnerTube(servePage([]byte(`{"contents":{}}`)), nil).Playlist(context.Background(), "LM")
+	if !errors.Is(err, renderers.ErrLikedShape) {
+		t.Fatalf("err = %v, want ErrLikedShape", err)
+	}
+	// Any other playlist keeps the plain parse and its own error.
+	_, err = catalog.NewInnerTube(servePage([]byte(`{"contents":{}}`)), nil).Playlist(context.Background(), "PLother")
+	if err == nil || errors.Is(err, renderers.ErrLikedShape) {
+		t.Fatalf("other playlist err = %v", err)
 	}
 }

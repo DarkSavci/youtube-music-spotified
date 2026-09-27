@@ -14,6 +14,7 @@ import (
 	"spotifier/internal/domain"
 	"spotifier/internal/identity"
 	"spotifier/internal/obs"
+	"spotifier/internal/renderers"
 )
 
 /*
@@ -230,3 +231,13 @@ func TestHealthSurvivesTotalFailure(t *testing.T) {
 }
 
 var _ = identity.ErrLoggedOut
+
+// Liked Music without its header or tracks is YouTube throttling the
+// account, so it is answered as a throttle: the client waits instead of
+// retrying at once or showing the page as broken.
+func TestThrottledLikedMusicIsA429(t *testing.T) {
+	s := serverWith(api.Deps{Catalog: brokenCatalog{err: renderers.ErrLikedShape}})
+	if rec := do(t, s, http.MethodGet, "/v1/playlists/LM"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("throttled liked music = %d, want 429", rec.Code)
+	}
+}
