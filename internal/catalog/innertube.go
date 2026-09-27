@@ -13,7 +13,9 @@ import (
 
 // InnerTube is the production Catalog, reading from YouTube Music.
 type InnerTube struct {
-	client   *innertube.Client
+	// session returns the client to use now. It is asked on every call, so a
+	// signed-in session that is refreshed or replaced applies at once.
+	session  func() *innertube.Client
 	recorder *obs.Recorder
 }
 
@@ -22,8 +24,17 @@ type InnerTube struct {
 // The recorder may be nil; it collects the unknown-node signal behind the
 // parser-health panel.
 func NewInnerTube(c *innertube.Client, rec *obs.Recorder) *InnerTube {
-	return &InnerTube{client: c, recorder: rec}
+	return &InnerTube{session: func() *innertube.Client { return c }, recorder: rec}
 }
+
+// NewInnerTubeFrom builds a Catalog that reads its client from session on
+// every call, such as the account's current signed-in client with a
+// signed-out one to fall back on.
+func NewInnerTubeFrom(session func() *innertube.Client, rec *obs.Recorder) *InnerTube {
+	return &InnerTube{session: session, recorder: rec}
+}
+
+func (c *InnerTube) client() *innertube.Client { return c.session() }
 
 var _ Catalog = (*InnerTube)(nil)
 
@@ -33,7 +44,7 @@ func (c *InnerTube) ctxFor(surface string) renderers.ParseContext {
 
 // call posts and decodes in one step, since every method needs both.
 func (c *InnerTube) call(ctx context.Context, endpoint string, body map[string]any) (renderers.Node, error) {
-	raw, err := c.client.Call(ctx, endpoint, body)
+	raw, err := c.client().Call(ctx, endpoint, body)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +137,7 @@ func (c *InnerTube) Playlist(ctx context.Context, id string) (domain.Playlist, e
 	if !strings.HasPrefix(browseID, "VL") {
 		browseID = "VL" + browseID
 	}
-	if renderers.IsLikedID(browseID) && !c.client.Authenticated() {
+	if renderers.IsLikedID(browseID) && !c.client().Authenticated() {
 		return domain.Playlist{ID: id}, renderers.ErrLikedSignedOut
 	}
 	doc, err := c.call(ctx, "browse", map[string]any{"browseId": browseID})
@@ -244,7 +255,7 @@ func (c *InnerTube) PlaylistPage(ctx context.Context, id, token string) (domain.
 	if !strings.HasPrefix(id, "VL") {
 		browseID = "VL" + id
 	}
-	if renderers.IsLikedID(browseID) && !c.client.Authenticated() {
+	if renderers.IsLikedID(browseID) && !c.client().Authenticated() {
 		return domain.PlaylistPage{}, renderers.ErrLikedSignedOut
 	}
 	doc, err := c.call(ctx, "browse", map[string]any{"browseId": browseID})

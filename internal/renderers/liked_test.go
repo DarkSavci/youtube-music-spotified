@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 )
 
 func fixtureDoc(t *testing.T, name string) Node {
@@ -169,5 +170,55 @@ func TestLikedMusicMessagePageIsAnEmptyList(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "message=true") || !strings.Contains(out, "Songs you like will show here") {
 		t.Fatalf("shape report lacks the message: %s", out)
+	}
+}
+
+// A message that is not the empty state is an error the UI can retry, not an
+// empty library: a throttle or a fault can arrive dressed as a message.
+func TestLikedMusicOtherMessageIsAnError(t *testing.T) {
+	likedShapeOnce = sync.Once{}
+	_, err := ParseLikedPlaylist(messagePage("Something went wrong", "Try again later", false), ParseContext{})
+	var msg *LikedMessageError
+	if !errors.As(err, &msg) || !errors.Is(err, ErrLikedMessage) || errors.Is(err, ErrLikedShape) {
+		t.Fatalf("err = %v, want a LikedMessageError", err)
+	}
+	if msg.Text != "Something went wrong Try again later" {
+		t.Fatalf("text = %q", msg.Text)
+	}
+}
+
+func TestLikedMusicEmptyStateWordings(t *testing.T) {
+	for _, text := range []string{
+		"Songs you like will show here",
+		"You haven\u2019t liked any songs yet",
+		"No liked songs",
+	} {
+		likedShapeOnce = sync.Once{}
+		pl, err := ParseLikedPlaylist(messagePage(text, "", false), ParseContext{})
+		if err != nil || pl.Title != LikedTitle || len(pl.Tracks) != 0 {
+			t.Fatalf("%q: got %+v, %v", text, pl, err)
+		}
+	}
+}
+
+// Long messages are cut by characters, so a multi-byte one is never split.
+func TestLikedMusicMessageIsCutByCharacters(t *testing.T) {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	likedShapeOnce = sync.Once{}
+
+	long := strings.Repeat("şarkı ", 60)
+	_, err := ParseLikedPlaylist(messagePage(long, "", false), ParseContext{})
+	var msg *LikedMessageError
+	if !errors.As(err, &msg) {
+		t.Fatalf("err = %v", err)
+	}
+	if !utf8.ValidString(msg.Text) || utf8.RuneCountInString(msg.Text) != maxMessage+1 || !strings.HasSuffix(msg.Text, "…") {
+		t.Fatalf("text not cut to %d characters: %d %q", maxMessage, utf8.RuneCountInString(msg.Text), msg.Text)
+	}
+	if !utf8.ValidString(buf.String()) || !strings.Contains(buf.String(), strings.TrimSuffix(msg.Text, "…")) {
+		t.Fatalf("log line not cut the same way: %s", buf.String())
 	}
 }

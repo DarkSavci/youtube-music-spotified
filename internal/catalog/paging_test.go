@@ -174,3 +174,21 @@ func TestLikedMusicMessagePageIsEmptyNotAnError(t *testing.T) {
 		t.Fatalf("PlaylistPage = %+v, %v", pg, err)
 	}
 }
+
+// The catalog asks for the client on every call, so a session that is
+// refreshed, or signed in after start, applies without a restart.
+func TestCatalogFollowsTheCurrentSession(t *testing.T) {
+	raw, err := os.ReadFile("../../testdata/fixtures/playlist.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := serveAs(raw, nil, nil) // signed out
+	c := catalog.NewInnerTubeFrom(func() *innertube.Client { return current }, nil)
+	if _, err := c.Playlist(context.Background(), "LM"); !errors.Is(err, renderers.ErrLikedSignedOut) {
+		t.Fatalf("signed out err = %v", err)
+	}
+	current = servePage(raw) // the shell signed in
+	if _, err := c.Playlist(context.Background(), "LM"); err != nil {
+		t.Fatalf("after sign-in: %v", err)
+	}
+}

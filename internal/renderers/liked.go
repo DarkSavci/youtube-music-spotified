@@ -26,6 +26,24 @@ var ErrLikedShape = errors.New("liked music came back without its header or trac
 // is to sign in, not to wait.
 var ErrLikedSignedOut = errors.New("liked music needs a signed-in account")
 
+// ErrLikedMessage matches a LikedMessageError.
+var ErrLikedMessage = errors.New("youtube returned a message instead of liked music")
+
+// LikedMessageError is Liked Music answered with a message page that is
+// neither a sign-in prompt nor the empty state, carrying YouTube's generic
+// wording. It is an error, not an empty list: a throttle or a fault dressed
+// as a message must not pass for a library with no likes.
+type LikedMessageError struct{ Text string }
+
+func (e *LikedMessageError) Error() string {
+	if e.Text == "" {
+		return "YouTube returned a message instead of Liked Music"
+	}
+	return "YouTube returned a message instead of Liked Music: " + e.Text
+}
+
+func (e *LikedMessageError) Is(target error) bool { return target == ErrLikedMessage }
+
 // IsLikedID reports whether a playlist id is Liked Music, with or without the
 // browse prefix.
 func IsLikedID(id string) bool { return id == "LM" || id == "VLLM" }
@@ -40,7 +58,8 @@ var likedShapeOnce sync.Once
 // (size, top-level keys, renderer counts and any message's wording, never
 // other content), and then read as:
 //   - a sign-in prompt: ErrLikedSignedOut;
-//   - any other message: an empty Liked Music, as for an account with no likes;
+//   - the empty state ("Songs you like will show here"): an empty Liked Music;
+//   - any other message: a LikedMessageError with YouTube's wording;
 //   - nothing at all: ErrLikedShape, the throttle's shape.
 func ParseLikedPlaylist(doc Node, pc ParseContext) (domain.Playlist, error) {
 	pl, ok := ParsePlaylistTitled(doc, "VLLM", LikedTitle, pc)
@@ -50,12 +69,13 @@ func ParseLikedPlaylist(doc Node, pc ParseContext) (domain.Playlist, error) {
 		switch {
 		case found && signInPrompt(doc, text):
 			return domain.Playlist{}, ErrLikedSignedOut
-		case found:
-			// Any other message stands where the tracks would be, as
-			// "Songs you like will show here" does for an account with no
-			// likes: an empty Liked Music, no different from any other.
+		case found && emptyState(text):
+			// An account with no likes gets a message where the tracks
+			// would be: an empty Liked Music, no different from any other.
 			// The shape line above keeps a real problem diagnosable.
 			return domain.Playlist{ID: "LM", Title: LikedTitle}, nil
+		case found:
+			return domain.Playlist{}, &LikedMessageError{Text: text}
 		}
 		return domain.Playlist{}, ErrLikedShape
 	}
@@ -63,9 +83,41 @@ func ParseLikedPlaylist(doc Node, pc ParseContext) (domain.Playlist, error) {
 	return pl, nil
 }
 
-// maxMessage bounds how much of a message page is kept: it is a sentence or
-// two of YouTube's wording, and nothing more is wanted in a log or an error.
-const maxMessage = 200
+// maxMessage bounds how much of a message page is kept, in characters: it is
+// a sentence or two of YouTube's wording, and nothing more is wanted in a log
+// or an error.
+const maxMessage = 120
+
+// emptyWording is how YouTube words Liked Music with nothing in it. Requests
+// ask for English (innertube.WithLocale), so English is all there is to match.
+var emptyWording = []string{
+	"songs you like will show here",
+	"will show here",
+	"haven't liked",
+	"have not liked",
+	"no liked songs",
+	"no likes yet",
+}
+
+// emptyState reports whether a message is Liked Music's empty state.
+func emptyState(text string) bool {
+	lower := strings.ToLower(strings.ReplaceAll(text, "\u2019", "'"))
+	for _, w := range emptyWording {
+		if strings.Contains(lower, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// truncate keeps the first n characters of s, never splitting one.
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
 
 // pageMessage reads the text of a message page's first messageRenderer: its
 // text, then its subtext.
@@ -85,11 +137,7 @@ func pageMessage(doc Node) (string, bool) {
 			parts = append(parts, t)
 		}
 	}
-	text := strings.Join(parts, " ")
-	if len(text) > maxMessage {
-		text = text[:maxMessage]
-	}
-	return text, true
+	return truncate(strings.Join(parts, " "), maxMessage), true
 }
 
 // signInPrompt reports whether a message page asks the listener to sign in:

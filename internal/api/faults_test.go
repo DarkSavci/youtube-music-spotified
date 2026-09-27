@@ -242,8 +242,8 @@ func TestThrottledLikedMusicIsA429(t *testing.T) {
 	}
 }
 
-// Signed out, Liked Music asks for sign-in like /v1/me/liked does; only the
-// empty shape is a 429.
+// Signed out, Liked Music asks for sign-in like /v1/me/liked does; another
+// message is an error in YouTube's words; only the empty shape is a 429.
 func TestLikedMusicFailuresAreToldApart(t *testing.T) {
 	cases := []struct {
 		err    error
@@ -252,6 +252,7 @@ func TestLikedMusicFailuresAreToldApart(t *testing.T) {
 	}{
 		{renderers.ErrLikedSignedOut, http.StatusUnauthorized, true},
 		{renderers.ErrLikedShape, http.StatusTooManyRequests, false},
+		{&renderers.LikedMessageError{Text: "Something went wrong"}, http.StatusBadGateway, false},
 	}
 	for _, c := range cases {
 		rec := do(t, serverWith(api.Deps{Catalog: brokenCatalog{err: c.err}}), http.MethodGet, "/v1/playlists/LM")
@@ -267,6 +268,9 @@ func TestLikedMusicFailuresAreToldApart(t *testing.T) {
 		}
 		if body.Reauth != c.reauth {
 			t.Fatalf("%v: reauth %v, want %v", c.err, body.Reauth, c.reauth)
+		}
+		if c.code == http.StatusBadGateway && !strings.Contains(body.Error, "Something went wrong") {
+			t.Fatalf("message lost: %q", body.Error)
 		}
 	}
 }
