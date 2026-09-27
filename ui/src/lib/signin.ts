@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { desktop } from "./desktop";
-import { ApiError } from "./api";
+import { useQuery } from "@tanstack/react-query";
+import { ApiError, api } from "./api";
 
 /**
  * Signing in, shared by every button that offers it.
@@ -62,4 +63,14 @@ export function signInLabel(signingIn: boolean): string {
  */
 export function libraryFailure(err: unknown, fallback: string): string {
   return err instanceof ApiError && err.reauth ? "Sign in to change your library." : fallback;
+}
+
+/** Whether the core reports a signed-in account; shares the top bar's query. */
+export function useSignedIn(): boolean {
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: ({ signal }) => api.me(signal),
+    staleTime: 60_000,
+  });
+  return me?.state === "signed_in";
 }

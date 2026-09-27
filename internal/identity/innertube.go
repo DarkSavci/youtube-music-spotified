@@ -116,6 +116,54 @@ func (i *InnerTube) History(ctx context.Context) ([]domain.Track, error) {
 	return out, nil
 }
 
+// SearchHistory asks what YouTube Music asks when its search box is focused
+// and empty: suggestions for no input, which for a signed-in account are its
+// past searches.
+func (i *InnerTube) SearchHistory(ctx context.Context) ([]domain.SearchHistoryEntry, error) {
+	doc, err := i.call(ctx, "music/get_search_suggestions", map[string]any{"input": ""})
+	if err != nil {
+		return nil, err
+	}
+	return renderers.ParseSearchHistory(doc), nil
+}
+
+// ForgetSearches removes past searches from the account, with the feedback
+// tokens their entries carried: the same call the website's remove button
+// makes, and the one library toggles use.
+func (i *InnerTube) ForgetSearches(ctx context.Context, tokens []string) error {
+	var keep []string
+	for _, t := range tokens {
+		if t != "" {
+			keep = append(keep, t)
+		}
+	}
+	if len(keep) == 0 {
+		return fmt.Errorf("identity: no search history token")
+	}
+	_, err := i.call(ctx, "feedback", map[string]any{"feedbackTokens": keep})
+	return err
+}
+
+// RemoteQueue reads the queue the account has on its other devices, the one
+// YouTube Music's website picks up at start-up. Asked for only on demand:
+// the answer is large, and every call counts against the account's budget.
+func (i *InnerTube) RemoteQueue(ctx context.Context) (domain.RemoteQueue, bool, error) {
+	doc, err := i.call(ctx, "next", map[string]any{
+		"watchNextType":      "WATCH_NEXT_TYPE_GET_QUEUE",
+		"queueContextParams": "",
+	})
+	if err != nil {
+		return domain.RemoteQueue{}, false, err
+	}
+	q, ok := renderers.ParseRemoteQueue(doc, i.ctxFor(renderers.SurfaceRemoteQueue))
+	return q, ok, nil
+}
+
+var (
+	_ SearchHistory = (*InnerTube)(nil)
+	_ RemoteQueuer  = (*InnerTube)(nil)
+)
+
 // ---------- writes ----------
 
 func (i *InnerTube) Rate(ctx context.Context, trackID string, rating Rating) error {

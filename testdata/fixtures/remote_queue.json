@@ -1,0 +1,109 @@
+{
+  "responseContext": {},
+  "contents": {
+    "singleColumnMusicWatchNextResultsRenderer": {
+      "tabbedRenderer": {
+        "watchNextTabbedResultsRenderer": {
+          "tabs": [
+            {
+              "tabRenderer": {
+                "title": "Up next",
+                "content": {
+                  "musicQueueRenderer": {
+                    "content": {
+                      "playlistPanelRenderer": {
+                        "title": "Liked Music",
+                        "playlistId": "LM",
+                        "isInfinite": false,
+                        "contents": [
+                          {
+                            "playlistPanelVideoRenderer": {
+                              "title": { "runs": [ { "text": "Song One" } ] },
+                              "longBylineText": { "runs": [
+                                { "text": "Artist One", "navigationEndpoint": { "browseEndpoint": { "browseId": "UCartist000000000000one1", "browseEndpointContextSupportedConfigs": { "browseEndpointContextMusicConfig": { "pageType": "MUSIC_PAGE_TYPE_ARTIST" } } } } },
+                                { "text": " • " },
+                                { "text": "Album One", "navigationEndpoint": { "browseEndpoint": { "browseId": "MPREb_album0001", "browseEndpointContextSupportedConfigs": { "browseEndpointContextMusicConfig": { "pageType": "MUSIC_PAGE_TYPE_ALBUM" } } } } },
+                                { "text": " • " },
+                                { "text": "2019" }
+                              ] },
+                              "lengthText": { "runs": [ { "text": "3:21" } ] },
+                              "thumbnail": { "thumbnails": [ { "url": "https://i.ytimg.com/vi/aaaaaaaaaa1/sddefault.jpg", "width": 120, "height": 120 } ] },
+                              "selected": false,
+                              "videoId": "aaaaaaaaaa1",
+                              "navigationEndpoint": { "watchEndpoint": { "videoId": "aaaaaaaaaa1", "playlistId": "LM", "index": 0 } }
+                            }
+                          },
+                          {
+                            "playlistPanelVideoWrapperRenderer": {
+                              "primaryRenderer": {
+                                "playlistPanelVideoRenderer": {
+                                  "title": { "runs": [ { "text": "Song Two" } ] },
+                                  "longBylineText": { "runs": [ { "text": "Artist Two" }, { "text": " • " }, { "text": "2021" } ] },
+                                  "lengthText": { "runs": [ { "text": "4:05" } ] },
+                                  "selected": false,
+                                  "videoId": "bbbbbbbbbb2",
+                                  "navigationEndpoint": { "watchEndpoint": { "videoId": "bbbbbbbbbb2", "playlistId": "LM", "index": 1 } }
+                                }
+                              },
+                              "counterpart": [
+                                {
+                                  "counterpartRenderer": {
+                                    "playlistPanelVideoRenderer": {
+                                      "title": { "runs": [ { "text": "Song Two (Official Video)" } ] },
+                                      "longBylineText": { "runs": [ { "text": "Artist Two" } ] },
+                                      "lengthText": { "runs": [ { "text": "4:12" } ] },
+                                      "selected": true,
+                                      "videoId": "bbbbbbbbbv2",
+                                      "navigationEndpoint": { "watchEndpoint": { "videoId": "bbbbbbbbbv2", "playlistId": "LM", "index": 1 } }
+                                    }
+                                  },
+                                  "segmentMap": {}
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "playlistPanelVideoRenderer": {
+                              "title": { "runs": [ { "text": "" } ] },
+                              "videoId": "unreadable0",
+                              "navigationEndpoint": { "watchEndpoint": { "videoId": "unreadable0" } }
+                            }
+                          },
+                          {
+                            "playlistPanelVideoRenderer": {
+                              "title": { "runs": [ { "text": "Song Three" } ] },
+                              "longBylineText": { "runs": [ { "text": "Artist Three" } ] },
+                              "lengthText": { "runs": [ { "text": "2:47" } ] },
+                              "videoId": "cccccccccc3",
+                              "navigationEndpoint": { "watchEndpoint": { "videoId": "cccccccccc3", "playlistId": "LM", "index": 2 } }
+                            }
+                          },
+                          {
+                            "automixPreviewVideoRenderer": {
+                              "content": {
+                                "automixPlaylistVideoRenderer": {
+                                  "navigationEndpoint": { "watchPlaylistEndpoint": { "playlistId": "RDAMPLLM", "params": "synthetic" } }
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "tabRenderer": {
+                "title": "Lyrics",
+                "endpoint": { "browseEndpoint": { "browseId": "MPLYt_synthetic", "browseEndpointContextSupportedConfigs": { "browseEndpointContextMusicConfig": { "pageType": "MUSIC_PAGE_TYPE_TRACK_LYRICS" } } } }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "currentVideoEndpoint": { "watchEndpoint": { "videoId": "cccccccccc3", "playlistId": "LM" } }
+}

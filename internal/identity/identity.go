@@ -79,6 +79,24 @@ type Identity interface {
 	RemoveFromPlaylist(ctx context.Context, playlistID string, items []PlaylistItemRef) error
 }
 
+// SearchHistory is the account's own search history, the list YouTube Music
+// shows under an empty search box. Optional: an Identity without it has no
+// account history to offer, and the UI keeps to its local recent searches.
+type SearchHistory interface {
+	// SearchHistory is most recent first.
+	SearchHistory(ctx context.Context) ([]domain.SearchHistoryEntry, error)
+	// ForgetSearches removes entries from the account's history, by the
+	// feedback tokens their entries carried.
+	ForgetSearches(ctx context.Context, tokens []string) error
+}
+
+// RemoteQueuer reads the queue the account has on its other devices. The
+// bool is false when the answer's shape was not recognised; the queue is
+// then empty.
+type RemoteQueuer interface {
+	RemoteQueue(ctx context.Context) (domain.RemoteQueue, bool, error)
+}
+
 // PlaylistItemRef identifies one Track's membership in one Playlist.
 type PlaylistItemRef struct {
 	TrackID string

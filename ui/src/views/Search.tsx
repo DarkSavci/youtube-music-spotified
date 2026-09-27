@@ -9,7 +9,7 @@ import { PageState, ShelfSkeleton } from "../components/States";
 import { PageError } from "./Home";
 import type { ShelfItem } from "../lib/types";
 import { IconClose, IconSearch } from "../components/Icon";
-import { useRecentSearches } from "../lib/searches";
+import { useRecentSearchList } from "../lib/searches";
 import { warmFirst, warmTrack } from "../lib/warm";
 
 const FILTERS = [
@@ -45,7 +45,9 @@ export function Search() {
   // And tracks are only warmed once the query has stopped changing for a
   // second: a prefix's results are rarely the ones clicked.
   const settled = useDebounced(query, 1000);
-  const { recent, remember, forget, clear } = useRecentSearches();
+  // The account's history is read only while the list can be seen: the page
+  // open with nothing typed.
+  const { items: recent, remember, remove, clear } = useRecentSearchList(!debounced.trim());
 
   /*
    * A search is remembered once it has produced results, not as it is typed.
@@ -106,23 +108,24 @@ export function Search() {
               </button>
             </div>
             <ul className="recents__list">
-              {recent.map((q) => (
-                <li key={q}>
+              {recent.map((item) => (
+                <li key={item.query.toLowerCase()}>
                   <button
                     className="recents__item"
                     onClick={() => {
                       const next = new URLSearchParams(params);
-                      next.set("q", q);
+                      next.set("q", item.query);
                       setParams(next, { replace: true });
                     }}
                   >
                     <IconSearch size={16} />
-                    <span className="truncate">{q}</span>
+                    <span className="truncate">{item.query}</span>
                   </button>
                   <button
                     className="iconbtn recents__remove"
-                    aria-label={`Remove ${q} from recent searches`}
-                    onClick={() => forget(q)}
+                    aria-label={`Remove ${item.query} from recent searches`}
+                    title={item.token ? "Remove from your YouTube Music history" : "Remove"}
+                    onClick={() => remove(item)}
                   >
                     <IconClose size={14} />
                   </button>

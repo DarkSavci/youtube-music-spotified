@@ -557,6 +557,9 @@ a.artistsongs__grouptitle:hover {
   flex: 1;
   padding: 0 var(--space-3) var(--space-4);
 }
+.queueremote {
+  padding: 0 var(--space-2);
+}
 .queuesection {
   margin-top: var(--space-4);
   padding: 0 var(--space-2);

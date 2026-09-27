@@ -1,7 +1,8 @@
 import type {
   Podcast,
   Track,
-  Album, Artist, BrowsePage, Health, LibraryItem, Me, MixSeed, Playlist, SearchResults,
+  Album, Artist, BrowsePage, Health, LibraryItem, Me, MixSeed, Playlist, RemoteQueue,
+  SearchHistoryEntry, SearchResults,
 } from "./types";
 
 /**
@@ -46,9 +47,23 @@ export function shouldRetry(count: number, err: unknown, max = 1): boolean {
 }
 
 async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await request(path, { signal });
+  return res.json() as Promise<T>;
+}
+
+/** Posts JSON to the core; the answer's body, if any, is not read. */
+async function post(path: string, body: unknown): Promise<void> {
+  await request(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+async function request(path: string, init: RequestInit): Promise<Response> {
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, { signal });
+    res = await fetch(`${BASE}${path}`, init);
   } catch (cause) {
     // Distinguish "we could not reach the core" from "the core said no": the
     // UI shows an offline state for one and an error for the other.
@@ -70,7 +85,7 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
     const retryAfter = Number(res.headers.get("Retry-After")) || bodyRetryAfter;
     throw new ApiError(message, res.status, reauth, retryAfter);
   }
-  return res.json() as Promise<T>;
+  return res;
 }
 
 export const api = {
@@ -105,6 +120,13 @@ export const api = {
   library: (filter = "", sort = "alphabetical", signal?: AbortSignal) =>
     get<LibraryItem[]>(`/me/library?filter=${filter}&sort=${sort}`, signal),
   liked: (signal?: AbortSignal) => get<Playlist>("/me/liked", signal),
+
+  /** The account's own past searches, most recent first; empty signed out. */
+  searchHistory: (signal?: AbortSignal) => get<SearchHistoryEntry[]>("/me/search-history", signal),
+  /** Removes past searches from the account, by the tokens they carried. */
+  forgetSearches: (tokens: string[]) => post("/me/search-history/forget", { tokens }),
+  /** The queue the account has on its other devices; empty signed out. */
+  remoteQueue: (signal?: AbortSignal) => get<RemoteQueue>("/me/remote-queue", signal),
 
   podcast: (id: string, signal?: AbortSignal) =>
     get<Podcast>(`/podcasts/${encodeURIComponent(id)}`, signal),
