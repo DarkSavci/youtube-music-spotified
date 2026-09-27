@@ -71,6 +71,22 @@ func (c *InnerTube) Browse(ctx context.Context, surfaceID, params string) (domai
 	return renderers.ParseBrowsePage(doc, c.ctxFor(surfaceID)), nil
 }
 
+func (c *InnerTube) BrowseMore(ctx context.Context, surfaceID, token string) (domain.BrowsePage, error) {
+	if token == "" {
+		return domain.BrowsePage{}, fmt.Errorf("catalog: empty continuation")
+	}
+	doc, err := c.call(ctx, "browse", map[string]any{"continuation": token})
+	if err != nil {
+		return domain.BrowsePage{}, err
+	}
+	page := renderers.ParseBrowsePage(doc, c.ctxFor(surfaceID))
+	if page.Continuation == token {
+		// The same page again would page forever; the surface ends here.
+		page.Continuation = ""
+	}
+	return page, nil
+}
+
 func (c *InnerTube) Search(ctx context.Context, query string, filter domain.SearchFilter) (domain.SearchResults, error) {
 	body := map[string]any{"query": query}
 	if params, ok := filterParams[filter]; ok {

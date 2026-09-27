@@ -24,6 +24,9 @@ func (emptyCatalog) Home(context.Context) (domain.BrowsePage, error) {
 func (emptyCatalog) Browse(context.Context, string, string) (domain.BrowsePage, error) {
 	return domain.BrowsePage{Title: "Browse"}, nil
 }
+func (emptyCatalog) BrowseMore(context.Context, string, string) (domain.BrowsePage, error) {
+	return domain.BrowsePage{Title: "More"}, nil
+}
 func (emptyCatalog) Search(context.Context, string, domain.SearchFilter) (domain.SearchResults, error) {
 	return domain.SearchResults{Query: "q"}, nil
 }

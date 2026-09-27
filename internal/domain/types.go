@@ -277,16 +277,28 @@ type MoodChip struct {
 	Color string `json:"color,omitempty"`
 }
 
+// HomeChip is one of the mood pills across the top of Home ("Energize",
+// "Relax", "Workout"...). Each re-reads Home with its params; the one the page
+// was read with comes back Selected.
+type HomeChip struct {
+	Title    string `json:"title"`
+	Params   string `json:"params"`
+	Selected bool   `json:"selected,omitempty"`
+}
+
 // BrowsePage is any shelf-based surface: home, explore, charts, moods.
 //
 // Moods is populated only by grid-shaped surfaces; Shelves only by row-shaped
 // ones. A surface may legitimately produce one and not the other, so callers
 // must not assume either is present.
 type BrowsePage struct {
-	Title        string     `json:"title,omitempty"`
-	Shelves      []Shelf    `json:"shelves"`
-	Moods        []MoodChip `json:"moods,omitempty"`
-	Continuation string     `json:"continuation,omitempty"`
+	Title   string     `json:"title,omitempty"`
+	Shelves []Shelf    `json:"shelves"`
+	Moods   []MoodChip `json:"moods,omitempty"`
+	// Chips is Home's mood row; other surfaces have none.
+	Chips []HomeChip `json:"chips,omitempty"`
+	// Continuation reads the rest of the page, a few shelves at a time.
+	Continuation string `json:"continuation,omitempty"`
 }
 
 // ---------- search ----------

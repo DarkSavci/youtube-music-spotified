@@ -45,6 +45,9 @@ func (s *stubCatalog) Home(context.Context) (domain.BrowsePage, error) {
 func (s *stubCatalog) Browse(context.Context, string, string) (domain.BrowsePage, error) {
 	return domain.BrowsePage{}, nil
 }
+func (s *stubCatalog) BrowseMore(context.Context, string, string) (domain.BrowsePage, error) {
+	return domain.BrowsePage{}, nil
+}
 func (s *stubCatalog) Search(context.Context, string, domain.SearchFilter) (domain.SearchResults, error) {
 	return domain.SearchResults{}, nil
 }

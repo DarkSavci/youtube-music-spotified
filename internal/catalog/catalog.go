@@ -42,6 +42,11 @@ type Catalog interface {
 	// tiles do: every tile shares one browse ID and differs only in params.
 	Browse(ctx context.Context, surfaceID, params string) (domain.BrowsePage, error)
 
+	// BrowseMore reads the next few shelves of a surface, from the
+	// continuation token its previous page ended with. Home arrives this way:
+	// a handful of shelves at a time, as the page is scrolled.
+	BrowseMore(ctx context.Context, surfaceID, token string) (domain.BrowsePage, error)
+
 	// Search queries the catalog. An empty filter searches everything, which
 	// returns a top-result card; a set filter returns a single uniform shelf.
 	Search(ctx context.Context, query string, filter domain.SearchFilter) (domain.SearchResults, error)

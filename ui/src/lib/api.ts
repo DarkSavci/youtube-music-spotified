@@ -77,7 +77,12 @@ export const api = {
   health: (signal?: AbortSignal) => get<Health>("/health", signal),
   me: (signal?: AbortSignal) => get<Me>("/me", signal),
 
-  home: (signal?: AbortSignal) => get<BrowsePage>("/home", signal),
+  /** Home, or Home re-read through one of its mood chips. */
+  home: (signal?: AbortSignal, mood = "") =>
+    get<BrowsePage>(`/home${mood ? `?mood=${encodeURIComponent(mood)}` : ""}`, signal),
+  /** The next few shelves of Home, from the token the last page ended with. */
+  homeMore: (continuation: string, signal?: AbortSignal) =>
+    get<BrowsePage>(`/home?continuation=${encodeURIComponent(continuation)}`, signal),
   browse: (surface: string, signal?: AbortSignal, params?: string) =>
     get<BrowsePage>(
       `/browse/${encodeURIComponent(surface)}${params ? `?params=${encodeURIComponent(params)}` : ""}`,
