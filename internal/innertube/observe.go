@@ -44,11 +44,12 @@ func SetObserver(f func(CallRecord)) {
 	observer.Store(&f)
 }
 
-var answered atomic.Pointer[func()]
+var answered atomic.Pointer[func(time.Time)]
 
 // OnAnswered installs a function told whenever YouTube answers a call at all,
-// whatever the status: proof the connection works.
-func OnAnswered(f func()) {
+// whatever the status: proof the connection works, as of when the call was
+// sent, which it is given.
+func OnAnswered(f func(sent time.Time)) {
 	if f == nil {
 		answered.Store(nil)
 		return
@@ -62,7 +63,7 @@ func observe(r CallRecord) {
 	}
 	if r.Status > 0 {
 		if f := answered.Load(); f != nil {
-			(*f)()
+			(*f)(time.Now().Add(-r.Duration))
 		}
 	}
 }

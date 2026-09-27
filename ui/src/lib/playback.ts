@@ -142,8 +142,11 @@ function noteConnection(offline: boolean, paused: boolean) {
       offlineDismissed = false;
     }
     if (!was) usePlayer.setState({ offline });
-    // Shown for as long as the outage lasts, unless the listener dismissed it.
-    if (!offlineDismissed && notice !== wanted) usePlayer.setState({ notice: wanted });
+    // Shown for as long as the outage lasts, unless the listener dismissed
+    // it, and never over a different notice that is showing (the switch to
+    // the embedded player, say): only an empty or offline notice is replaced.
+    const replaceable = notice === null || offlineNotices.has(notice);
+    if (!offlineDismissed && replaceable && notice !== wanted) usePlayer.setState({ notice: wanted });
     return;
   }
   if (!was) return;

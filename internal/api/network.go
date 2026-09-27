@@ -36,9 +36,11 @@ type network struct {
 	// lastAnswer is when upstream last answered anything; a probe that only
 	// times out soon after is not taken as the connection being gone.
 	lastAnswer time.Time
-	polling    bool
-	checkedAt  time.Time
-	checkedOK  bool
+	// offlineSince is when the current outage began.
+	offlineSince time.Time
+	polling      bool
+	checkedAt    time.Time
+	checkedOK    bool
 }
 
 // errOffline answers any lookup or download asked for while the connection
@@ -90,12 +92,19 @@ const recentAnswer = 5 * time.Second
 
 // Succeeded records that upstream answered: a stream, a lookup, a catalogue
 // call. Any of them ends an outage, not just the probe.
-func (n *network) Succeeded() {
+func (n *network) Succeeded() { n.AnsweredSince(time.Now()) }
+
+// AnsweredSince records an answer to a request sent at started. An answer to
+// one sent before the outage began proves nothing about the connection now:
+// a lookup that set off just before a drop and finished just after it once
+// flipped the core back online for a moment.
+func (n *network) AnsweredSince(started time.Time) {
 	n.mu.Lock()
 	n.lastAnswer = time.Now()
 	offline := n.offline
+	stale := offline && started.Before(n.offlineSince)
 	n.mu.Unlock()
-	if offline {
+	if offline && !stale {
 		n.setOffline(false)
 	}
 }
@@ -140,6 +149,9 @@ func (n *network) setOffline(offline bool) {
 		return
 	}
 	n.offline = offline
+	if offline {
+		n.offlineSince = time.Now()
+	}
 	if !offline {
 		n.checkedAt, n.checkedOK = time.Now(), true
 	}
@@ -281,7 +293,7 @@ func (t *swappableTransport) renew() {
 
 // UpstreamAnswered tells the server some other call reached YouTube, which
 // ends an outage as surely as a probe does.
-func (s *Server) UpstreamAnswered() { s.net.Succeeded() }
+func (s *Server) UpstreamAnswered(started time.Time) { s.net.AnsweredSince(started) }
 
 // isNetworkError reports whether err is a failure to reach upstream at all,
 // as opposed to an answer from it. Failing to reach this machine is not a

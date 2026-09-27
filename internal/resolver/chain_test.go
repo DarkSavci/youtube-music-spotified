@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"spotifier/internal/domain"
 )
@@ -116,5 +117,39 @@ func TestChainDoesNotGiveUpOnTheAdapterOverALostConnection(t *testing.T) {
 	got, _, err := c.Resolve(context.Background(), "w")
 	if err != nil || got.URL != "https://x/ytdlp" {
 		t.Fatalf("after the connection came back resolved via %q (%v), want yt-dlp", got.URL, err)
+	}
+}
+
+// One track the preferred adapter has no format for is that track's problem:
+// the fallback answers for it, and the next track tries the preferred again.
+func TestChainFallsBackForOneTrackOnAFormatError(t *testing.T) {
+	a := &stub{id: "ytdlp", err: errors.New("yt-dlp: ERROR: [youtube] v: Requested format is not available")}
+	b := &stub{id: "library"}
+	c := NewChain(a, b, quiet())
+	if got, _, err := c.Resolve(context.Background(), "v"); err != nil || got.URL != "https://x/library" {
+		t.Fatalf("first track: %q %v", got.URL, err)
+	}
+	a.err = nil
+	if got, _, _ := c.Resolve(context.Background(), "w"); got.URL != "https://x/ytdlp" {
+		t.Fatalf("next track resolved via %q, want yt-dlp again", got.URL)
+	}
+}
+
+// A preferred adapter that proved broken is given up on for a while, not for
+// the session: after a few minutes it is tried again.
+func TestChainTriesThePreferredAdapterAgainLater(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	a := &stub{id: "ytdlp", err: errors.New("exec: not found")}
+	b := &stub{id: "library"}
+	c := NewChain(a, b, quiet())
+	c.now = func() time.Time { return now }
+	_, _, _ = c.Resolve(context.Background(), "v")
+	a.err = nil
+	if got, _, _ := c.Resolve(context.Background(), "w"); got.URL != "https://x/library" {
+		t.Fatalf("within the window resolved via %q, want the fallback", got.URL)
+	}
+	now = now.Add(retryPreferredAfter + time.Second)
+	if got, _, _ := c.Resolve(context.Background(), "x"); got.URL != "https://x/ytdlp" {
+		t.Fatalf("after the window resolved via %q, want yt-dlp again", got.URL)
 	}
 }

@@ -224,7 +224,7 @@ func (s *Server) resolve(ctx context.Context, videoID string, speculative bool) 
 		// Upstream answered: whatever cooldown was running is over — if this
 		// lookup began after it did, or was its probe.
 		s.streamGov.Succeeded(started, probe)
-		s.net.Succeeded()
+		s.net.AnsweredSince(started)
 	case errors.Is(err, resolver.ErrRateLimited):
 		d := s.streamGov.CoolDown(0)
 		err = fmt.Errorf("%w: %w", err, &ratelimit.Error{RetryAfter: d})
@@ -491,10 +491,11 @@ func (s *Server) fetchUpstream(ctx context.Context, url, rng string) (*http.Resp
 	upstream.Header.Set("User-Agent", browserUserAgent)
 	upstream.Header.Set("Origin", "https://music.youtube.com")
 	upstream.Header.Set("Referer", "https://music.youtube.com/")
+	sent := time.Now()
 	resp, err := s.streamClient.Do(upstream)
 	if err == nil {
 		// Any answer at all means the connection works.
-		s.net.Succeeded()
+		s.net.AnsweredSince(sent)
 	}
 	return resp, err
 }

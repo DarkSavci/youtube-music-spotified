@@ -132,3 +132,43 @@ func TestAFollowerIsHeldOfflineAndPlaysAgainOnline(t *testing.T) {
 		t.Fatalf("did not follow the room after reconnecting: %+v", c.State())
 	}
 }
+
+// Paused during an outage, then Play pressed while still offline: when the
+// connection returns the track starts afresh, so a stall timer the engine
+// began offline cannot fail it once the probe says the link works (#7).
+func TestPlayPressedOfflineIsStartedAfreshOnReturn(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 3)
+	c.SetOnline(false)
+	c.HandleEngine(EngineEvent{Kind: EvFailed, Epoch: c.State().Epoch, Reason: "network"})
+	c.Apply(Command{Kind: CmdToggle}) // pause
+	c.Apply(Command{Kind: CmdToggle}) // play, still offline
+	epoch := c.State().Epoch
+	c.SetOnline(true)
+	if c.State().Epoch == epoch || c.State().State != domain.StatePlaying || c.State().Queue.Index != 0 {
+		t.Fatalf("not restarted on return: %+v", c.State())
+	}
+}
+
+// A track still buffering from the outage — stalled, never reported failed —
+// is started afresh when the connection returns, not left to a stall timer
+// that began offline.
+func TestAStalledTrackIsStartedAfreshOnReturn(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 3)
+	c.SetOnline(false)
+	c.HandleEngine(EngineEvent{Kind: EvStalled, Epoch: c.State().Epoch})
+	epoch := c.State().Epoch
+	c.SetOnline(true)
+	s := c.State()
+	if s.Epoch == epoch || s.State != domain.StatePlaying || s.Queue.Index != 0 {
+		t.Fatalf("stalled track not restarted on return: %+v", s)
+	}
+	// A track playing fine through a short outage is left alone.
+	c.SetOnline(false)
+	epoch = c.State().Epoch
+	c.SetOnline(true)
+	if c.State().Epoch != epoch {
+		t.Fatal("a playing track was restarted by a reconnect")
+	}
+}

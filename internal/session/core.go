@@ -292,6 +292,9 @@ func (c *Core) toggle() (Reject, []LogEntry) {
 		c.waitingForNetwork = false
 	case domain.StatePaused:
 		c.state.State = domain.StatePlaying
+		// Pressed while offline: the track is waiting for the connection
+		// again, and is started afresh when it returns (#7).
+		c.waitingForNetwork = c.offline
 	default:
 		if c.state.Queue.Current() == nil {
 			return RejectEmptyQueue, nil
@@ -883,10 +886,19 @@ func (c *Core) SetOnline(online bool) bool {
 		return false
 	}
 	c.offline = !online
-	if online && c.waitingForNetwork {
+	/*
+	 * Back online, a track meant to be playing that is held, or still
+	 * buffering from the outage, starts afresh under a new epoch. Otherwise a
+	 * stall timer the engine began while offline fires after the return, the
+	 * probe then says the connection works, and the track is judged broken
+	 * and skipped.
+	 */
+	if online {
+		held := c.waitingForNetwork
 		c.waitingForNetwork = false
-		if c.state.State == domain.StateStalled && c.state.Queue.Current() != nil {
-			c.startTrack(c.state.Queue.Index, c.state.PositionMs)
+		stuck := c.state.State == domain.StateStalled || c.state.State == domain.StateLoading
+		if (held || stuck) && c.playIntent() && c.state.Queue.Current() != nil {
+			c.startTrack(c.state.Queue.Index, c.positionNow())
 			return true
 		}
 	}

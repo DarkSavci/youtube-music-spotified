@@ -255,3 +255,20 @@ func TestTrackHealthWhileOfflineIsNotARateLimit(t *testing.T) {
 		t.Fatalf("health offline: %s", rec.Body.String())
 	}
 }
+
+// An answer to a request sent before the outage began does not end it.
+func TestAnAnswerFromBeforeTheOutageDoesNotEndIt(t *testing.T) {
+	n := newNetwork(func(context.Context) error { return errors.New("unreachable") }, nil)
+	n.every = time.Hour
+	sent := time.Now()
+	time.Sleep(2 * time.Millisecond)
+	n.Failed(lostConnection)
+	n.AnsweredSince(sent)
+	if !n.Offline() {
+		t.Fatal("a lookup sent before the drop ended the outage")
+	}
+	n.AnsweredSince(time.Now())
+	if n.Offline() {
+		t.Fatal("an answer to a request sent during the outage did not end it")
+	}
+}
