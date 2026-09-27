@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"spotifier/internal/audiocache"
+	"spotifier/internal/ratelimit"
 	"spotifier/internal/resolver"
 )
 
@@ -73,6 +74,60 @@ type prefetcher struct {
 	// waiting counts streams someone is listening for that still need
 	// resolving. Speculative work holds off while any are.
 	waiting atomic.Int32
+
+	// guesses are the speculative prefetches not yet finished, oldest first.
+	// Hovering along a list used to queue one per row, each waiting up to
+	// half an hour for the single resolution slot, and all of them ran in
+	// turn long after the pointer had moved on — a stream lookup every few
+	// seconds, paused or not. Only the newest few are kept; asking for
+	// another cancels the oldest.
+	guesses []guess
+	seq     uint64
+}
+
+type guess struct {
+	key    string
+	id     uint64
+	cancel context.CancelFunc
+}
+
+// maxGuesses is how many speculative prefetches may be pending at once.
+const maxGuesses = 3
+
+// guessDeadline bounds a speculative prefetch, queueing included: a guess
+// that has not happened in two minutes is about a list nobody is looking at.
+const guessDeadline = 2 * time.Minute
+
+// addGuess records a speculative prefetch, cancelling the oldest beyond the
+// limit, and returns the function that removes it when it ends.
+func (p *prefetcher) addGuess(key string, cancel context.CancelFunc) func() {
+	p.mu.Lock()
+	p.seq++
+	id := p.seq
+	p.guesses = append(p.guesses, guess{key: key, id: id, cancel: cancel})
+	var dropped []guess
+	for len(p.guesses) > maxGuesses {
+		dropped = append(dropped, p.guesses[0])
+		p.guesses = p.guesses[1:]
+	}
+	for _, g := range dropped {
+		// Superseded: worth doing if it is asked for again.
+		delete(p.recent, g.key)
+	}
+	p.mu.Unlock()
+	for _, g := range dropped {
+		g.cancel()
+	}
+	return func() {
+		p.mu.Lock()
+		for i, g := range p.guesses {
+			if g.id == id {
+				p.guesses = append(p.guesses[:i], p.guesses[i+1:]...)
+				break
+			}
+		}
+		p.mu.Unlock()
+	}
 }
 
 // yield waits while a listener is waiting on a resolution of their own.
@@ -134,9 +189,16 @@ func (p *prefetcher) unclaim(key string) {
 	p.mu.Unlock()
 }
 
-func (p *prefetcher) backOff() {
+// backOff pauses speculative work for as long as upstream's cooldown, or ten
+// minutes when that is not known.
+func (p *prefetcher) backOff(d time.Duration) {
+	if d <= 0 {
+		d = 10 * time.Minute
+	}
 	p.mu.Lock()
-	p.pausedUntil = time.Now().Add(10 * time.Minute)
+	if until := time.Now().Add(d); until.After(p.pausedUntil) {
+		p.pausedUntil = until
+	}
 	p.mu.Unlock()
 }
 
@@ -144,7 +206,7 @@ func (p *prefetcher) backOff() {
 // Safe to call freely; repeats and a busy or rate-limited upstream are
 // absorbed here.
 func (s *Server) Prefetch(videoID string, whole bool) {
-	s.prefetchTrack(videoID, whole, false)
+	s.prefetchTrack(videoID, whole, false, "")
 }
 
 /*
@@ -172,11 +234,14 @@ func (s *Server) PrefetchQueue(ids []string) {
 	}
 	s.prefetch.mu.Unlock()
 	for _, id := range ids {
-		s.prefetchTrack(id, true, true)
+		s.prefetchTrack(id, true, true, "")
 	}
 }
 
-func (s *Server) prefetchTrack(videoID string, whole, forQueue bool) {
+// prefetchTrack readies a track. A non-empty guessReason marks a speculative
+// prefetch — a hover, a page's first rows, a search result — which is bounded
+// and short-lived; see prefetcher.guesses.
+func (s *Server) prefetchTrack(videoID string, whole, forQueue bool, guessReason string) {
 	if s.deps.Audio == nil || s.deps.Resolver == nil || videoID == "" {
 		return
 	}
@@ -197,7 +262,19 @@ func (s *Server) prefetchTrack(videoID string, whole, forQueue bool) {
 
 	// A whole track is a long transfer; the stall guard, not this, is what
 	// catches a dead one.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	deadline, reason := 30*time.Minute, "queue"
+	if !forQueue {
+		reason = "playing"
+	}
+	if guessReason != "" {
+		deadline, reason = guessDeadline, guessReason
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	ctx = withReason(ctx, reason)
+	endGuess := func() {}
+	if guessReason != "" {
+		endGuess = s.prefetch.addGuess(key, cancel)
+	}
 	if forQueue {
 		s.prefetch.mu.Lock()
 		s.prefetch.queued[videoID] = cancel
@@ -207,6 +284,7 @@ func (s *Server) prefetchTrack(videoID string, whole, forQueue bool) {
 	go func() {
 		defer done()
 		defer cancel()
+		defer endGuess()
 		if forQueue {
 			defer func() {
 				s.prefetch.mu.Lock()
@@ -232,7 +310,7 @@ func (s *Server) prefetchTrack(videoID string, whole, forQueue bool) {
 			<-s.prefetch.resolve
 			if err != nil {
 				if errors.Is(err, resolver.ErrRateLimited) {
-					s.prefetch.backOff()
+					s.prefetch.backOff(ratelimit.RetryAfterOf(err))
 				}
 				if errors.Is(err, context.Canceled) {
 					// Gave way to a listener; still worth doing later.
@@ -302,7 +380,7 @@ func (s *Server) retryIfStillQueued(videoID string, whole, forQueue bool) {
 		still := s.prefetch.wanted[videoID]
 		s.prefetch.mu.Unlock()
 		if still {
-			s.prefetchTrack(videoID, whole, true)
+			s.prefetchTrack(videoID, whole, true, "")
 		}
 	})
 }
@@ -798,8 +876,17 @@ func mimeOnly(m string) string {
 
 // handlePrefetch readies tracks the listener is likely to play next.
 // Answers at once; the work happens in the background.
+// handlePrefetch is the UI's guess that a track is about to be played: a
+// hover, the first rows of a page, a search result. ?reason= says which, for
+// the logs; every one is speculative and bounded.
 func (s *Server) handlePrefetch(w http.ResponseWriter, r *http.Request) {
-	s.Prefetch(r.PathValue("id"), r.URL.Query().Get("whole") == "1")
+	reason := r.URL.Query().Get("reason")
+	switch reason {
+	case "hover", "page", "search", "queue", "warm":
+	default:
+		reason = "hover"
+	}
+	s.prefetchTrack(r.PathValue("id"), r.URL.Query().Get("whole") == "1", false, reason)
 	w.WriteHeader(http.StatusAccepted)
 }
 

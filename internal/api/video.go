@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 
 	"spotifier/internal/domain"
 	"spotifier/internal/lyrics"
+	"spotifier/internal/ratelimit"
 	"spotifier/internal/resolver"
 )
 
@@ -133,7 +135,10 @@ func (s *Server) resolveVideo(ctx context.Context, id string, refresh bool) (dom
 	provider, ok := s.deps.Resolver.(interface {
 		ResolveVideo(context.Context, string) (domain.Stream, error)
 	})
-	if !ok {
+	if cooling, left := s.streamGov.Cooling(); cooling {
+		// Same limit as audio: a video lookup during it only extends it.
+		flight.err = fmt.Errorf("%w: %w", resolver.ErrRateLimited, &ratelimit.Error{RetryAfter: left})
+	} else if !ok {
 		flight.err = errors.New("video playback is unavailable with this resolver")
 	} else {
 		// Other requests share this result, so one of them going away must
@@ -141,6 +146,9 @@ func (s *Server) resolveVideo(ctx context.Context, id string, refresh bool) (dom
 		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 		defer cancel()
 		flight.stream, flight.err = provider.ResolveVideo(rctx, id)
+		if errors.Is(flight.err, resolver.ErrRateLimited) {
+			s.streamGov.CoolDown(0)
+		}
 		if flight.err == nil && flight.stream.URL == "" {
 			flight.err = errors.New("video resolution returned no stream")
 		}

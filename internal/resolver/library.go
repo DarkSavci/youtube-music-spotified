@@ -99,9 +99,22 @@ func classify(err error) error {
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
+	// An age check is about this track and this session, not about how much
+	// was asked: signing in may unlock it, and nothing else should wait.
+	case strings.Contains(msg, "confirm your age"),
+		strings.Contains(msg, "age-restricted"),
+		strings.Contains(msg, "age restricted"),
+		strings.Contains(msg, "inappropriate for some users"):
+		return fmt.Errorf("%w: age restricted: %v", ErrUnavailable, err)
+	// A format that is not offered right now says nothing lasting about the
+	// track either; it is an ordinary failure, retried after a short while.
+	case strings.Contains(msg, "requested format is not available"):
+		return err
 	// Upstream answers 429 once an address has asked for too much, and the
-	// bot check surfaces the same way. Neither says anything about the track.
+	// bot check surfaces the same way. "Try again later" is YouTube's softer
+	// way of saying the same. None says anything about the track.
 	case strings.Contains(msg, "429"),
+		strings.Contains(msg, "try again later"),
 		strings.Contains(msg, "too many requests"),
 		strings.Contains(msg, "not a bot"),
 		strings.Contains(msg, "sign in to confirm"):

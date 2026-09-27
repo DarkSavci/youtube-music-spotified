@@ -13,14 +13,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
+
+	"spotifier/internal/ratelimit"
 )
 
 const (
@@ -64,8 +66,8 @@ type Client struct {
 	language  string
 	region    string
 
-	mu  sync.RWMutex
-	cfg *Config
+	gov     *ratelimit.Governor
+	configs *configStore
 }
 
 // Option configures a Client.
@@ -97,8 +99,14 @@ func New(opts ...Option) *Client {
 		language:  "en",
 		region:    "US",
 	}
+	defaults.mu.Lock()
+	c.gov, c.configs = defaults.governor, defaults.configs
+	defaults.mu.Unlock()
 	for _, o := range opts {
 		o(c)
+	}
+	if c.configs == nil {
+		c.configs = newConfigStore()
 	}
 	return c
 }
@@ -148,14 +156,19 @@ func (c *Client) GetSigned(ctx context.Context, rawURL string) (int, error) {
 		req.Header.Set("Authorization", auth)
 		req.Header.Set("X-Origin", Origin)
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.send(req, "signed", u.Path)
+	if resp != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}()
+	}
 	if err != nil {
+		if resp != nil {
+			return resp.StatusCode, err
+		}
 		return 0, err
 	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-	}()
 	return resp.StatusCode, nil
 }
 
@@ -185,13 +198,11 @@ var (
 
 // config returns a usable Config, scraping and caching as needed.
 func (c *Client) config(ctx context.Context) (*Config, error) {
-	c.mu.RLock()
-	cfg := c.cfg
-	c.mu.RUnlock()
-	if cfg != nil && time.Since(cfg.scrapedAt) < configTTL {
-		return cfg, nil
-	}
+	return c.configs.get(ctx, c.creds.cookie()+"|"+c.language, c.scrape)
+}
 
+// scrape fetches the homepage and reads the config out of it.
+func (c *Client) scrape(ctx context.Context) (*Config, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, Origin+"/", nil)
 	if err != nil {
 		return nil, err
@@ -200,11 +211,23 @@ func (c *Client) config(ctx context.Context) (*Config, error) {
 	req.Header.Set("Accept-Language", c.language)
 	req.Header.Set("Cookie", c.creds.cookie())
 
-	resp, err := c.http.Do(req)
+	resp, err := c.send(req, "config", "")
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
+		if resp != nil {
+			// Upstream answered, with a rate limit: remembered.
+			return nil, &scrapeFailure{fmt.Errorf("scrape config: %w", err)}
+		}
 		return nil, fmt.Errorf("scrape config: %w", err)
 	}
-	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// A consent page or an error page has no config in it, and reading
+		// one as if it had is how a failure turned into a second request
+		// before every call.
+		return nil, &scrapeFailure{fmt.Errorf("scrape config: %w", &HTTPError{Status: resp.StatusCode, Endpoint: "config"})}
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return nil, fmt.Errorf("scrape config: %w", err)
@@ -224,17 +247,8 @@ func (c *Client) config(ctx context.Context) (*Config, error) {
 		scrapedAt:     time.Now(),
 	}
 	if next.ClientVersion == "" {
-		// Reuse a stale config rather than failing outright: an unparseable
-		// homepage should degrade, not take the app down.
-		if cfg != nil {
-			return cfg, nil
-		}
-		return nil, fmt.Errorf("scrape config: no client version in %d bytes", len(html))
+		return nil, &scrapeFailure{fmt.Errorf("scrape config: no client version in %d bytes", len(html))}
 	}
-
-	c.mu.Lock()
-	c.cfg = next
-	c.mu.Unlock()
 	return next, nil
 }
 
@@ -375,11 +389,20 @@ func (c *Client) CallAs(ctx context.Context, endpoint string, body map[string]an
 		}
 	}
 
-	resp, err := c.http.Do(req)
+	resp, err := c.send(req, endpoint, describe(body))
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
+		if resp != nil {
+			// Rate limited: keep upstream's message with it.
+			out, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			return nil, fmt.Errorf("innertube %s: %w", endpoint, withCause(err, &HTTPError{
+				Status: resp.StatusCode, Endpoint: endpoint, Message: errorMessage(out),
+			}))
+		}
 		return nil, fmt.Errorf("innertube %s: %w", endpoint, err)
 	}
-	defer resp.Body.Close()
 
 	out, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if err != nil {
@@ -404,6 +427,29 @@ func (c *Client) Continue(ctx context.Context, endpoint, token string) (json.Raw
 		return nil, fmt.Errorf("innertube %s: empty continuation", endpoint)
 	}
 	return c.Call(ctx, endpoint, map[string]any{"continuation": token})
+}
+
+// describe names what a call asked for, for the logs: the page, not the
+// user's words, so a search is logged as a search and nothing more.
+func describe(body map[string]any) string {
+	if _, ok := body["continuation"]; ok {
+		return "continuation"
+	}
+	for _, k := range []string{"browseId", "videoId", "playlistId"} {
+		if v, ok := body[k].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// withCause attaches the upstream response to a rate-limit error.
+func withCause(err error, cause error) error {
+	var rl *ratelimit.Error
+	if errors.As(err, &rl) && rl.Cause == nil {
+		return &ratelimit.Error{RetryAfter: rl.RetryAfter, Cause: cause}
+	}
+	return err
 }
 
 // errorMessage lifts error.message out of an InnerTube error body, if present.
