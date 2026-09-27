@@ -3,6 +3,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { api, ApiError } from "./api";
 import { apiUrl } from "./base";
 import { toast } from "./toast";
+import { libraryFailure } from "./signin";
 import type { LibraryItem, Track } from "./types";
 
 /**
@@ -130,12 +131,7 @@ export function useToggleLike() {
     mutationFn: ({ trackId, liked, track }: { trackId: string; liked: boolean; track?: Track }) =>
       setLiked(qc, track ?? { id: trackId }, !liked),
     // The heart has already sprung back; say why rather than fail silently.
-    onError: (err) =>
-      toast(
-        err instanceof ApiError && err.reauth
-          ? "Sign in to save songs to your library."
-          : "Couldn't update your library. Try again.",
-      ),
+    onError: (err) => toast(libraryFailure(err, "Couldn't update your library. Try again.")),
   });
 }
 

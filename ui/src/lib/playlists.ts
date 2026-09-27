@@ -3,6 +3,8 @@ import { queryClient } from "./queryclient";
 import { api, ApiError } from "./api";
 import { apiUrl } from "./base";
 import type { LibraryItem, Track } from "./types";
+import { toast } from "./toast";
+import { libraryFailure } from "./signin";
 
 /**
  * Editing playlists.
@@ -23,8 +25,13 @@ async function send(path: string, method: string, body?: unknown): Promise<Respo
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(`status ${res.status}`);
+  if (!res.ok) throw new ApiError(`status ${res.status}`, res.status, res.status === 401);
   return res;
+}
+
+/** Says why a playlist change failed, rather than failing silently. */
+function playlistFailed(err: unknown) {
+  toast(libraryFailure(err, "Couldn't update the playlist. Try again."));
 }
 
 /*
@@ -85,6 +92,7 @@ export function useCreatePlaylist() {
       }
       return id;
     },
+    onError: playlistFailed,
     onSettled: () => qc.invalidateQueries({ queryKey: ["library"] }),
   });
 }
@@ -96,6 +104,7 @@ export function useAddToPlaylist() {
       send(`/v1/me/playlists/${encodeURIComponent(v.playlistId)}/tracks`, "POST", {
         trackIds: v.trackIds,
       }),
+    onError: playlistFailed,
     onSettled: (_d, _e, v) => {
       void qc.invalidateQueries({ queryKey: ["playlist", v.playlistId] });
       void qc.invalidateQueries({ queryKey: ["library"] });
@@ -110,6 +119,7 @@ export function useRemoveFromPlaylist() {
       send(`/v1/me/playlists/${encodeURIComponent(v.playlistId)}/tracks`, "DELETE", {
         items: v.items,
       }),
+    onError: playlistFailed,
     onSettled: (_d, _e, v) => qc.invalidateQueries({ queryKey: ["playlist", v.playlistId] }),
   });
 }
@@ -119,6 +129,7 @@ export function useDeletePlaylist() {
   return useMutation({
     mutationFn: (playlistId: string) =>
       send(`/v1/me/playlists/${encodeURIComponent(playlistId)}`, "DELETE"),
+    onError: playlistFailed,
     onSettled: () => qc.invalidateQueries({ queryKey: ["library"] }),
   });
 }

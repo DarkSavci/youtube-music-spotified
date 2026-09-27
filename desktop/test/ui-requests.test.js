@@ -106,6 +106,7 @@ function likedHarness(ok) {
     './api': { api: {}, ApiError },
     './base': base,
     './toast': { toast: (m) => toasts.push(m) },
+    './signin': { libraryFailure: (err, fallback) => (err && err.reauth ? 'Sign in to change your library.' : fallback) },
   }, { fetch });
   qc.setQueryData(['liked'], { tracks: [{ id: 'kept0000001' }] });
   qc.setQueryData(['library', '', 'recents'], [{ id: 'LM', kind: 'playlist', title: 'Liked Music', subtitle: '41 songs' }, { id: 'PL1', title: 'Mine', subtitle: '12 songs' }]);
@@ -195,6 +196,8 @@ function playlistsHarness(state) {
     './queryclient': { queryClient },
     './api': { api: {}, ApiError: StubApiError },
     './base': base,
+    './toast': { toast: () => {} },
+    './signin': { libraryFailure: (err, fallback) => (err && err.reauth ? 'Sign in to change your library.' : fallback) },
   });
   return { mod, prefetched };
 }
