@@ -62,6 +62,9 @@ func main() {
 		level = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	// Packages without a logger of their own (library, identity) log through
+	// the default, which should read like the rest of the core's output.
+	slog.SetDefault(log)
 
 	rec := obs.NewRecorder()
 	// The token comes through the environment rather than a flag, so it does

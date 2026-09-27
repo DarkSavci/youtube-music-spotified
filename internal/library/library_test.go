@@ -1,7 +1,10 @@
 package library_test
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"strings"
 	"os"
 	"testing"
 	"time"
@@ -224,5 +227,27 @@ func TestSidebarDoesNotDownloadLikedTracks(t *testing.T) {
 		if id.summaries != want {
 			t.Fatalf("summary calls = %d, want %d", id.summaries, want)
 		}
+	}
+}
+
+// Only the first error reaches the caller, so each failing surface is logged
+// by name: which of the three a refused library fails on is the question.
+func TestEachFailingSurfaceIsLoggedByName(t *testing.T) {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	stub := newStub()
+	stub.failArtists = true
+	if _, err := library.New(stub, nil).List(context.Background(), library.FilterAll, library.SortAlphabetical); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "library surface failed") || !strings.Contains(out, "surface=artists") {
+		t.Fatalf("failing surface not named: %s", out)
+	}
+	if strings.Contains(out, "surface=playlists") {
+		t.Fatalf("a working surface was reported as failing: %s", out)
 	}
 }
