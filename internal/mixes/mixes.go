@@ -13,7 +13,9 @@ package mixes
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -22,6 +24,8 @@ import (
 	"spotifier/internal/catalog"
 	"spotifier/internal/control"
 	"spotifier/internal/domain"
+	"spotifier/internal/innertube"
+	"spotifier/internal/ratelimit"
 )
 
 // Kind tags a generated mix, so the UI can group and label them.
@@ -50,10 +54,58 @@ type Mix struct {
 type Generator struct {
 	store   *control.Store
 	catalog catalog.Catalog
+	// radio bounds the radio calls in flight across every mix being built.
+	// Building them all at once used to be about thirty calls in the same
+	// instant, which is how an account runs into YouTube's rate limit.
+	radio chan struct{}
 }
 
 func New(store *control.Store, cat catalog.Catalog) *Generator {
-	return &Generator{store: store, catalog: cat}
+	return &Generator{store: store, catalog: cat, radio: make(chan struct{}, radioInFlight)}
+}
+
+const (
+	// radioInFlight is how many radio calls run at once.
+	radioInFlight = 3
+	// seedsPerMix is how many artists seed each mix. Three already give a
+	// mix of thirty tracks plenty to draw from; more only cost calls.
+	seedsPerMix = 3
+	// dailyMixes is how many Daily Mixes are built.
+	dailyMixes = 3
+)
+
+// ErrThinHistory means there is not yet enough listening to seed mixes. It is
+// an answer, not a failure, but one that more listening changes soon.
+var ErrThinHistory = errors.New("mixes: not enough listening history yet")
+
+// ErrNoMixes means the radio answered but no mix had enough tracks.
+var ErrNoMixes = errors.New("mixes: no mix came out with enough tracks")
+
+// minSeedsPerMix is how many of a mix's seeds must answer for it to be built.
+// One artist's radio alone is not a mix.
+const minSeedsPerMix = 2
+
+/*
+transient reports whether a failed radio call says YouTube or the network is
+refusing for now (a rate limit, a timeout, a dropped connection, a 5xx), as
+opposed to this one seed being unusable (a deleted video, say).
+
+A transient failure ends the rebuild so the mixes already kept stay; anything
+else only drops that seed, or one bad song would block every mix for good.
+*/
+func transient(err error) bool {
+	if errors.Is(err, ratelimit.ErrRateLimited) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	var ne net.Error
+	if errors.As(err, &ne) {
+		return true
+	}
+	var he *innertube.HTTPError
+	if errors.As(err, &he) {
+		return he.Status == 429 || he.Status >= 500
+	}
+	return false
 }
 
 // minHistoryForSeeding is how many distinct artists must exist before seeded
@@ -78,25 +130,57 @@ func (g *Generator) All(ctx context.Context, userID int64) ([]Mix, error) {
 	if onRepeat, err := g.OnRepeat(ctx, userID); err == nil && len(onRepeat.Tracks) > 0 {
 		out = append(out, onRepeat)
 	}
+	// Without a cache in front, a partial shelf is better than none.
+	seeded, _ := g.build(ctx, userID)
+	return append(out, seeded...), nil
+}
 
-	artists, err := g.store.TopArtists(ctx, userID, control.Last(90*24*time.Hour), 24)
+/*
+Seeded is the mixes built from YouTube's radio: the Daily Mixes and Discover.
+
+They are the expensive part, a handful of radio calls, and they change slowly,
+so the API keeps them for a day; On Repeat is local and is always read fresh.
+
+Unlike All, Seeded is all or nothing: if any radio call fails (a rate limit,
+most often) it returns the error rather than a partial set, so a kept set is
+never replaced by one built while YouTube was refusing. ErrThinHistory and
+ErrNoMixes say there is nothing to show yet.
+*/
+func (g *Generator) Seeded(ctx context.Context, userID int64) ([]Mix, error) {
+	out, err := g.build(ctx, userID)
 	if err != nil {
-		return out, nil
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, ErrNoMixes
+	}
+	return out, nil
+}
+
+// build makes the seeded mixes, returning what it could and the first
+// radio failure, if any.
+func (g *Generator) build(ctx context.Context, userID int64) ([]Mix, error) {
+	if g.store == nil {
+		return nil, fmt.Errorf("mixes: no history store")
+	}
+	artists, err := g.store.TopArtists(ctx, userID, control.Last(90*24*time.Hour), seedsPerMix*dailyMixes)
+	if err != nil {
+		return nil, err
 	}
 	if len(artists) < minHistoryForSeeding {
 		// Not enough history to seed anything meaningful. Returning what we
 		// have is honest; inventing mixes from two artists is not.
-		return out, nil
+		return nil, ErrThinHistory
 	}
 
-	daily, err := g.DailyMixes(ctx, userID, artists, 3)
-	if err == nil {
-		out = append(out, daily...)
-	}
-	if discover, err := g.Discover(ctx, userID, artists); err == nil && len(discover.Tracks) > 0 {
+	var out []Mix
+	daily, dailyErr := g.DailyMixes(ctx, userID, artists, dailyMixes)
+	out = append(out, daily...)
+	discover, discoverErr := g.Discover(ctx, userID, artists)
+	if len(discover.Tracks) > 0 {
 		out = append(out, discover)
 	}
-	return out, nil
+	return out, errors.Join(dailyErr, discoverErr)
 }
 
 // OnRepeat is what the listener has played most recently and most often.
@@ -126,11 +210,17 @@ func (g *Generator) DailyMixes(ctx context.Context, userID int64, artists []cont
 		return nil, nil
 	}
 	clusters := partition(artists, count)
+	for i := range clusters {
+		if len(clusters[i]) > seedsPerMix {
+			clusters[i] = clusters[i][:seedsPerMix]
+		}
+	}
 
 	var (
-		wg  sync.WaitGroup
-		mu  sync.Mutex
-		out []Mix
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		out  []Mix
+		errs []error
 	)
 	for i, cluster := range clusters {
 		if len(cluster) == 0 {
@@ -139,7 +229,12 @@ func (g *Generator) DailyMixes(ctx context.Context, userID int64, artists []cont
 		wg.Add(1)
 		go func(index int, cluster []control.ArtistStat) {
 			defer wg.Done()
-			tracks, seeds := g.expand(ctx, userID, cluster, 30, false)
+			tracks, seeds, err := g.expand(ctx, userID, cluster, 30, false)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+			}
 			if len(tracks) < 5 {
 				// Too thin to present as a mix.
 				return
@@ -159,17 +254,17 @@ func (g *Generator) DailyMixes(ctx context.Context, userID int64, artists []cont
 	wg.Wait()
 
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
+	return out, errors.Join(errs...)
 }
 
 // Discover is radio from familiar artists, with everything already heard
 // removed — so the result is genuinely new rather than a greatest-hits replay.
 func (g *Generator) Discover(ctx context.Context, userID int64, artists []control.ArtistStat) (Mix, error) {
 	seedArtists := artists
-	if len(seedArtists) > 8 {
-		seedArtists = seedArtists[:8]
+	if len(seedArtists) > seedsPerMix {
+		seedArtists = seedArtists[:seedsPerMix]
 	}
-	tracks, seeds := g.expand(ctx, userID, seedArtists, 30, true)
+	tracks, seeds, err := g.expand(ctx, userID, seedArtists, 30, true)
 	return Mix{
 		ID:          "discover",
 		Kind:        KindDiscover,
@@ -177,7 +272,7 @@ func (g *Generator) Discover(ctx context.Context, userID int64, artists []contro
 		Description: "Tracks you have not heard, from artists adjacent to what you play.",
 		Tracks:      tracks,
 		Seeds:       seeds,
-	}, nil
+	}, err
 }
 
 // expand turns seed artists into tracks via YouTube's radio.
@@ -190,7 +285,7 @@ func (g *Generator) expand(
 	artists []control.ArtistStat,
 	limit int,
 	excludeHeard bool,
-) ([]domain.Track, []string) {
+) ([]domain.Track, []string, error) {
 	heard := map[string]bool{}
 	if excludeHeard {
 		if known, err := g.store.TopTracks(ctx, userID, control.Last(3650*24*time.Hour), 2000); err == nil {
@@ -201,30 +296,61 @@ func (g *Generator) expand(
 	}
 
 	// One seed track per artist, resolved concurrently — a mix is several
-	// independent radio calls and running them in series is needlessly slow.
+	// independent radio calls and running them in series is needlessly slow —
+	// but only a few at a time across all mixes (see Generator.radio).
 	type result struct {
 		artist string
 		tracks []domain.Track
 	}
 	results := make([]result, len(artists))
-	var wg sync.WaitGroup
+	var (
+		wg       sync.WaitGroup
+		errMu    sync.Mutex
+		radioErr error // transient failures only
+		answered int
+		asked    int
+	)
 
 	for i, a := range artists {
 		seed, err := g.seedTrackFor(ctx, userID, a)
 		if err != nil || seed == "" {
 			continue
 		}
+		asked++
 		wg.Add(1)
 		go func(index int, artist, seedID string) {
 			defer wg.Done()
-			tracks, err := g.catalog.Radio(ctx, seedID)
-			if err != nil {
+			select {
+			case g.radio <- struct{}{}:
+			case <-ctx.Done():
+				errMu.Lock()
+				radioErr = errors.Join(radioErr, ctx.Err())
+				errMu.Unlock()
 				return
 			}
+			defer func() { <-g.radio }()
+			tracks, err := g.catalog.Radio(ctx, seedID)
+			errMu.Lock()
+			defer errMu.Unlock()
+			if err != nil {
+				if transient(err) {
+					radioErr = errors.Join(radioErr, err)
+				}
+				// Anything else: this seed is unusable; the rest carry on.
+				return
+			}
+			answered++
 			results[index] = result{artist: artist, tracks: tracks}
 		}(i, a.Artist, seed)
 	}
 	wg.Wait()
+	if radioErr != nil {
+		return nil, nil, radioErr
+	}
+	if answered == 0 || answered < min(minSeedsPerMix, asked) {
+		// Too few seeds answered to make this mix; the others still build.
+		return nil, nil, nil
+	}
 
 	// Interleave so no single artist dominates the opening of the mix.
 	var (
@@ -258,7 +384,7 @@ func (g *Generator) expand(
 			break
 		}
 	}
-	return out, seeds
+	return out, seeds, radioErr
 }
 
 // seedTrackFor picks a track by this artist that the listener actually played,

@@ -44,6 +44,7 @@ func (s *Server) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	s.expire(r.Context(), cacheKey("lib", "playlists"))
 	s.write(w, http.StatusOK, map[string]string{"id": newID})
 }
 
@@ -57,6 +58,8 @@ func (s *Server) handleDeletePlaylist(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	s.forget(r.Context(), playlistKeys(r.PathValue("id")))
+	s.expire(r.Context(), cacheKey("lib", "playlists"))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -81,6 +84,8 @@ func (s *Server) handleAddToPlaylist(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	s.forget(r.Context(), playlistKeys(r.PathValue("id")))
+	s.expire(r.Context(), cacheKey("lib", "playlists"))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -125,6 +130,8 @@ func (s *Server) handleRemoveFromPlaylist(w http.ResponseWriter, r *http.Request
 		s.fail(w, r, err)
 		return
 	}
+	s.forget(r.Context(), playlistKeys(r.PathValue("id")))
+	s.expire(r.Context(), cacheKey("lib", "playlists"))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -151,5 +158,6 @@ func (s *Server) handleFollow(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	s.expire(r.Context(), cacheKey("lib", "artists"), cacheKey("cat", "artist", r.PathValue("id")))
 	w.WriteHeader(http.StatusNoContent)
 }

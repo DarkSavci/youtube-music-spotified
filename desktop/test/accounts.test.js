@@ -65,3 +65,26 @@ test("concurrent channel readers share the refresh instead of reporting an accou
  assert.equal(a.activeId, b.activeId);
  assert.equal(a.accounts[0].channels.length, 2);
 });
+
+test("signing out or removing an account deletes its cached answers and keeps its history", async t => {
+ const h = setup(t);
+ await h.call("sign-in");
+ const state = await h.call("accounts");
+ const dir = h.manager.activeDirectory();
+ const channel = path.join(dir, "channels", "abc");
+ fs.mkdirSync(channel, { recursive: true });
+ for (const d of [dir, channel]) {
+  for (const f of ["responses.db", "responses.db-wal", "responses.db-shm", "spotifier.db"]) fs.writeFileSync(path.join(d, f), "x");
+ }
+ // The legacy account's cached answers, for an inactive removal.
+ fs.writeFileSync(path.join(h.root, "responses.db"), "x");
+ const legacy = state.accounts.find(a => a.id !== state.activeId).id;
+ await h.call("remove-account", legacy);
+ assert.equal(fs.existsSync(path.join(h.root, "responses.db")), false);
+
+ await h.call("sign-out");
+ for (const d of [dir, channel]) {
+  for (const f of ["responses.db", "responses.db-wal", "responses.db-shm"]) assert.equal(fs.existsSync(path.join(d, f)), false, `${f} survived in ${d}`);
+  assert.equal(fs.existsSync(path.join(d, "spotifier.db")), true, "listening history was deleted");
+ }
+});
