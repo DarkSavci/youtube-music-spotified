@@ -43,7 +43,8 @@ func TestPlaylistPageDoesNotFetchTheTail(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Fatal(err)
 			}
-			if token, ok := request["continuation"]; ok {
+			// A browse continuation travels in the URL, as the web client's does.
+			if token := r.URL.Query().Get("ctoken"); token != "" {
 				if token != "next" {
 					t.Fatalf("unexpected token %v", token)
 				}

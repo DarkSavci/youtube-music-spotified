@@ -61,9 +61,8 @@ func likedPages(t *testing.T, pages ...[]string) (*InnerTube, *int) {
 				mu.Lock()
 				calls++
 				mu.Unlock()
-				var req map[string]any
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				if tok, ok := req["continuation"].(string); ok {
+				// A browse continuation travels in the URL, as the web client's does.
+				if tok := r.URL.Query().Get("ctoken"); tok != "" {
 					n := int(tok[1] - '0')
 					body, _ = json.Marshal(map[string]any{"onResponseReceivedActions": []any{map[string]any{
 						"appendContinuationItemsAction": map[string]any{"continuationItems": rows(n)}}}})
