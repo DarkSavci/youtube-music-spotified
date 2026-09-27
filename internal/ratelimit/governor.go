@@ -86,14 +86,15 @@ type Governor struct {
 	// sleep waits for d or until ctx ends; tests replace it.
 	sleep func(ctx context.Context, d time.Duration) error
 
-	mu       sync.Mutex
-	tokens   float64
-	last     time.Time
-	until    time.Time     // cooldown end
-	probed   time.Time     // the cooldown end a probe was let through for
-	backoff  time.Duration // next exponential cooldown
-	inFlight chan struct{}
-	onCool   []func(time.Duration)
+	mu        sync.Mutex
+	tokens    float64
+	last      time.Time
+	until     time.Time     // cooldown end
+	probed    time.Time     // the cooldown end a probe was let through for
+	coolStart time.Time     // when the running cooldown began
+	backoff   time.Duration // next exponential cooldown
+	inFlight  chan struct{}
+	onCool    []func(time.Duration)
 }
 
 // New builds a Governor. name identifies it in logs.
@@ -265,16 +266,27 @@ func (g *Governor) Probe() bool {
 	return true
 }
 
-// Succeeded records a call that worked: the exponential step starts over, and
-// a cooldown still running is over, since upstream has just answered.
-func (g *Governor) Succeeded() {
+/*
+Succeeded records a call that worked: the exponential step starts over, and a
+cooldown still running is over, since upstream has just answered.
+
+started is when the call began, and probe whether it was the cooldown's probe.
+A call that began before the cooldown did says nothing about it — a slow
+lookup finishing after a refusal is old news — so it changes nothing unless it
+was the probe.
+*/
+func (g *Governor) Succeeded(started time.Time, probe bool) {
 	if g == nil {
 		return
 	}
 	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !probe && !g.coolStart.IsZero() && started.Before(g.coolStart) {
+		return
+	}
 	g.backoff = g.s.MinCooldown
 	g.until = time.Time{}
-	g.mu.Unlock()
+	g.coolStart = time.Time{}
 }
 
 /*
@@ -331,6 +343,9 @@ func (g *Governor) coolDown(asked time.Duration) time.Duration {
 	}
 	now := g.now()
 	wasCooling := g.until.After(now)
+	if !wasCooling {
+		g.coolStart = now
+	}
 	end := now.Add(d)
 	if end.After(g.until) {
 		g.until = end

@@ -208,9 +208,9 @@ func TestProbeOncePerCooldown(t *testing.T) {
 	if !g.Probe() {
 		t.Fatal("no probe for a new cooldown")
 	}
-	g.Succeeded()
+	g.Succeeded(c.t, true)
 	if cooling, _ := g.Cooling(); cooling {
-		t.Fatal("a successful call left the cooldown running")
+		t.Fatal("a successful probe left the cooldown running")
 	}
 }
 
@@ -242,5 +242,23 @@ func TestCancelledWaitRefundsItsToken(t *testing.T) {
 	defer cancel2()
 	if _, err := g.Acquire(ctx2); err != nil {
 		t.Fatalf("the abandoned call spent the last token: %v", err)
+	}
+}
+
+// A call that began before the cooldown did cannot end it: a slow lookup
+// finishing after a refusal is old news. One begun afterwards can.
+func TestOnlyNewerSuccessesEndACooldown(t *testing.T) {
+	g, c := newFake(Settings{})
+	before := c.t
+	c.t = c.t.Add(time.Second)
+	g.CoolDown(0)
+	g.Succeeded(before, false)
+	if cooling, _ := g.Cooling(); !cooling {
+		t.Fatal("an older success ended the cooldown")
+	}
+	c.t = c.t.Add(time.Second)
+	g.Succeeded(c.t, false)
+	if cooling, _ := g.Cooling(); cooling {
+		t.Fatal("a newer success left the cooldown running")
 	}
 }

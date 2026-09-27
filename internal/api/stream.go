@@ -150,7 +150,9 @@ func (s *Server) resolve(ctx context.Context, videoID string, speculative bool) 
 	}
 	// A rate limit holds for everyone — except for one probe per cooldown
 	// for a track someone is waiting for, which may find it already over.
-	if cooling, left := s.streamGov.Cooling(); cooling && (speculative || !s.streamGov.Probe()) {
+	cooling, left := s.streamGov.Cooling()
+	probe := cooling && !speculative && s.streamGov.Probe()
+	if cooling && !probe {
 		err := fmt.Errorf("%w: %w", resolver.ErrRateLimited, &ratelimit.Error{RetryAfter: left})
 		// Recorded, so the health check says "rate limited" rather than
 		// leaving the client to take this track for a dead one.
@@ -213,8 +215,9 @@ func (s *Server) resolve(ctx context.Context, videoID string, speculative bool) 
 	cancel()
 	switch {
 	case err == nil:
-		// Upstream answered: whatever cooldown was running is over.
-		s.streamGov.Succeeded()
+		// Upstream answered: whatever cooldown was running is over — if this
+		// lookup began after it did, or was its probe.
+		s.streamGov.Succeeded(started, probe)
 	case errors.Is(err, resolver.ErrRateLimited):
 		d := s.streamGov.CoolDown(0)
 		err = fmt.Errorf("%w: %w", err, &ratelimit.Error{RetryAfter: d})

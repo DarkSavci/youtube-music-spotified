@@ -19,6 +19,7 @@ import (
 	"spotifier/internal/domain"
 	"spotifier/internal/innertube"
 	"spotifier/internal/ratelimit"
+	"spotifier/internal/renderers"
 	"spotifier/internal/resolver"
 	"spotifier/internal/session"
 )
@@ -362,5 +363,49 @@ func TestPrefetchPauseMatchesTheCooldown(t *testing.T) {
 	left := time.Until(s.prefetch.pausedUntil)
 	if left < 25*time.Second || left > 35*time.Second {
 		t.Fatalf("paused for %s after a 30s cooldown", left)
+	}
+}
+
+// gatedResolver succeeds, but only once released, so it can finish after a
+// cooldown began.
+type gatedResolver struct{ release chan struct{} }
+
+func (r *gatedResolver) Name() string { return "gated" }
+func (r *gatedResolver) Resolve(ctx context.Context, id string) (domain.Stream, resolver.Quality, error) {
+	<-r.release
+	return domain.Stream{Kind: domain.StreamURL, VideoID: id, URL: "http://x/" + id}, resolver.Quality{}, nil
+}
+
+// A lookup that began before a cooldown and finishes during it leaves the
+// cooldown running.
+func TestOldLookupDoesNotEndANewCooldown(t *testing.T) {
+	r := &gatedResolver{release: make(chan struct{})}
+	g := ratelimit.New("streams", ratelimit.Settings{})
+	s := New(Deps{Resolver: r, StreamGovernor: g})
+	done := make(chan struct{})
+	go func() { _, _ = s.resolveCached(context.Background(), "vid00000020"); close(done) }()
+	time.Sleep(30 * time.Millisecond)
+	g.CoolDown(0)
+	close(r.release)
+	<-done
+	if cooling, _ := g.Cooling(); !cooling {
+		t.Fatal("a lookup begun before the cooldown ended it")
+	}
+}
+
+// Liked Music's throttle shape (a 200) cools the API governor down and is
+// reported like any rate limit.
+func TestLikedThrottleCoolsDownTheAPI(t *testing.T) {
+	g := ratelimit.New("api", ratelimit.Settings{})
+	s := New(Deps{APIGovernor: g})
+	rec := httptest.NewRecorder()
+	s.fail(rec, httptest.NewRequest(http.MethodGet, "/v1/me/liked", nil), renderers.ErrLikedShape)
+	var body apiError
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if rec.Code != http.StatusTooManyRequests || !body.RateLimited || rec.Header().Get("Retry-After") != "30" {
+		t.Fatalf("%d %q %s", rec.Code, rec.Header().Get("Retry-After"), rec.Body)
+	}
+	if cooling, _ := g.Cooling(); !cooling {
+		t.Fatal("the API governor was not cooled down")
 	}
 }
