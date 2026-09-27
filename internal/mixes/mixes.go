@@ -13,6 +13,7 @@ package mixes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -70,6 +71,13 @@ const (
 	dailyMixes = 3
 )
 
+// ErrThinHistory means there is not yet enough listening to seed mixes. It is
+// an answer, not a failure, but one that more listening changes soon.
+var ErrThinHistory = errors.New("mixes: not enough listening history yet")
+
+// ErrNoMixes means the radio answered but no mix had enough tracks.
+var ErrNoMixes = errors.New("mixes: no mix came out with enough tracks")
+
 // minHistoryForSeeding is how many distinct artists must exist before seeded
 // mixes are offered.
 //
@@ -92,10 +100,8 @@ func (g *Generator) All(ctx context.Context, userID int64) ([]Mix, error) {
 	if onRepeat, err := g.OnRepeat(ctx, userID); err == nil && len(onRepeat.Tracks) > 0 {
 		out = append(out, onRepeat)
 	}
-	seeded, err := g.Seeded(ctx, userID)
-	if err != nil {
-		return out, nil
-	}
+	// Without a cache in front, a partial shelf is better than none.
+	seeded, _ := g.build(ctx, userID)
 	return append(out, seeded...), nil
 }
 
@@ -104,8 +110,26 @@ Seeded is the mixes built from YouTube's radio: the Daily Mixes and Discover.
 
 They are the expensive part, a handful of radio calls, and they change slowly,
 so the API keeps them for a day; On Repeat is local and is always read fresh.
+
+Unlike All, Seeded is all or nothing: if any radio call fails (a rate limit,
+most often) it returns the error rather than a partial set, so a kept set is
+never replaced by one built while YouTube was refusing. ErrThinHistory and
+ErrNoMixes say there is nothing to show yet.
 */
 func (g *Generator) Seeded(ctx context.Context, userID int64) ([]Mix, error) {
+	out, err := g.build(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, ErrNoMixes
+	}
+	return out, nil
+}
+
+// build makes the seeded mixes, returning what it could and the first
+// radio failure, if any.
+func (g *Generator) build(ctx context.Context, userID int64) ([]Mix, error) {
 	if g.store == nil {
 		return nil, fmt.Errorf("mixes: no history store")
 	}
@@ -116,18 +140,17 @@ func (g *Generator) Seeded(ctx context.Context, userID int64) ([]Mix, error) {
 	if len(artists) < minHistoryForSeeding {
 		// Not enough history to seed anything meaningful. Returning what we
 		// have is honest; inventing mixes from two artists is not.
-		return nil, nil
+		return nil, ErrThinHistory
 	}
 
 	var out []Mix
-	daily, err := g.DailyMixes(ctx, userID, artists, dailyMixes)
-	if err == nil {
-		out = append(out, daily...)
-	}
-	if discover, err := g.Discover(ctx, userID, artists); err == nil && len(discover.Tracks) > 0 {
+	daily, dailyErr := g.DailyMixes(ctx, userID, artists, dailyMixes)
+	out = append(out, daily...)
+	discover, discoverErr := g.Discover(ctx, userID, artists)
+	if len(discover.Tracks) > 0 {
 		out = append(out, discover)
 	}
-	return out, nil
+	return out, errors.Join(dailyErr, discoverErr)
 }
 
 // OnRepeat is what the listener has played most recently and most often.
@@ -164,9 +187,10 @@ func (g *Generator) DailyMixes(ctx context.Context, userID int64, artists []cont
 	}
 
 	var (
-		wg  sync.WaitGroup
-		mu  sync.Mutex
-		out []Mix
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		out  []Mix
+		errs []error
 	)
 	for i, cluster := range clusters {
 		if len(cluster) == 0 {
@@ -175,7 +199,12 @@ func (g *Generator) DailyMixes(ctx context.Context, userID int64, artists []cont
 		wg.Add(1)
 		go func(index int, cluster []control.ArtistStat) {
 			defer wg.Done()
-			tracks, seeds := g.expand(ctx, userID, cluster, 30, false)
+			tracks, seeds, err := g.expand(ctx, userID, cluster, 30, false)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+			}
 			if len(tracks) < 5 {
 				// Too thin to present as a mix.
 				return
@@ -195,7 +224,7 @@ func (g *Generator) DailyMixes(ctx context.Context, userID int64, artists []cont
 	wg.Wait()
 
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
+	return out, errors.Join(errs...)
 }
 
 // Discover is radio from familiar artists, with everything already heard
@@ -205,7 +234,7 @@ func (g *Generator) Discover(ctx context.Context, userID int64, artists []contro
 	if len(seedArtists) > seedsPerMix {
 		seedArtists = seedArtists[:seedsPerMix]
 	}
-	tracks, seeds := g.expand(ctx, userID, seedArtists, 30, true)
+	tracks, seeds, err := g.expand(ctx, userID, seedArtists, 30, true)
 	return Mix{
 		ID:          "discover",
 		Kind:        KindDiscover,
@@ -213,7 +242,7 @@ func (g *Generator) Discover(ctx context.Context, userID int64, artists []contro
 		Description: "Tracks you have not heard, from artists adjacent to what you play.",
 		Tracks:      tracks,
 		Seeds:       seeds,
-	}, nil
+	}, err
 }
 
 // expand turns seed artists into tracks via YouTube's radio.
@@ -226,7 +255,7 @@ func (g *Generator) expand(
 	artists []control.ArtistStat,
 	limit int,
 	excludeHeard bool,
-) ([]domain.Track, []string) {
+) ([]domain.Track, []string, error) {
 	heard := map[string]bool{}
 	if excludeHeard {
 		if known, err := g.store.TopTracks(ctx, userID, control.Last(3650*24*time.Hour), 2000); err == nil {
@@ -244,7 +273,11 @@ func (g *Generator) expand(
 		tracks []domain.Track
 	}
 	results := make([]result, len(artists))
-	var wg sync.WaitGroup
+	var (
+		wg       sync.WaitGroup
+		errMu    sync.Mutex
+		radioErr error
+	)
 
 	for i, a := range artists {
 		seed, err := g.seedTrackFor(ctx, userID, a)
@@ -257,11 +290,17 @@ func (g *Generator) expand(
 			select {
 			case g.radio <- struct{}{}:
 			case <-ctx.Done():
+				errMu.Lock()
+				radioErr = errors.Join(radioErr, ctx.Err())
+				errMu.Unlock()
 				return
 			}
 			defer func() { <-g.radio }()
 			tracks, err := g.catalog.Radio(ctx, seedID)
 			if err != nil {
+				errMu.Lock()
+				radioErr = errors.Join(radioErr, err)
+				errMu.Unlock()
 				return
 			}
 			results[index] = result{artist: artist, tracks: tracks}
@@ -301,7 +340,7 @@ func (g *Generator) expand(
 			break
 		}
 	}
-	return out, seeds
+	return out, seeds, radioErr
 }
 
 // seedTrackFor picks a track by this artist that the listener actually played,

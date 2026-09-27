@@ -35,6 +35,24 @@ type Entry struct {
 	// Expired marks an answer a local change made out of date: it is still
 	// shown, but the next read refreshes it whatever its age.
 	Expired bool
+	// FreshUntil, when set, overrides the Policy's freshness for this one
+	// answer: shorter for a result that is likely to change soon (a list read
+	// just after an edit, an empty result that more history will fill).
+	FreshUntil time.Time
+	// NoStore returns the answer to everyone waiting for it without keeping
+	// it, for answers that must never be served again (a signed-out state).
+	NoStore bool
+}
+
+// fresh reports whether e is still fresh under p at now.
+func (e Entry) fresh(p Policy, now time.Time) bool {
+	if e.Expired {
+		return false
+	}
+	if !e.FreshUntil.IsZero() {
+		return now.Before(e.FreshUntil)
+	}
+	return now.Sub(e.StoredAt) < p.Fresh
 }
 
 // Policy says how long an answer is good for.
@@ -90,6 +108,9 @@ type Persist interface {
 	SaveResponse(ctx context.Context, key string, e Entry, keepUntil time.Time) error
 	DeleteResponses(ctx context.Context, prefix string) error
 	ExpireResponses(ctx context.Context, prefix string) error
+	// PruneResponses drops what is past its keep date and the oldest beyond
+	// the store's caps. Called now and then, not on every write.
+	PruneResponses(ctx context.Context) error
 }
 
 // Fetch asks upstream. The status is what the route writes with the body; an
@@ -116,7 +137,23 @@ type Options struct {
 	// RetryAfterFailure is how long a failed background refresh of one key
 	// waits before it is tried again. Default 1 minute.
 	RetryAfterFailure time.Duration
+	// EditLag is how long after a local edit a re-read is kept only briefly,
+	// since YouTube can still answer with the list as it was. Default 1 min.
+	EditLag time.Duration
+	// PruneEvery is how often the persisted answers are pruned. Default 1h.
+	PruneEvery time.Duration
 }
+
+// edit is one Invalidate or Expire: which keys, and when.
+type edit struct {
+	prefix string
+	gen    uint64
+	at     time.Time
+}
+
+// maxEdits bounds the remembered edits; older ones only matter to a fetch
+// that has been running longer than its timeout.
+const maxEdits = 256
 
 // Cache is safe for concurrent use.
 type Cache struct {
@@ -128,6 +165,11 @@ type Cache struct {
 	bytes    int
 	flights  map[string]*flight
 	failedAt map[string]time.Time
+	// gen counts edits. A fetch notes it when it starts; an edit to its key
+	// after that means the answer may be from before the edit.
+	gen       uint64
+	edits     []edit
+	lastPrune time.Time
 
 	bg chan struct{}
 	wg sync.WaitGroup
@@ -142,6 +184,7 @@ type flight struct {
 	done  chan struct{}
 	entry Entry
 	err   error
+	gen   uint64 // the edit count when the fetch started
 }
 
 // New builds a Cache.
@@ -164,13 +207,20 @@ func New(o Options) *Cache {
 	if o.RetryAfterFailure <= 0 {
 		o.RetryAfterFailure = time.Minute
 	}
+	if o.EditLag <= 0 {
+		o.EditLag = time.Minute
+	}
+	if o.PruneEvery <= 0 {
+		o.PruneEvery = time.Hour
+	}
 	return &Cache{
-		opt:      o,
-		lru:      list.New(),
-		items:    map[string]*list.Element{},
-		flights:  map[string]*flight{},
-		failedAt: map[string]time.Time{},
-		bg:       make(chan struct{}, o.Background),
+		opt:       o,
+		lru:       list.New(),
+		items:     map[string]*list.Element{},
+		flights:   map[string]*flight{},
+		failedAt:  map[string]time.Time{},
+		bg:        make(chan struct{}, o.Background),
+		lastPrune: o.Clock.Now(),
 	}
 }
 
@@ -179,10 +229,10 @@ func (c *Cache) Get(ctx context.Context, key string, p Policy, fetch Fetch) (Ent
 	now := c.opt.Clock.Now()
 	cached, have := c.lookup(ctx, key, p)
 	if have && !cached.Expired {
-		age := now.Sub(cached.StoredAt)
-		if age < p.Fresh {
+		if cached.fresh(p, now) {
 			return cached, Hit, nil
 		}
+		age := now.Sub(cached.StoredAt)
 		if age < p.Fresh+p.revalidate() && age < p.keep() {
 			c.refreshLater(key, p, fetch)
 			return cached, Stale, nil
@@ -219,6 +269,7 @@ func (c *Cache) Put(ctx context.Context, key string, p Policy, e Entry) {
 // read refreshes them while still showing the old copy.
 func (c *Cache) Expire(ctx context.Context, prefix string) {
 	c.mu.Lock()
+	c.noteEdit(prefix)
 	for k, el := range c.items {
 		if strings.HasPrefix(k, prefix) {
 			el.Value.(*item).entry.Expired = true
@@ -235,6 +286,7 @@ func (c *Cache) Expire(ctx context.Context, prefix string) {
 // Invalidate drops every answer whose key starts with prefix.
 func (c *Cache) Invalidate(ctx context.Context, prefix string) {
 	c.mu.Lock()
+	c.noteEdit(prefix)
 	for k, el := range c.items {
 		if strings.HasPrefix(k, prefix) {
 			c.bytes -= len(el.Value.(*item).entry.Body)
@@ -248,6 +300,39 @@ func (c *Cache) Invalidate(ctx context.Context, prefix string) {
 			c.opt.Log.Warn("response cache: delete", "prefix", prefix, "err", err)
 		}
 	}
+}
+
+// noteEdit records an edit to the keys under prefix. Fetches already running
+// for them are detached, so a read after the edit starts its own rather than
+// joining one that may return the list as it was. c.mu is held.
+func (c *Cache) noteEdit(prefix string) {
+	c.gen++
+	c.edits = append(c.edits, edit{prefix: prefix, gen: c.gen, at: c.opt.Clock.Now()})
+	if len(c.edits) > maxEdits {
+		c.edits = c.edits[len(c.edits)-maxEdits:]
+	}
+	for k := range c.flights {
+		if strings.HasPrefix(k, prefix) {
+			delete(c.flights, k)
+		}
+	}
+}
+
+// editedSince reports whether key was edited after gen, and whether it was
+// edited within the lag window before now. c.mu is held.
+func (c *Cache) editedSince(key string, gen uint64, now time.Time) (after, recent bool) {
+	for _, e := range c.edits {
+		if !strings.HasPrefix(key, e.prefix) {
+			continue
+		}
+		if e.gen > gen {
+			after = true
+		}
+		if now.Sub(e.at) < c.opt.EditLag {
+			recent = true
+		}
+	}
+	return after, recent
 }
 
 // Now is the cache's clock, for callers timing things against kept answers.
@@ -301,12 +386,26 @@ func (c *Cache) remember(key string, e Entry) {
 }
 
 func (c *Cache) store(ctx context.Context, key string, p Policy, e Entry) {
+	if e.NoStore {
+		return
+	}
 	c.remember(key, e)
 	if p.Memory || c.opt.Persist == nil {
 		return
 	}
 	if err := c.opt.Persist.SaveResponse(ctx, key, e, e.StoredAt.Add(p.keep())); err != nil {
 		c.opt.Log.Warn("response cache: save", "key", key, "err", err)
+	}
+	c.mu.Lock()
+	due := c.opt.Clock.Now().Sub(c.lastPrune) >= c.opt.PruneEvery
+	if due {
+		c.lastPrune = c.opt.Clock.Now()
+	}
+	c.mu.Unlock()
+	if due {
+		if err := c.opt.Persist.PruneResponses(ctx); err != nil {
+			c.opt.Log.Warn("response cache: prune", "err", err)
+		}
 	}
 }
 
@@ -317,7 +416,7 @@ func (c *Cache) shared(ctx context.Context, key string, p Policy, fetch Fetch) (
 	c.mu.Lock()
 	f, running := c.flights[key]
 	if !running {
-		f = &flight{done: make(chan struct{})}
+		f = &flight{done: make(chan struct{}), gen: c.gen}
 		c.flights[key] = f
 	}
 	c.mu.Unlock()
@@ -328,12 +427,28 @@ func (c *Cache) shared(ctx context.Context, key string, p Policy, fetch Fetch) (
 			defer cancel()
 			e, err := fetch(fctx)
 			if err == nil {
-				e.StoredAt = c.opt.Clock.Now()
+				now := c.opt.Clock.Now()
+				e.StoredAt = now
+				c.mu.Lock()
+				after, recent := c.editedSince(key, f.gen, now)
+				c.mu.Unlock()
+				switch {
+				case after:
+					// Edited while this ran: it may be the list from before
+					// the edit. Show it, but read again next time.
+					e.Expired = true
+				case recent && (e.FreshUntil.IsZero() || e.FreshUntil.After(now.Add(c.opt.EditLag))):
+					// Read just after an edit, when YouTube can still answer
+					// with the old list: kept only briefly.
+					e.FreshUntil = now.Add(c.opt.EditLag)
+				}
 				c.store(fctx, key, p, e)
 			}
 			f.entry, f.err = e, err
 			c.mu.Lock()
-			delete(c.flights, key)
+			if c.flights[key] == f {
+				delete(c.flights, key)
+			}
 			c.mu.Unlock()
 			close(f.done)
 		}()

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"spotifier/internal/clock"
 	"spotifier/internal/domain"
 	"spotifier/internal/identity"
+	"spotifier/internal/innertube"
 	"spotifier/internal/library"
 	"spotifier/internal/respcache"
 )
@@ -115,6 +117,9 @@ type likedIdentity struct {
 	since     int
 	playlists int
 	rated     []string
+	// window makes the incremental read behave like the real one, which
+	// returns known songs that moved up and stops at a run of known songs.
+	window bool
 }
 
 func (f *likedIdentity) LikedSongs(context.Context) (domain.Playlist, error) {
@@ -129,9 +134,19 @@ func (f *likedIdentity) LikedSongsSince(_ context.Context, known func(string) bo
 	defer f.mu.Unlock()
 	f.since++
 	pl := domain.Playlist{ID: "LM", Title: "Liked Music", TrackCount: len(f.liked)}
+	run := 0
 	for _, t := range f.liked {
 		if known(t.ID) {
-			return pl, true, nil
+			if !f.window {
+				return pl, true, nil
+			}
+			run++
+			if run >= 2 {
+				pl.Tracks = pl.Tracks[:len(pl.Tracks)-(run-1)]
+				return pl, true, nil
+			}
+		} else {
+			run = 0
 		}
 		pl.Tracks = append(pl.Tracks, t)
 	}
@@ -290,5 +305,64 @@ func TestEditingAPlaylistDropsItsKeptCopy(t *testing.T) {
 	do(t, s, http.MethodGet, "/v1/playlists/PL1")
 	if _, n := cat.count(); n != 2 {
 		t.Fatalf("after adding a track the playlist was read %d times, want 2", n)
+	}
+}
+
+func TestASignedOutSessionIsNeverKept(t *testing.T) {
+	st := account.State{Client: innertube.New()}
+	s := serverWith(api.Deps{Account: account.Static(st), Responses: kept(clock.NewManual())})
+	for i := 0; i < 2; i++ {
+		rec := do(t, s, http.MethodGet, "/v1/me")
+		if !strings.Contains(rec.Body.String(), "logged_out") {
+			t.Fatalf("read %d: %s", i, rec.Body)
+		}
+		if got := rec.Header().Get("X-Cache"); got == "hit" || got == "stale" {
+			t.Fatalf("read %d: a signed-out answer was served from the cache (%s)", i, got)
+		}
+	}
+}
+
+// Liked, then unliked straight away: the like still has to be read.
+func TestAnUnlikeKeepsAPendingLikesMark(t *testing.T) {
+	f := &likedIdentity{liked: []domain.Track{{ID: "c"}, {ID: "b"}, {ID: "a"}}}
+	s := signedIn(f, &countingCatalog{})
+	do(t, s, http.MethodGet, "/v1/me/liked")
+	post(t, s, "/v1/me/tracks/d/rating", `{"rating":"like"}`)
+	post(t, s, "/v1/me/tracks/b/rating", `{"rating":"none"}`)
+	ids := likedIDs(t, do(t, s, http.MethodGet, "/v1/me/liked"))
+	if len(ids) != 3 || ids[0] != "d" {
+		t.Fatalf("got %v, want the new like on top and b gone", ids)
+	}
+}
+
+// A song liked again moves to the top of Liked Music; the kept list follows.
+func TestAReLikedSongMovesToTheTop(t *testing.T) {
+	f := &likedIdentity{liked: []domain.Track{{ID: "c"}, {ID: "b"}, {ID: "a"}}}
+	s := signedIn(f, &countingCatalog{})
+	do(t, s, http.MethodGet, "/v1/me/liked")
+	f.mu.Lock()
+	f.liked = []domain.Track{{ID: "e"}, {ID: "a"}, {ID: "d"}, {ID: "c"}, {ID: "b"}}
+	f.window = true
+	f.mu.Unlock()
+	post(t, s, "/v1/me/tracks/e/rating", `{"rating":"like"}`)
+	f.mu.Lock()
+	f.liked = f.liked[1:]
+	f.mu.Unlock()
+	ids := likedIDs(t, do(t, s, http.MethodGet, "/v1/me/liked"))
+	want := []string{"e", "a", "d", "c", "b"}
+	if strings.Join(ids, ",") != strings.Join(want, ",") {
+		t.Fatalf("got %v, want %v", ids, want)
+	}
+}
+
+func TestAPlaylistEditDropsItsBrowseIDToo(t *testing.T) {
+	f := &likedIdentity{}
+	cat := &countingCatalog{}
+	s := signedIn(f, cat)
+	do(t, s, http.MethodGet, "/v1/playlists/VLPL1")
+	post(t, s, "/v1/me/playlists/PL1/tracks", `{"trackIds":["x"]}`)
+	do(t, s, http.MethodGet, "/v1/playlists/VLPL1")
+	if _, n := cat.count(); n != 2 {
+		t.Fatalf("VLPL1 read %d times, want it dropped by an edit to PL1", n)
 	}
 }

@@ -2,6 +2,7 @@ package mixes_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -283,5 +284,49 @@ func TestMixesAskForRadioAFewAtATime(t *testing.T) {
 		if len(m.Seeds) > 3 {
 			t.Errorf("%s seeded from %d artists", m.Title, len(m.Seeds))
 		}
+	}
+}
+
+// failingCatalog fails every radio call after the first n.
+type failingCatalog struct {
+	busyCatalog
+	ok int
+}
+
+func (f *failingCatalog) Radio(ctx context.Context, seed string) ([]domain.Track, error) {
+	f.mu.Lock()
+	allowed := f.ok > 0
+	f.ok--
+	f.mu.Unlock()
+	if !allowed {
+		return nil, errors.New("HTTP 429")
+	}
+	return f.busyCatalog.Radio(ctx, seed)
+}
+
+// A set built while some radio calls fail is not handed out as the mixes:
+// Seeded reports the failure so a kept set can stand instead.
+func TestSeededIsAllOrNothing(t *testing.T) {
+	store := openStore(t)
+	var artists []string
+	for i := 0; i < 9; i++ {
+		artists = append(artists, "Artist "+string(rune('A'+i)))
+	}
+	seedHistory(t, store, artists)
+
+	g := mixes.New(store, &failingCatalog{ok: 4})
+	if out, err := g.Seeded(context.Background(), control.DefaultUserID); err == nil {
+		t.Fatalf("got %d mixes and no error while radio failed", len(out))
+	}
+	// Without a cache, All still shows what it could.
+	if out, err := g.All(context.Background(), control.DefaultUserID); err != nil {
+		t.Fatal(err)
+	} else {
+		_ = out
+	}
+	thin := openStore(t)
+	seedHistory(t, thin, []string{"One", "Two"})
+	if _, err := mixes.New(thin, &busyCatalog{}).Seeded(context.Background(), control.DefaultUserID); !errors.Is(err, mixes.ErrThinHistory) {
+		t.Fatalf("thin history: %v", err)
 	}
 }

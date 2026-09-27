@@ -14,8 +14,9 @@ import (
 
 // memPersist stands in for the database.
 type memPersist struct {
-	mu   sync.Mutex
-	rows map[string]Entry
+	mu     sync.Mutex
+	rows   map[string]Entry
+	prunes int
 }
 
 func newMemPersist() *memPersist { return &memPersist{rows: map[string]Entry{}} }
@@ -54,6 +55,13 @@ func (m *memPersist) ExpireResponses(_ context.Context, prefix string) error {
 			m.rows[k] = e
 		}
 	}
+	return nil
+}
+
+func (m *memPersist) PruneResponses(context.Context) error {
+	m.mu.Lock()
+	m.prunes++
+	m.mu.Unlock()
 	return nil
 }
 
@@ -318,5 +326,136 @@ func TestMemoryIsBounded(t *testing.T) {
 	defer c.mu.Unlock()
 	if c.bytes > 100 || len(c.items) > 4 {
 		t.Fatalf("holding %d bytes in %d answers", c.bytes, len(c.items))
+	}
+}
+
+// A read already on its way when an edit lands may return the list from
+// before the edit. It is shown, but not kept as fresh.
+func TestAReadThatRacesAnEditIsNotKeptAsFresh(t *testing.T) {
+	clk := clock.NewManual()
+	c := newCache(clk, nil)
+	up := &upstream{body: "before the edit", gate: make(chan struct{})}
+	done := make(chan Entry, 1)
+	go func() {
+		e, _, _ := c.Get(context.Background(), "lib|playlists", hour, up.fetch)
+		done <- e
+	}()
+	time.Sleep(20 * time.Millisecond)
+	c.Invalidate(context.Background(), "lib|")
+	close(up.gate)
+	if e := <-done; string(e.Body) != "before the edit" {
+		t.Fatalf("the waiting read got %q", e.Body)
+	}
+	up.set("after the edit", nil)
+	up.gate = nil
+	e, res, _ := c.Get(context.Background(), "lib|playlists", hour, up.fetch)
+	if res != Miss || string(e.Body) != "after the edit" {
+		t.Fatalf("got %s %q: a read that raced an edit was kept as fresh", res, e.Body)
+	}
+}
+
+// A read after an edit does not join one that started before it.
+func TestAReadAfterAnEditStartsItsOwnFetch(t *testing.T) {
+	c := newCache(clock.NewManual(), nil)
+	gate := make(chan struct{})
+	old := &upstream{body: "old", gate: gate}
+	go c.Get(context.Background(), "lib|playlists", hour, old.fetch)
+	time.Sleep(20 * time.Millisecond)
+	c.Invalidate(context.Background(), "lib|")
+	fresh := &upstream{body: "new"}
+	e, _, err := c.Get(context.Background(), "lib|playlists", hour, fresh.fetch)
+	close(gate)
+	if err != nil || string(e.Body) != "new" {
+		t.Fatalf("got %q %v, want a fetch of its own", e.Body, err)
+	}
+}
+
+// Just after an edit YouTube can still answer with the old list, so a re-read
+// then is kept only briefly.
+func TestAReadJustAfterAnEditIsKeptBriefly(t *testing.T) {
+	clk := clock.NewManual()
+	c := New(Options{Clock: clk, EditLag: time.Minute})
+	up := &upstream{body: "lagging"}
+	c.Expire(context.Background(), "lib|")
+	c.Get(context.Background(), "lib|playlists", hour, up.fetch)
+	clk.Advance(30 * time.Second)
+	if _, res, _ := c.Get(context.Background(), "lib|playlists", hour, up.fetch); res != Hit {
+		t.Fatalf("within the lag window: %s", res)
+	}
+	clk.Advance(45 * time.Second)
+	up.set("caught up", nil)
+	if _, res, _ := c.Get(context.Background(), "lib|playlists", hour, up.fetch); res != Stale {
+		t.Fatalf("after the lag window: %s, want a refresh", res)
+	}
+	c.Wait()
+	if e, _, _ := c.Get(context.Background(), "lib|playlists", hour, up.fetch); string(e.Body) != "caught up" {
+		t.Fatalf("got %q", e.Body)
+	}
+	// Unrelated keys are not affected.
+	other := &upstream{body: "x"}
+	c.Get(context.Background(), "cat|album|a", hour, other.fetch)
+	clk.Advance(10 * time.Minute)
+	if _, res, _ := c.Get(context.Background(), "cat|album|a", hour, other.fetch); res != Hit {
+		t.Fatalf("an unrelated answer was shortened: %s", res)
+	}
+}
+
+func TestAnAnswerCanSetItsOwnFreshness(t *testing.T) {
+	clk := clock.NewManual()
+	c := newCache(clk, nil)
+	calls := 0
+	fetch := func(context.Context) (Entry, error) {
+		calls++
+		return Entry{Status: 200, Body: []byte("[]"), FreshUntil: clk.Now().Add(10 * time.Minute)}, nil
+	}
+	c.Get(context.Background(), "me|mixes", Policy{Fresh: 24 * time.Hour}, fetch)
+	clk.Advance(5 * time.Minute)
+	c.Get(context.Background(), "me|mixes", Policy{Fresh: 24 * time.Hour}, fetch)
+	if calls != 1 {
+		t.Fatalf("fetched %d times within its own freshness", calls)
+	}
+	clk.Advance(6 * time.Minute)
+	c.Get(context.Background(), "me|mixes", Policy{Fresh: 24 * time.Hour}, fetch)
+	c.Wait()
+	if calls != 2 {
+		t.Fatalf("fetched %d times, want a refresh after 10 minutes", calls)
+	}
+}
+
+func TestANoStoreAnswerIsNeverServedAgain(t *testing.T) {
+	db := newMemPersist()
+	c := newCache(clock.NewManual(), db)
+	calls := 0
+	fetch := func(context.Context) (Entry, error) {
+		calls++
+		return Entry{Status: 200, Body: []byte(`{"state":"logged_out"}`), NoStore: true}, nil
+	}
+	for i := 0; i < 3; i++ {
+		if e, _, err := c.Get(context.Background(), "me|state", hour, fetch); err != nil || string(e.Body) == "" {
+			t.Fatalf("read %d: %q %v", i, e.Body, err)
+		}
+	}
+	if calls != 3 {
+		t.Fatalf("a no-store answer was served from the cache (%d fetches)", calls)
+	}
+	if _, ok := db.LoadResponse(context.Background(), "me|state"); ok {
+		t.Fatal("a no-store answer was persisted")
+	}
+}
+
+func TestPersistedAnswersArePrunedNowAndThen(t *testing.T) {
+	clk := clock.NewManual()
+	db := newMemPersist()
+	c := New(Options{Clock: clk, Persist: db, PruneEvery: time.Hour})
+	up := &upstream{body: "x"}
+	c.Get(context.Background(), "a", hour, up.fetch)
+	if db.prunes != 0 {
+		t.Fatal("pruned on the first write")
+	}
+	clk.Advance(2 * time.Hour)
+	c.Get(context.Background(), "b", hour, up.fetch)
+	c.Get(context.Background(), "c", hour, up.fetch)
+	if db.prunes != 1 {
+		t.Fatalf("pruned %d times, want once an hour", db.prunes)
 	}
 }

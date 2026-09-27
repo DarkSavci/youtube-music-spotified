@@ -121,18 +121,6 @@ func (s *Store) migrate(ctx context.Context) error {
 		// history. The blob is the session's own snapshot format, which keeps
 		// the playback shape out of the schema — it has changed before and
 		// will again, and a migration per field is not worth it.
-		// Answers read from YouTube, kept so a restart does not ask for them
-		// all again. The blob is the API route's own response body.
-		`CREATE TABLE IF NOT EXISTS response_cache (
-			key        TEXT PRIMARY KEY,
-			status     INTEGER NOT NULL,
-			body       BLOB NOT NULL,
-			stored_at  TIMESTAMP NOT NULL,
-			keep_until TIMESTAMP NOT NULL,
-			expired    INTEGER NOT NULL DEFAULT 0
-		)`,
-		`CREATE INDEX IF NOT EXISTS response_cache_keep ON response_cache(keep_until)`,
-
 		`CREATE TABLE IF NOT EXISTS resume_state (
 			user_id  INTEGER PRIMARY KEY,
 			snapshot BLOB NOT NULL,
@@ -156,8 +144,11 @@ func (s *Store) migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM stream_urls WHERE expires_at <= ?`, time.Now().UTC()); err != nil {
 		return fmt.Errorf("control: prune stream urls: %w", err)
 	}
-	if err := s.pruneResponses(ctx); err != nil {
-		return err
+	// An earlier build kept YouTube's answers in this database. They live in
+	// their own file now (see OpenResponses), so an account's cached
+	// personal data can be deleted without its listening history.
+	if _, err := s.db.ExecContext(ctx, `DROP TABLE IF EXISTS response_cache`); err != nil {
+		return fmt.Errorf("control: drop old response cache: %w", err)
 	}
 	if err := s.repairLibraryArtistIDs(ctx); err != nil {
 		return err

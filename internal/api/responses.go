@@ -34,16 +34,20 @@ edit can drop exactly the right ones:
 // How long each kind of answer stays fresh. Past that it is still served
 // while a background refresh replaces it.
 var (
-	policyAlbum     = respcache.Policy{Fresh: 7 * 24 * time.Hour}
-	policyArtist    = respcache.Policy{Fresh: 12 * time.Hour}
-	policyPlaylist  = respcache.Policy{Fresh: time.Hour}
-	policyPodcast   = respcache.Policy{Fresh: time.Hour}
-	policyHome      = respcache.Policy{Fresh: 30 * time.Minute}
-	policyBrowse    = respcache.Policy{Fresh: 24 * time.Hour}
-	policySearch    = respcache.Policy{Fresh: 30 * time.Minute, Keep: 7 * 24 * time.Hour}
-	policyRadio     = respcache.Policy{Fresh: time.Hour, Keep: 7 * 24 * time.Hour}
-	policyMe        = respcache.Policy{Fresh: time.Hour}
-	policyChannels  = respcache.Policy{Fresh: 6 * time.Hour}
+	policyAlbum    = respcache.Policy{Fresh: 7 * 24 * time.Hour}
+	policyArtist   = respcache.Policy{Fresh: 12 * time.Hour}
+	policyPlaylist = respcache.Policy{Fresh: time.Hour}
+	policyPodcast  = respcache.Policy{Fresh: time.Hour}
+	policyHome     = respcache.Policy{Fresh: 30 * time.Minute}
+	policyBrowse   = respcache.Policy{Fresh: 24 * time.Hour}
+	policySearch   = respcache.Policy{Fresh: 30 * time.Minute, Keep: 7 * 24 * time.Hour}
+	// A radio queue is only reused within the hour: past that, the same
+	// song starts a new one, as it does on YouTube.
+	policyRadio = respcache.Policy{Fresh: time.Hour, Keep: time.Hour}
+	// The account's state is checked again every few minutes, and a
+	// signed-out answer is never kept at all (see handleMe).
+	policyMe        = respcache.Policy{Fresh: 5 * time.Minute, Keep: 24 * time.Hour}
+	policyChannels  = respcache.Policy{Fresh: 10 * time.Minute}
 	policyLibrary   = respcache.Policy{Fresh: 30 * time.Minute}
 	policyLiked     = respcache.Policy{Fresh: 10 * time.Minute}
 	policyMixes     = respcache.Policy{Fresh: 24 * time.Hour, Keep: 7 * 24 * time.Hour}
@@ -155,7 +159,16 @@ func (s *Server) expire(ctx context.Context, prefixes ...string) {
 }
 
 // playlistKeys are every kept form of one playlist: whole, or page by page.
-func playlistKeys(id string) string { return cacheKey("cat", "playlist", id) + "|" }
+// A browse id ("VL" + the playlist id) and the bare playlist id name the same
+// list, so both share one key and one edit drops both.
+func playlistKeys(id string) string { return cacheKey("cat", "playlist", playlistID(id)) + "|" }
+
+func playlistID(id string) string {
+	if strings.HasPrefix(id, "VL") && len(id) > 2 {
+		return id[2:]
+	}
+	return id
+}
 
 // ---------- the saved library ----------
 
@@ -342,5 +355,10 @@ func (s *Server) unlikeKept(ctx context.Context, trackID string) {
 	if err != nil {
 		return
 	}
-	s.deps.Responses.Put(ctx, likedKey, policyLiked, respcache.Entry{Status: http.StatusOK, Body: body, StoredAt: e.StoredAt})
+	// Keep whatever marks the kept list had: after a like it is out of date,
+	// and the next read must still fetch the new song at the top.
+	s.deps.Responses.Put(ctx, likedKey, policyLiked, respcache.Entry{
+		Status: http.StatusOK, Body: body, StoredAt: e.StoredAt,
+		Expired: e.Expired, FreshUntil: e.FreshUntil,
+	})
 }

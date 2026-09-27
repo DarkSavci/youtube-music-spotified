@@ -141,6 +141,10 @@ type Server struct {
 	// rather than each starting their own. See resolveCached.
 	pendingMu sync.Mutex
 	pending   map[string]*pendingResolve
+	// mixesFailedAt is when building the mixes last failed with nothing
+	// kept to show instead; see handleMixes.
+	mixesMu       sync.Mutex
+	mixesFailedAt time.Time
 	// Separate client from the API one: audio transfers are long-lived and
 	// must not be cut short by a timeout sized for JSON requests.
 	streamClient *http.Client
@@ -527,7 +531,10 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 				return respcache.Entry{}, err
 			}
 			body, err := json.Marshal(meResponse{State: string(state), Account: acct})
-			return respcache.Entry{Status: http.StatusOK, Body: body}, err
+			// Only a verified sign-in is kept. A signed-out answer is passed
+			// on once and never served again: signing back in must show at
+			// once, not an hour later.
+			return respcache.Entry{Status: http.StatusOK, Body: body, NoStore: state != innertube.SignedIn}, err
 		})
 	if err != nil {
 		s.write(w, http.StatusOK, meResponse{State: string(innertube.Unknown)})
@@ -581,7 +588,8 @@ func (s *Server) handleAuthSignOut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Account != nil {
 		s.deps.Account.Clear()
 	}
-	s.forget(r.Context(), "me|", "lib|", cacheKey("cat", "home"))
+	// Everything kept was read as that account, browsing included.
+	s.forget(r.Context(), "")
 	s.write(w, http.StatusOK, map[string]any{"signedIn": false})
 }
 
