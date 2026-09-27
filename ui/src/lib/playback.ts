@@ -87,6 +87,19 @@ const OFFLINE_NOTICE =
 const OFFLINE_PAUSED_NOTICE =
   "You’re offline. Press Play once the connection is back to carry on from where it stopped.";
 const offlineNotices = new Set([OFFLINE_NOTICE, OFFLINE_PAUSED_NOTICE]);
+/*
+ * Whether the listener dismissed the offline notice during this outage. Kept
+ * as its own flag: other code clears the notice too (a room changing track),
+ * and an empty notice must not read as the listener having dismissed it.
+ */
+let offlineDismissed = false;
+
+/** The notice's Dismiss button. */
+export function dismissNotice() {
+  const { notice } = usePlayer.getState();
+  if (notice !== null && offlineNotices.has(notice)) offlineDismissed = true;
+  usePlayer.setState({ notice: null });
+}
 /** The epoch of the last target, to notice track changes; see retryNativeAtTrackChange(). */
 let targetEpoch: number | null = null;
 
@@ -124,14 +137,17 @@ function noteConnection(offline: boolean, paused: boolean) {
   if (offline) {
     // Paused, nothing resumes by itself: the wording says what will happen.
     const wanted = paused ? OFFLINE_PAUSED_NOTICE : OFFLINE_NOTICE;
-    if (!was) ladder.loaded();
-    // Only the offline notice itself is reworded: a dismissed one stays gone.
-    if (!was || (notice !== null && notice !== wanted && offlineNotices.has(notice))) {
-      usePlayer.setState({ offline, notice: wanted });
+    if (!was) {
+      ladder.loaded();
+      offlineDismissed = false;
     }
+    if (!was) usePlayer.setState({ offline });
+    // Shown for as long as the outage lasts, unless the listener dismissed it.
+    if (!offlineDismissed && notice !== wanted) usePlayer.setState({ notice: wanted });
     return;
   }
   if (!was) return;
+  offlineDismissed = false;
   usePlayer.setState({ offline });
   if (notice !== null && offlineNotices.has(notice)) usePlayer.setState({ notice: null });
   if (ladder.fellBack && useSettings.getState().enginePreference !== "embedded") {

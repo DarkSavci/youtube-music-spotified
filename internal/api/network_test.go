@@ -2,16 +2,20 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"spotifier/internal/ratelimit"
 	"spotifier/internal/resolver"
 )
 
@@ -138,5 +142,116 @@ func TestOnlyNetworkShapedEngineFailuresAreProbed(t *testing.T) {
 		if got := mayBeNetwork(reason); got != want {
 			t.Errorf("mayBeNetwork(%q) = %v, want %v", reason, got, want)
 		}
+	}
+}
+
+// Any answer from upstream ends an outage, not only the probe.
+func TestAnyAnswerFromUpstreamEndsAnOutage(t *testing.T) {
+	p := &probeStub{}
+	var ch changes
+	n := newNetwork(p.probe, ch.record)
+	n.every = time.Hour // the poll must not be what notices
+	n.Failed(lostConnection)
+	if !n.Offline() {
+		t.Fatal("setup: not offline")
+	}
+	n.Succeeded()
+	if n.Offline() {
+		t.Fatal("an answer from upstream did not end the outage")
+	}
+	if got := ch.list(); len(got) != 2 || !got[1] {
+		t.Fatalf("changes %v, want [false true]", got)
+	}
+}
+
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+// A probe that only times out while other traffic got answers moments ago is
+// a slow probe, not an outage; long after the last answer it counts.
+func TestAProbeTimeoutIsInconclusiveRightAfterAnAnswer(t *testing.T) {
+	n := newNetwork(func(context.Context) error { return timeoutErr{} }, nil)
+	n.every = time.Hour
+	n.Succeeded()
+	if n.Failed(lostConnection) || n.Offline() {
+		t.Fatal("a probe timeout right after an answer marked the connection lost")
+	}
+	n.mu.Lock()
+	n.lastAnswer = time.Now().Add(-time.Minute)
+	n.checkedAt = time.Time{}
+	n.mu.Unlock()
+	if !n.Failed(lostConnection) {
+		t.Fatal("a probe timeout long after the last answer was not believed")
+	}
+}
+
+// Renewing the stream transport replaces it, so no connection from before an
+// outage — idle or frozen mid-transfer — is used again.
+func TestRenewingTheStreamTransportReplacesIt(t *testing.T) {
+	st := newSwappableTransport(newStreamTransport)
+	before := st.cur.Load()
+	st.renew()
+	if st.cur.Load() == before {
+		t.Fatal("renew kept the same transport")
+	}
+	if h2 := st.cur.Load().HTTP2; h2 == nil || h2.SendPingTimeout <= 0 || h2.PingTimeout <= 0 {
+		t.Fatal("the stream transport does not health-check quiet HTTP/2 connections")
+	}
+}
+
+// An outage is not a rate limit: it answers before the cooldown check and
+// starts no cooldown; and a cooldown is not an outage.
+func TestOfflineAndRateLimitsStayApart(t *testing.T) {
+	g := ratelimit.New("streams", ratelimit.Settings{})
+	r := &failingResolver{err: errors.New("never called")}
+	s := New(Deps{Resolver: r, StreamGovernor: g, NetworkProbe: func(context.Context) error { return errors.New("unreachable") }})
+	s.net.every = time.Hour
+	s.net.setOffline(true)
+	if _, err := s.resolveCached(context.Background(), "vid00000009"); !errors.Is(err, errOffline) {
+		t.Fatalf("offline lookup: %v", err)
+	}
+	if cooling, _ := g.Cooling(); cooling || r.calls.Load() != 0 {
+		t.Fatal("an outage started a cooldown or ran the resolver")
+	}
+	s.net.Succeeded()
+	g.CoolDown(0)
+	if s.net.Failed(fmt.Errorf("%w: slow down", resolver.ErrRateLimited)) || s.net.Offline() {
+		t.Fatal("a rate limit was taken for a lost connection")
+	}
+}
+
+// A connection that answered until it went silent is not "other traffic
+// getting through": once the answers stop, a timing-out probe is believed.
+func TestASilentDropIsNotExcusedByAnswersFromBeforeIt(t *testing.T) {
+	n := newNetwork(func(context.Context) error { return timeoutErr{} }, nil)
+	n.every = time.Hour
+	n.mu.Lock()
+	n.lastAnswer = time.Now().Add(-20 * time.Second)
+	n.mu.Unlock()
+	if !n.Failed(lostConnection) {
+		t.Fatal("answers from 20 s before a silent drop kept the connection counted as working")
+	}
+}
+
+// Offline, a track's health says so and never "rate limited", even with a
+// rate limit remembered from before: the engine must not report "blocked"
+// and have the session pause instead of wait (#7).
+func TestTrackHealthWhileOfflineIsNotARateLimit(t *testing.T) {
+	s := New(Deps{NetworkProbe: func(context.Context) error { return errors.New("unreachable") }})
+	s.net.every = time.Hour
+	s.lastFailure.Store("vid00000010", fmt.Errorf("%w: earlier", resolver.ErrRateLimited))
+	s.net.setOffline(true)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/tracks/vid00000010/health", nil))
+	var body struct {
+		RateLimited bool `json:"rateLimited"`
+		Offline     bool `json:"offline"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.RateLimited || !body.Offline {
+		t.Fatalf("health offline: %s", rec.Body.String())
 	}
 }

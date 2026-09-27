@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"spotifier/internal/resolver"
@@ -30,12 +31,19 @@ type network struct {
 	onChange func(online bool)
 	every    time.Duration
 
-	mu        sync.Mutex
-	offline   bool
-	polling   bool
-	checkedAt time.Time
-	checkedOK bool
+	mu      sync.Mutex
+	offline bool
+	// lastAnswer is when upstream last answered anything; a probe that only
+	// times out soon after is not taken as the connection being gone.
+	lastAnswer time.Time
+	polling    bool
+	checkedAt  time.Time
+	checkedOK  bool
 }
+
+// errOffline answers any lookup or download asked for while the connection
+// is known to be gone.
+var errOffline = errors.New("offline: YouTube cannot be reached")
 
 // probeTimeout bounds one reachability check; offline, DNS usually fails at
 // once, but a dropped route only times out.
@@ -74,9 +82,20 @@ func (n *network) Failed(err error) bool {
 	return true
 }
 
-// Succeeded records that upstream answered.
+// recentAnswer is how long after any answer from upstream a probe that times
+// out is inconclusive rather than proof of a lost connection. Short: it is
+// for other traffic getting through right now, not for a connection that
+// worked before it went silent — that is exactly the drop to detect.
+const recentAnswer = 5 * time.Second
+
+// Succeeded records that upstream answered: a stream, a lookup, a catalogue
+// call. Any of them ends an outage, not just the probe.
 func (n *network) Succeeded() {
-	if n.Offline() {
+	n.mu.Lock()
+	n.lastAnswer = time.Now()
+	offline := n.offline
+	n.mu.Unlock()
+	if offline {
 		n.setOffline(false)
 	}
 }
@@ -93,11 +112,25 @@ func (n *network) reachable() bool {
 	n.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 	defer cancel()
-	ok := n.probe(ctx) == nil
+	err := n.probe(ctx)
+	ok := err == nil
 	n.mu.Lock()
+	// A probe that only timed out, while other traffic got answers moments
+	// ago, is a slow probe on a working link, not an outage.
+	if !ok && isTimeout(err) && time.Since(n.lastAnswer) < recentAnswer {
+		ok = true
+	}
 	n.checkedAt, n.checkedOK = time.Now(), ok
 	n.mu.Unlock()
 	return ok
+}
+
+func isTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 func (n *network) setOffline(offline bool) {
@@ -166,8 +199,8 @@ func probeYouTube() func(context.Context) error {
 			DisableKeepAlives:     true,
 		},
 	}
-	return func(ctx context.Context) error {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://www.youtube.com/generate_204", nil)
+	ask := func(ctx context.Context, url string) error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
 		if err != nil {
 			return err
 		}
@@ -178,7 +211,77 @@ func probeYouTube() func(context.Context) error {
 		_ = resp.Body.Close()
 		return nil
 	}
+	// Two hosts, so one slow or blocked endpoint does not read as the whole
+	// connection gone: reachable if either answers.
+	return func(ctx context.Context) error {
+		errs := make(chan error, 2)
+		for _, url := range []string{"https://www.youtube.com/generate_204", "https://music.youtube.com/"} {
+			go func() { errs <- ask(ctx, url) }()
+		}
+		first := <-errs
+		if first == nil {
+			return nil
+		}
+		if second := <-errs; second == nil {
+			return nil
+		}
+		return first
+	}
 }
+
+/*
+newStreamTransport builds the transport audio is fetched with. No total
+deadline — a three-hour mix is one transfer — but a connection that never
+answers, or answers and then stops, must not hang playback: dial, handshake
+and headers are bounded, every body is read through a stall guard, and an
+HTTP/2 connection that goes quiet is pinged and dropped if it does not answer.
+*/
+func newStreamTransport() *http.Transport {
+	return &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConnsPerHost:   8,
+		ForceAttemptHTTP2:     true,
+		HTTP2: &http.HTTP2Config{
+			SendPingTimeout: 15 * time.Second,
+			PingTimeout:     5 * time.Second,
+		},
+	}
+}
+
+// swappableTransport lets the stream transport be replaced while requests
+// are in flight: after an outage every connection it holds is suspect.
+type swappableTransport struct {
+	make func() *http.Transport
+	cur  atomic.Pointer[http.Transport]
+}
+
+func newSwappableTransport(make func() *http.Transport) *swappableTransport {
+	t := &swappableTransport{make: make}
+	t.cur.Store(make())
+	return t
+}
+
+func (t *swappableTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return t.cur.Load().RoundTrip(r)
+}
+
+// CloseIdleConnections lets http.Client.CloseIdleConnections reach it.
+func (t *swappableTransport) CloseIdleConnections() { t.cur.Load().CloseIdleConnections() }
+
+// renew starts a fresh transport; the old one's idle connections close now,
+// and those still in use close as their requests finish.
+func (t *swappableTransport) renew() {
+	old := t.cur.Swap(t.make())
+	old.CloseIdleConnections()
+}
+
+// UpstreamAnswered tells the server some other call reached YouTube, which
+// ends an outage as surely as a probe does.
+func (s *Server) UpstreamAnswered() { s.net.Succeeded() }
 
 // isNetworkError reports whether err is a failure to reach upstream at all,
 // as opposed to an answer from it. Failing to reach this machine is not a
@@ -186,6 +289,9 @@ func probeYouTube() func(context.Context) error {
 func isNetworkError(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, resolver.ErrRateLimited) {
 		return false
+	}
+	if errors.Is(err, errOffline) {
+		return true
 	}
 	var ue *url.Error
 	if errors.As(err, &ue) {

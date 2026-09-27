@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net"
 	"math"
 	"net/http"
 	"spotifier/internal/audiocache"
@@ -160,15 +159,7 @@ func New(d Deps) *Server {
 		// connection that never answers, or answers and then stops, must not
 		// hang playback: dial, handshake and headers are bounded here, and
 		// every body is read through a stall guard.
-		streamClient: &http.Client{Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
-			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: 15 * time.Second,
-			IdleConnTimeout:       90 * time.Second,
-			MaxIdleConnsPerHost:   8,
-			ForceAttemptHTTP2:     true,
-		}},
+		streamClient: &http.Client{Transport: newSwappableTransport(newStreamTransport)},
 	}
 	s.streamGov = d.StreamGovernor
 	// Speculative work stops the moment YouTube says to slow down, whichever
@@ -183,12 +174,17 @@ func New(d Deps) *Server {
 		if online {
 			s.deps.Log.Info("connection back")
 			s.prefetch.forget()
-			// Connections from before the outage are dead; reusing one failed
-			// the first request after it.
-			s.streamClient.CloseIdleConnections()
+			// Connections from before the outage are dead, idle or not: one
+			// frozen mid-transfer would otherwise be reused. A new transport
+			// has none of them; the old one's go as their requests end.
+			if t, ok := s.streamClient.Transport.(*swappableTransport); ok {
+				t.renew()
+			}
 			if t, ok := http.DefaultTransport.(*http.Transport); ok {
 				t.CloseIdleConnections()
 			}
+			// What failed during the outage may well work now.
+			s.failures.clear()
 		} else {
 			s.deps.Log.Warn("connection lost; playback waits for it")
 		}

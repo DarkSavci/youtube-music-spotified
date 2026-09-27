@@ -240,6 +240,8 @@ func main() {
 	}
 
 	apiServer := api.New(deps)
+	// Any answer from YouTube ends an outage, not only the server's probe (#7).
+	innertube.OnAnswered(apiServer.UpstreamAnswered)
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           apiServer,

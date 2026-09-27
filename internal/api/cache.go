@@ -460,6 +460,11 @@ func (s *Server) fill(ctx context.Context, videoID string, limit int64, speculat
 	refusals, failures := 0, 0
 	windowed := false
 	for {
+		// A download already under way stops when the connection goes; it
+		// carries on from where it got to once the queue is fetched again.
+		if s.net.Offline() {
+			return errOffline
+		}
 		off, size := w.Offset(), w.Size()
 		if (size > 0 && off >= size) || (limit > 0 && off >= limit) {
 			return nil
@@ -808,6 +813,9 @@ func (s *Server) serveCached(w http.ResponseWriter, r *http.Request, videoID str
 func (s *Server) relayRest(ctx context.Context, w io.Writer, videoID string, pos, end int64) {
 	retried := false
 	for pos <= end {
+		if s.net.Offline() {
+			return
+		}
 		e, err := s.resolveCached(ctx, videoID)
 		if err != nil {
 			return

@@ -148,6 +148,12 @@ func (s *Server) resolve(ctx context.Context, videoID string, speculative bool) 
 	if err := s.failures.recall(videoID, !speculative); err != nil {
 		return resolvedEntry{}, err
 	}
+	// Known offline, yt-dlp cannot reach anything (#7). Answered here, before
+	// the rate-limit check, so an outage never looks like a cooldown and
+	// starts none; the network poll notices the connection coming back.
+	if s.net.Offline() {
+		return resolvedEntry{}, errOffline
+	}
 	// A rate limit holds for everyone — except for one probe per cooldown
 	// for a track someone is waiting for, which may find it already over.
 	cooling, left := s.streamGov.Cooling()
@@ -218,6 +224,7 @@ func (s *Server) resolve(ctx context.Context, videoID string, speculative bool) 
 		// Upstream answered: whatever cooldown was running is over — if this
 		// lookup began after it did, or was its probe.
 		s.streamGov.Succeeded(started, probe)
+		s.net.Succeeded()
 	case errors.Is(err, resolver.ErrRateLimited):
 		d := s.streamGov.CoolDown(0)
 		err = fmt.Errorf("%w: %w", err, &ratelimit.Error{RetryAfter: d})
@@ -387,6 +394,14 @@ answered.
 */
 func (s *Server) handleTrackHealth(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{"rateLimited": false}
+	// Offline, the connection is why it failed, whatever the last lookup
+	// said: a rate limit remembered from before would have the engine report
+	// "blocked", and the session pause rather than wait for the connection.
+	if s.net.Offline() {
+		out["offline"] = true
+		s.write(w, http.StatusOK, out)
+		return
+	}
 	if v, ok := s.lastFailure.Load(r.PathValue("id")); ok {
 		err, _ := v.(error)
 		out["rateLimited"] = errors.Is(err, resolver.ErrRateLimited)
@@ -476,7 +491,12 @@ func (s *Server) fetchUpstream(ctx context.Context, url, rng string) (*http.Resp
 	upstream.Header.Set("User-Agent", browserUserAgent)
 	upstream.Header.Set("Origin", "https://music.youtube.com")
 	upstream.Header.Set("Referer", "https://music.youtube.com/")
-	return s.streamClient.Do(upstream)
+	resp, err := s.streamClient.Do(upstream)
+	if err == nil {
+		// Any answer at all means the connection works.
+		s.net.Succeeded()
+	}
+	return resp, err
 }
 
 // handleStream relays audio bytes to the UI process.
