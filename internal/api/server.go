@@ -31,6 +31,7 @@ import (
 	"spotifier/internal/mixes"
 	"spotifier/internal/obs"
 	"spotifier/internal/ratelimit"
+	"spotifier/internal/renderers"
 	"spotifier/internal/report"
 	"spotifier/internal/resolver"
 	"spotifier/internal/session"
@@ -314,7 +315,7 @@ func retryAfter(err error) time.Duration {
 
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, identity.ErrLoggedOut):
+	case errors.Is(err, identity.ErrLoggedOut), errors.Is(err, renderers.ErrLikedSignedOut):
 		s.write(w, http.StatusUnauthorized, apiError{Error: "signed out", Reauth: true})
 	case errors.Is(err, context.Canceled):
 		// The client went away; nothing to report.
@@ -327,6 +328,27 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
 		s.write(w, http.StatusTooManyRequests,
 			apiError{Error: "rate limited by YouTube; wait a few minutes", RateLimited: true, RetryAfter: int(math.Ceil(wait.Seconds()))})
+	case errors.Is(err, renderers.ErrLikedMessage):
+		// YouTube's generic wording, shown as it is, as an error the UI can
+		// retry: it is not an empty library.
+		s.deps.Log.Warn("liked music message page", "path", r.URL.Path, "err", err)
+		s.write(w, http.StatusBadGateway, apiError{Error: err.Error()})
+	case errors.Is(err, renderers.ErrLikedShape):
+		// Liked Music without its header or tracks only comes back while
+		// YouTube throttles the account. That throttle arrives as a 200 the
+		// governor never sees as one, so the cooldown is started here: every
+		// call waits, not just this one.
+		wait := s.deps.APIGovernor.CoolDown(0)
+		if wait <= 0 {
+			wait = retryAfter(err)
+		}
+		s.deps.Log.Warn("liked music throttled", "path", r.URL.Path, "retryAfter", wait)
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+		s.write(w, http.StatusTooManyRequests, apiError{
+			Error:       "YouTube is throttling this account's Liked Music; wait a few minutes",
+			RateLimited: true,
+			RetryAfter:  int(math.Ceil(wait.Seconds())),
+		})
 	default:
 		s.deps.Log.Warn("request failed", "path", r.URL.Path, "err", err)
 		s.write(w, http.StatusBadGateway, apiError{Error: err.Error()})

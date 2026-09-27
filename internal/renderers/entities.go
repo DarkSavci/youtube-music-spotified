@@ -375,6 +375,14 @@ func PlayCount(s string) int64 {
 
 // ParsePlaylist reads a playlist browse response.
 func ParsePlaylist(doc Node, id string, pc ParseContext) (domain.Playlist, bool) {
+	return ParsePlaylistTitled(doc, id, "", pc)
+}
+
+// ParsePlaylistTitled is ParsePlaylist for a playlist whose name is known
+// without the response, such as Liked Music. A response with no header still
+// parses under that name, but only when it holds the playlist's own track
+// list: tracks from a suggestions or related shelf do not make a playlist.
+func ParsePlaylistTitled(doc Node, id, title string, pc ParseContext) (domain.Playlist, bool) {
 	h := findHeader(doc)
 	pl := domain.Playlist{ID: strings.TrimPrefix(id, "VL")}
 	if h != nil {
@@ -403,13 +411,22 @@ func ParsePlaylist(doc Node, id string, pc ParseContext) (domain.Playlist, bool)
 	if pl.Title == "" {
 		pl.Title = textOf(Find(doc, "musicHeaderRenderer").Child("title"))
 	}
+	for _, n := range playlistShelves(doc) {
+		pl.Tracks = append(pl.Tracks, listTracks(n.Nodes("contents"))...)
+	}
+	if pl.Title == "" && title != "" {
+		// Header-less: take only the playlist shelf's own rows.
+		var own []domain.Track
+		for _, n := range FindAll(doc, "musicPlaylistShelfRenderer") {
+			own = append(own, listTracks(n.Nodes("contents"))...)
+		}
+		if len(own) > 0 {
+			pl.Title, pl.Tracks = title, own
+		}
+	}
 	if pl.Title == "" {
 		pc.unknown("playlist:noTitle")
 		return domain.Playlist{}, false
-	}
-
-	for _, n := range playlistShelves(doc) {
-		pl.Tracks = append(pl.Tracks, listTracks(n.Nodes("contents"))...)
 	}
 	if pl.TrackCount == 0 {
 		pl.TrackCount = len(pl.Tracks)
