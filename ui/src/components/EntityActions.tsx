@@ -6,7 +6,7 @@ import { usePrompt } from "./Prompt";
 import { IconMore } from "./Icon";
 import { transport } from "../lib/playback";
 import { share } from "../lib/share";
-import { useAddToPlaylist, useCreatePlaylist, useDeletePlaylist, useOwnPlaylists } from "../lib/playlists";
+import { useAddToPlaylist, useCreatePlaylist, useDeletePlaylist, useOwnPlaylists, wantOwnPlaylists } from "../lib/playlists";
 import type { Track } from "../lib/types";
 
 /**
@@ -77,7 +77,7 @@ export function EntityActions({
           })();
         },
       });
-      for (const pl of playlists.slice(0, 6)) {
+      for (const pl of (playlists ?? []).slice(0, 6)) {
         if (pl.id === id) continue;
         out.push({
           label: `Add all to ${pl.title}`,
@@ -122,7 +122,10 @@ export function EntityActions({
       // to the page when the menu hands it back while loading.
       aria-disabled={loading}
       aria-busy={loading}
-      onClick={(e) => { if (!loading) menu.open(e, build()); }}
+      // Reaching the button is the cue to fetch the playlists its menu lists.
+      onPointerEnter={wantOwnPlaylists}
+      onFocus={wantOwnPlaylists}
+      onClick={(e) => { wantOwnPlaylists(); if (!loading) menu.open(e, build()); }}
     >
       <IconMore size={22} />
     </button>

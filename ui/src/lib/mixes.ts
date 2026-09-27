@@ -28,6 +28,9 @@ export function useMixes() {
       return (await res.json()) as Mix[];
     },
     retry: false,
-    staleTime: 10 * 60_000,
+    // Building the mixes is dozens of radio requests to YouTube, and they are
+    // meant to change daily, not every visit to Home.
+    staleTime: 6 * 60 * 60_000,
+    gcTime: 24 * 60 * 60_000,
   });
 }

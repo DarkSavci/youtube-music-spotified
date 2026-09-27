@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { signInLabel, useSignIn } from "../lib/signin";
 import { NavLink } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { api, ApiError } from "../lib/api";
+import { api, ApiError, shouldRetry } from "../lib/api";
 import type { LibraryItem } from "../lib/types";
 import { artworkAtLeast } from "../lib/types";
 import { useMenu, type MenuItem } from "./ContextMenu";
@@ -122,7 +122,9 @@ export function LibrarySidebar({ expanded, onExpand, onNavigate }: { expanded: b
   const { data, isPending, error } = useQuery({
     queryKey: ["library", filter, sort],
     queryFn: ({ signal }) => api.library(filter, sort, signal),
-    retry: (count, err) => !(err instanceof ApiError && err.reauth) && count < 2,
+    // Never retried on a 429 or an upstream failure: the library is the page
+    // YouTube rate-limits most, and each retry is three more requests.
+    retry: (count, err) => shouldRetry(count, err),
   });
 
   // Drag to resize. Pointer events are captured on the window so the drag
@@ -344,6 +346,9 @@ function LibraryList({
   }
   if (error instanceof ApiError && error.status === 0) {
     return <EmptyState title="Offline" body="Cannot reach the player core." action="Retry" />;
+  }
+  if (error instanceof ApiError && error.rateLimited) {
+    return <EmptyState title="YouTube is limiting requests" body="Your library will load again shortly." action="Retry" />;
   }
   if (error) {
     return <EmptyState title="Could not load your library" body={String(error)} action="Retry" />;

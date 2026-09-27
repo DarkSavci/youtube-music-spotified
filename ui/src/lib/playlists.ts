@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import { apiUrl } from "./base";
@@ -26,17 +27,40 @@ async function send(path: string, method: string, body?: unknown): Promise<Respo
   return res;
 }
 
-/** The user's own playlists, for an "add to" menu. */
-export function useOwnPlaylists(): LibraryItem[] {
+/*
+ * The "add to playlist" lists are only fetched once one is about to be used.
+ *
+ * Every album, playlist and artist page, and every track list, holds a menu
+ * that can add to a playlist, and each used to fetch the user's playlists on
+ * mount — a library request to YouTube per page visit, for a menu most visits
+ * never open. Now nothing is fetched until a menu button is reached or a menu
+ * opens (wantOwnPlaylists); after that the list is kept like any other query.
+ */
+let wanted = false;
+const wantListeners = new Set<() => void>();
+export function wantOwnPlaylists(): void {
+  if (wanted) return;
+  wanted = true;
+  for (const listener of wantListeners) listener();
+}
+function subscribeWanted(listener: () => void) {
+  wantListeners.add(listener);
+  return () => wantListeners.delete(listener);
+}
+
+/** The user's own playlists, for an "add to" menu; undefined until loaded. */
+export function useOwnPlaylists(): LibraryItem[] | undefined {
+  const enabled = useSyncExternalStore(subscribeWanted, () => wanted);
   const { data } = useQuery({
     queryKey: ["library", "playlists", "alphabetical"],
     queryFn: ({ signal }) => api.library("playlists", "alphabetical", signal),
-    staleTime: 60_000,
+    enabled,
+    staleTime: 10 * 60_000,
     retry: false,
   });
   // Liked Music is a generated list and cannot be added to; offering it would
   // produce an error the user cannot act on.
-  return (data ?? []).filter((p) => p.id !== "LM");
+  return data?.filter((p) => p.id !== "LM");
 }
 
 export function useCreatePlaylist() {

@@ -1,6 +1,6 @@
 import { useTogether } from "../lib/together";
 import { useEffect, useRef } from "react";
-import { attachVideo, isVideoTrack, retryVideo, setVideoEnabled, useVideo } from "../lib/video";
+import { attachVideo, checkVideoAvailabilityOnce, isVideoTrack, retryVideo, setVideoEnabled, useVideo } from "../lib/video";
 import { IconExpand, IconVideo } from "./Icon";
 import { usePlayer } from "../lib/player";
 
@@ -19,6 +19,7 @@ export function useVideoControl() {
     : status === "checking" ? "Checking for a music video…"
     : status === "unavailable" ? "No matching music video is available for this song."
     : status === "error" ? "Could not check video availability. Click to retry."
+    // "unknown": not asked yet; pressing the button finds out.
     : "Watch music video";
   return { blocked: busy || !track || (following && !controlsRoom && !video) || status === "checking" || status === "unavailable", reason };
 }
@@ -40,6 +41,8 @@ export function VideoSwitch() {
     aria-busy={busy}
     data-active={enabled || undefined}
     aria-disabled={enabled ? busy : blocked}
+    onPointerEnter={checkVideoAvailabilityOnce}
+    onFocus={checkVideoAvailabilityOnce}
     onClick={() => { if (!(enabled ? busy : blocked)) void setVideoEnabled(!enabled); }}
   ><IconVideo size={18} /></button>;
 }

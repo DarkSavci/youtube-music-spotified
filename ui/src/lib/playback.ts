@@ -773,13 +773,16 @@ export async function playEntity(
   origin: string,
 ): Promise<boolean> {
   const { api } = await import("./api");
+  // Through the shared cache, under the keys the pages use: a card played
+  // after its page was opened, or twice, does not ask YouTube again.
+  const { queryClient, completePlaylist } = await import("./queryclient");
   try {
     const tracks =
       kind === "album"
-        ? (await api.album(id)).tracks
+        ? (await queryClient.fetchQuery({ queryKey: ["album", id], queryFn: ({ signal }) => api.album(id, signal) })).tracks
         : kind === "playlist"
-          ? (await api.playlist(id)).tracks
-          : await artistSongs(await api.artist(id));
+          ? await completePlaylist(id)
+          : await artistSongs(await queryClient.fetchQuery({ queryKey: ["artist", id], queryFn: ({ signal }) => api.artist(id, signal) }));
     const playable = (tracks ?? []).filter((t) => t.playable);
     if (playable.length === 0) return false;
     transport.play(playable, 0, origin);
@@ -802,10 +805,10 @@ export async function playEntity(
 export async function artistSongs(artist: Artist, signal?: AbortSignal): Promise<Track[]> {
   const top = (artist.topTracks ?? []).filter((t) => t.playable);
   if (!artist.songsId) return top;
-  const { api } = await import("./api");
   try {
     const { byPlays } = await import("./artistsongs");
-    const all = byPlays(((await api.playlist(artist.songsId, signal)).tracks ?? []).filter((t) => t.playable));
+    const { completePlaylist } = await import("./queryclient");
+    const all = byPlays((await completePlaylist(artist.songsId, signal)).filter((t) => t.playable));
     return all.length > 0 ? all : top;
   } catch (err) {
     if (signal?.aborted) throw err;

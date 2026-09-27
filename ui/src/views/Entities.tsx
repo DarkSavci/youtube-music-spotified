@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ArtistLinks } from "../components/EntityLinks";
 import { warmFirst } from "../lib/warm";
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { completePlaylist } from "../lib/queryclient";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, browsePath } from "../lib/api";
 import { EntityHeader, MetaLine } from "../components/EntityHeader";
@@ -36,7 +37,7 @@ const SHUFFLE_MIN = 20;
  */
 function useWarmFirstTrack(tracks: Track[] | undefined) {
   // Keyed on the ids, not the array, so a refetch does not ask again.
-  const key = (tracks ?? []).slice(0, 3).map((t) => t.id).join(",");
+  const key = (tracks ?? []).find((t) => t.playable !== false)?.id ?? "";
   useEffect(() => {
     warmFirst(tracks);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -123,7 +124,6 @@ export function AlbumView() {
 
 export function PlaylistView() {
   const { id = "" } = useParams();
-  const qc = useQueryClient();
   const moreRef = useRef<HTMLDivElement>(null);
   const request = useRef(0);
   const [preparing, setPreparing] = useState(false);
@@ -152,8 +152,7 @@ export function PlaylistView() {
   // fetch it, never silently queue or copy only the visible prefix.
   const completeTracks = async () => {
     if (!hasUnloadedTracks) return tracks;
-    const full = await qc.fetchQuery({ queryKey: ["playlist", id, "complete"], queryFn: ({ signal }) => api.playlist(id, signal), staleTime: 60_000 });
-    return full.tracks ?? [];
+    return completePlaylist(id);
   };
   const play = async (index: number) => {
     const generation = ++request.current;

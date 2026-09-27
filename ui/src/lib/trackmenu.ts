@@ -7,10 +7,10 @@ import type { MenuItem } from "../components/ContextMenu";
 import type { Track } from "./types";
 import { transport } from "./playback";
 import { api } from "./api";
-import { apiUrl } from "./base";
-import { useLikedIds } from "./liked";
+import { toast } from "./toast";
+import { setLiked, useLikedIds } from "./liked";
 import {
-  useAddToPlaylist, useCreatePlaylist, useOwnPlaylists, useRemoveFromPlaylist,
+  useAddToPlaylist, useCreatePlaylist, useOwnPlaylists, useRemoveFromPlaylist, wantOwnPlaylists,
 } from "./playlists";
 import { usePrompt } from "../components/Prompt";
 
@@ -63,7 +63,11 @@ export function useTrackMenu(): (
         })();
       },
     });
-    for (const pl of playlists) {
+    // The first menu opened asks for the playlists; until they arrive the
+    // submenu says so rather than looking empty.
+    wantOwnPlaylists();
+    if (!playlists) destinations.push({ label: "Loading your playlists…", disabled: true, onSelect: () => {} });
+    for (const pl of playlists ?? []) {
       destinations.push({
         label: pl.title,
         icon: createElement(IconLibrary, { size: 18 }),
@@ -117,16 +121,7 @@ export function useTrackMenu(): (
       label: isLiked ? "Remove from your library" : "Save to your library",
       separated: true,
       onSelect: () => {
-        void (async () => {
-          await fetch(apiUrl(`/v1/me/tracks/${encodeURIComponent(track.id)}/rating`), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ rating: isLiked ? "none" : "like" }),
-          });
-          void qc.invalidateQueries({ queryKey: ["liked"] });
-          void qc.invalidateQueries({ queryKey: ["playlist", "LM"] });
-          void qc.invalidateQueries({ queryKey: ["library"] });
-        })();
+        void setLiked(qc, track, !isLiked).catch(() => toast("Couldn't update your library."));
       },
     });
 

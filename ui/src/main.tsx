@@ -5,28 +5,15 @@ import "@fontsource-variable/inter";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
+import { queryClient } from "./lib/queryclient";
 import { installFlushHooks } from "./lib/playlog";
 import { installLogForwarding } from "./lib/diagnostics";
 import "./styles/global.css";
 import "./styles/shell.css";
 import "./styles/content.css";
 import "./styles/miniplayer.css";
-
-/**
- * HashRouter rather than BrowserRouter: the packaged desktop app loads from a
- * file URL, where path-based routing has no server to fall back on.
- */
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 60_000,
-      refetchOnWindowFocus: false,
-      retry: 1,
-    },
-  },
-});
 
 // First, so whatever goes wrong while the app starts reaches the log file.
 installLogForwarding();
@@ -35,6 +22,10 @@ installLogForwarding();
 // so history is not lost on exit.
 installFlushHooks();
 
+/**
+ * HashRouter rather than BrowserRouter: the packaged desktop app loads from a
+ * file URL, where path-based routing has no server to fall back on.
+ */
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>

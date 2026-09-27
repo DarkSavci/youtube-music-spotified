@@ -1,7 +1,7 @@
 import { Artwork } from "./Artwork";
 import { EndTime } from "./EndTime";
 import { VideoSurface, VideoNotice, useVideoControl } from "./VideoPlayer";
-import { useVideo, setVideoEnabled } from "../lib/video";
+import { useVideo, setVideoEnabled, checkVideoAvailabilityOnce } from "../lib/video";
 import { useContext, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -405,7 +405,8 @@ function Extras({ panel, onPanel }: PanelProps) {
       {/* The mini player has no custom tooltip layer, so title is its only tooltip. */}
       <button className="iconbtn" aria-label={panel === "video" ? "Hide music video" : reason} title={panel === "video" ? "Hide music video" : reason}
         aria-pressed={panel === "video"} data-active={panel === "video" || undefined}
-        aria-disabled={panel !== "video" && blocked} onClick={() => { if (panel === "video" || !blocked) onPanel("video"); }}>
+        aria-disabled={panel !== "video" && blocked} onPointerEnter={checkVideoAvailabilityOnce} onFocus={checkVideoAvailabilityOnce}
+        onClick={() => { if (panel === "video" || !blocked) onPanel("video"); }}>
         <IconVideo size={18} />
       </button>
       <VideoNotice />
