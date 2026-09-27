@@ -144,6 +144,12 @@ func (s *Store) migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM stream_urls WHERE expires_at <= ?`, time.Now().UTC()); err != nil {
 		return fmt.Errorf("control: prune stream urls: %w", err)
 	}
+	// An earlier build kept YouTube's answers in this database. They live in
+	// their own file now (see OpenResponses), so an account's cached
+	// personal data can be deleted without its listening history.
+	if _, err := s.db.ExecContext(ctx, `DROP TABLE IF EXISTS response_cache`); err != nil {
+		return fmt.Errorf("control: drop old response cache: %w", err)
+	}
 	if err := s.repairLibraryArtistIDs(ctx); err != nil {
 		return err
 	}

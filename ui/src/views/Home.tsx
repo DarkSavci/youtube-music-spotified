@@ -90,12 +90,28 @@ function HomeSkeleton() {
   );
 }
 
+/** "Try again in a minute", from a 429's Retry-After when the core sent one. */
+export function waitHint(retryAfter: number): string {
+  if (retryAfter <= 0) return "Try again in a bit.";
+  if (retryAfter < 90) return "Try again in a minute.";
+  return `Try again in about ${Math.round(retryAfter / 60)} minutes.`;
+}
+
 export function PageError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   if (error instanceof ApiError && error.status === 0) {
     return (
       <PageState
         title="Can't reach the player"
         body="The player core isn't responding. It may still be starting up."
+        action={{ label: "Try again", onClick: onRetry }}
+      />
+    );
+  }
+  if (error instanceof ApiError && error.rateLimited) {
+    return (
+      <PageState
+        title="YouTube is limiting requests"
+        body={`Too many requests went to YouTube in a short time. ${waitHint(error.retryAfter)}`}
         action={{ label: "Try again", onClick: onRetry }}
       />
     );

@@ -260,13 +260,34 @@ function SummaryTiles({ s }: { s: Summary }) {
  * Until a photo arrives, and for an artist that has none, the card shows the
  * cover of one of their songs rather than an empty circle.
  */
+// Each photo is a full artist page from YouTube, so only the first row's
+// worth are looked up, two at a time, and kept for the day.
+const PHOTO_LOOKUPS = 6;
+const PHOTO_PARALLEL = 2;
+let photoActive = 0;
+const photoWaiting: (() => void)[] = [];
+async function artistForPhoto(id: string, signal: AbortSignal) {
+  await new Promise<void>((resolve) => {
+    const run = () => { photoActive++; resolve(); };
+    if (photoActive < PHOTO_PARALLEL) run(); else photoWaiting.push(run);
+  });
+  try {
+    signal.throwIfAborted();
+    return await api.artist(id, signal);
+  } finally {
+    photoActive--;
+    photoWaiting.shift()?.();
+  }
+}
+
 function TopArtists({ artists }: { artists: ArtistStat[] }) {
   const lookups = useQueries({
-    queries: artists.slice(0, 12).map((a) => ({
+    queries: artists.slice(0, PHOTO_LOOKUPS).map((a) => ({
       queryKey: ["artist", a.artistId],
-      queryFn: ({ signal }: { signal: AbortSignal }) => api.artist(a.artistId, signal),
+      queryFn: ({ signal }: { signal: AbortSignal }) => artistForPhoto(a.artistId, signal),
       enabled: isChannelId(a.artistId),
       staleTime: Infinity,
+      gcTime: 24 * 60 * 60_000,
       retry: 0,
     })),
   });
@@ -518,6 +539,7 @@ function DetailPanel({
     queryFn: ({ signal }) => api.artist(selection.id, signal),
     enabled: selection.kind === "artist" && isChannelId(selection.id),
     staleTime: Infinity,
+    gcTime: 24 * 60 * 60_000,
     retry: 0,
   });
 

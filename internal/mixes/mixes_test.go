@@ -2,12 +2,16 @@ package mixes_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"spotifier/internal/control"
 	"spotifier/internal/domain"
+	"spotifier/internal/innertube"
 	"spotifier/internal/mixes"
 )
 
@@ -222,5 +226,137 @@ func TestEmptyHistoryIsNotAnError(t *testing.T) {
 	}
 	if len(out) != 0 {
 		t.Errorf("expected no mixes, got %d", len(out))
+	}
+}
+
+// busyCatalog records how many radio calls run at once.
+type busyCatalog struct {
+	stubCatalog
+	mu       sync.Mutex
+	inFlight int
+	maxSeen  int
+	total    int
+}
+
+func (b *busyCatalog) Radio(_ context.Context, seed string) ([]domain.Track, error) {
+	b.mu.Lock()
+	b.inFlight++
+	b.total++
+	if b.inFlight > b.maxSeen {
+		b.maxSeen = b.inFlight
+	}
+	b.mu.Unlock()
+	time.Sleep(20 * time.Millisecond)
+	b.mu.Lock()
+	b.inFlight--
+	b.mu.Unlock()
+	var out []domain.Track
+	for i := 0; i < 20; i++ {
+		out = append(out, track(seed+"-r"+string(rune('a'+i)), "Radio", "Someone"))
+	}
+	return out, nil
+}
+
+// Building the mixes used to fire about thirty radio calls in the same
+// instant. Now a handful run at a time, from a few seeds per mix.
+func TestMixesAskForRadioAFewAtATime(t *testing.T) {
+	store := openStore(t)
+	var artists []string
+	for i := 0; i < 26; i++ {
+		artists = append(artists, "Artist "+string(rune('A'+i)))
+	}
+	seedHistory(t, store, artists)
+
+	cat := &busyCatalog{}
+	g := mixes.New(store, cat)
+	out, err := g.All(context.Background(), control.DefaultUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) == 0 {
+		t.Fatal("no mixes built")
+	}
+	if cat.maxSeen > 3 {
+		t.Errorf("%d radio calls ran at once, want at most 3", cat.maxSeen)
+	}
+	if cat.total > 12 {
+		t.Errorf("%d radio calls, want at most 12 (3 seeds × 3 daily mixes + 3 for Discover)", cat.total)
+	}
+	for _, m := range out {
+		if len(m.Seeds) > 3 {
+			t.Errorf("%s seeded from %d artists", m.Title, len(m.Seeds))
+		}
+	}
+}
+
+// failingCatalog fails every radio call after the first n with err, or only
+// the calls for the seeds in bad.
+type failingCatalog struct {
+	busyCatalog
+	ok  int
+	err error
+	bad map[string]bool
+}
+
+func (f *failingCatalog) Radio(ctx context.Context, seed string) ([]domain.Track, error) {
+	if f.bad != nil {
+		if f.bad[seed] {
+			return nil, f.err
+		}
+		return f.busyCatalog.Radio(ctx, seed)
+	}
+	f.mu.Lock()
+	allowed := f.ok > 0
+	f.ok--
+	f.mu.Unlock()
+	if !allowed {
+		return nil, f.err
+	}
+	return f.busyCatalog.Radio(ctx, seed)
+}
+
+// A set built while some radio calls fail is not handed out as the mixes:
+// Seeded reports the failure so a kept set can stand instead.
+func TestSeededIsAllOrNothing(t *testing.T) {
+	store := openStore(t)
+	var artists []string
+	for i := 0; i < 9; i++ {
+		artists = append(artists, "Artist "+string(rune('A'+i)))
+	}
+	seedHistory(t, store, artists)
+
+	g := mixes.New(store, &failingCatalog{ok: 4, err: fmt.Errorf("innertube next: %w", &innertube.HTTPError{Status: 429, Endpoint: "next"})})
+	if out, err := g.Seeded(context.Background(), control.DefaultUserID); err == nil {
+		t.Fatalf("got %d mixes and no error while radio failed", len(out))
+	}
+	// Without a cache, All still shows what it could.
+	if out, err := g.All(context.Background(), control.DefaultUserID); err != nil {
+		t.Fatal(err)
+	} else {
+		_ = out
+	}
+	thin := openStore(t)
+	seedHistory(t, thin, []string{"One", "Two"})
+	if _, err := mixes.New(thin, &busyCatalog{}).Seeded(context.Background(), control.DefaultUserID); !errors.Is(err, mixes.ErrThinHistory) {
+		t.Fatalf("thin history: %v", err)
+	}
+}
+
+// One seed that cannot be played (a deleted song, say) drops only itself:
+// the other mixes still build, and nothing blocks them for good.
+func TestAnUnusableSeedOnlyDropsItself(t *testing.T) {
+	store := openStore(t)
+	var artists []string
+	for i := 0; i < 9; i++ {
+		artists = append(artists, "Artist "+string(rune('A'+i)))
+	}
+	seedHistory(t, store, artists)
+	cat := &failingCatalog{err: errors.New("innertube next: video unavailable"), bad: map[string]bool{"ta": true}}
+	out, err := mixes.New(store, cat).Seeded(context.Background(), control.DefaultUserID)
+	if err != nil {
+		t.Fatalf("one bad seed failed the set: %v", err)
+	}
+	if len(out) < 3 {
+		t.Fatalf("only %d mixes built", len(out))
 	}
 }

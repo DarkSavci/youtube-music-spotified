@@ -1,8 +1,9 @@
 import { ShareIcon } from "./ShareIcon";
 import { IconChevronRight, IconPlus, IconQueue, IconPlay, IconHeart, IconLibrary, IconFolder, IconDelete, IconArtist, IconAlbum, IconRadio, IconPin } from "./Icon";
 import {
-  createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState,
+  createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore,
 } from "react";
+import { queryClient } from "../lib/queryclient";
 
 /**
  * Right-click menus.
@@ -25,6 +26,22 @@ export interface MenuItem {
   /** Draws a rule above this item, for grouping unlike actions. */
   separated?: boolean;
   disabled?: boolean;
+  /**
+   * Read when the menu renders rather than when it is built: for entries that
+   * depend on data still arriving (the user's playlists), so an open menu
+   * fills in, or says it could not, without being reopened. With children,
+   * it gives the submenu; without, the entries that take this one's place.
+   */
+  live?: () => MenuItem[];
+  /** Leaves the menu open after choosing, for an action whose result shows in it. */
+  keepOpen?: boolean;
+}
+
+/** The menu as it stands now, with every live entry read. */
+function resolve(items: MenuItem[]): MenuItem[] {
+  return items.flatMap((item) =>
+    !item.live ? [item] : item.children ? [{ ...item, children: item.live() }] : item.live(),
+  );
 }
 
 interface MenuState {
@@ -77,6 +94,12 @@ function itemIcon(item: MenuItem) {
   return <Icon size={18} />;
 }
 
+let version = 0;
+const queryVersion = () => version;
+function subscribeQueries(listener: () => void) {
+  return queryClient.getQueryCache().subscribe(() => { version++; listener(); });
+}
+
 function Menu({ state, onClose }: { state: MenuState; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -90,7 +113,9 @@ function Menu({ state, onClose }: { state: MenuState; onClose: () => void }) {
     view.addEventListener("resize", onClose);
     return () => { view.removeEventListener("keydown", escape); doc.removeEventListener("mousedown", outside); view.removeEventListener("scroll", outside, true); view.removeEventListener("resize", onClose); };
   }, [onClose]);
-  return <div ref={ref}><MenuPanel items={state.items} x={state.x} y={state.y} onClose={onClose} /></div>;
+  // Live entries read the query cache, so the open menu follows it.
+  useSyncExternalStore(subscribeQueries, queryVersion);
+  return <div ref={ref}><MenuPanel items={resolve(state.items)} x={state.x} y={state.y} onClose={onClose} /></div>;
 }
 
 function MenuPanel({ items, x, y, onClose, onBack, anchor, label = "Actions", onHover }: {
@@ -125,7 +150,7 @@ function MenuPanel({ items, x, y, onClose, onBack, anchor, label = "Actions", on
     const item = items[i];
     if (!item || item.disabled) return;
     if (item.children) openSub(i);
-    else { item.onSelect?.(); onClose(); }
+    else { item.onSelect?.(); if (!item.keepOpen) onClose(); }
   };
   return <div ref={ref} className="ctxmenu" role="menu" aria-label={label} onMouseEnter={() => { clearTimeout(hoverTimer.current); onHover?.(); }} style={{ left: pos.x, top: pos.y }} onContextMenu={e => e.preventDefault()}
     onKeyDown={e => {

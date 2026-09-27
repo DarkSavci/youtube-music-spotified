@@ -22,6 +22,34 @@ async function refresh() {
   if (!store.get()) return { ok: false, reason: "not-signed-in" };
   return auth.refreshCredentials(activeDirectory(), store.partition());
 }
+/*
+ * Deletes the answers the core kept from YouTube for an account: its library,
+ * its likes, its channels and everything it browsed. They sit in their own
+ * file beside each database the account uses (one per channel), apart from
+ * the listening history, which stays. Called with the core stopped when the
+ * account is the one running, since an open database cannot be deleted.
+ */
+const RESPONSES_FILE = "responses.db";
+function forgetCachedAnswers(account) {
+  const root = store.directory(account);
+  const dirs = [root];
+  try {
+    for (const entry of fs.readdirSync(path.join(root, "channels"), { withFileTypes: true })) {
+      if (entry.isDirectory()) dirs.push(path.join(root, "channels", entry.name));
+    }
+  } catch {
+    /* no channels */
+  }
+  for (const dir of dirs) {
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(path.join(dir, RESPONSES_FILE + suffix), { force: true });
+      } catch (err) {
+        console.warn("[accounts] could not delete cached answers:", err.message);
+      }
+    }
+  }
+}
 function prepareCredentials() {
   const file = path.join(activeDirectory(), "credentials.json");
   if (!store.get()) return;
@@ -92,6 +120,7 @@ function register(getMainWindow, port, restartCore) {
     if (!account) return { ok: true };
     const clear = async () => {
       await auth.signOut(store.directory(account), store.partition(account));
+      forgetCachedAnswers(account);
       store.remove(id);
     };
     if (id === store.state.active) await restartCore(clear);

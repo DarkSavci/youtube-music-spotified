@@ -7,10 +7,10 @@ import type { MenuItem } from "../components/ContextMenu";
 import type { Track } from "./types";
 import { transport } from "./playback";
 import { api } from "./api";
-import { apiUrl } from "./base";
-import { useLikedIds } from "./liked";
+import { toast } from "./toast";
+import { setLiked, useLikedIds } from "./liked";
 import {
-  useAddToPlaylist, useCreatePlaylist, useOwnPlaylists, useRemoveFromPlaylist,
+  ownPlaylists, useAddToPlaylist, useCreatePlaylist, useRemoveFromPlaylist, wantOwnPlaylists,
 } from "./playlists";
 import { usePrompt } from "../components/Prompt";
 
@@ -31,7 +31,6 @@ export function useTrackMenu(): (
   const navigate = useNavigate();
   const qc = useQueryClient();
   const liked = useLikedIds();
-  const playlists = useOwnPlaylists();
   const addTo = useAddToPlaylist();
   const removeFrom = useRemoveFromPlaylist();
   const createPlaylist = useCreatePlaylist();
@@ -63,15 +62,28 @@ export function useTrackMenu(): (
         })();
       },
     });
-    for (const pl of playlists) {
-      destinations.push({
+    // The first menu opened asks for the playlists; the submenu reads them
+    // when it renders, so it fills in, or offers a retry, while open.
+    wantOwnPlaylists();
+    const ownDestinations = (): MenuItem[] => {
+      const own = ownPlaylists();
+      if (own.status === "loading") return [{ label: "Loading your playlists…", disabled: true }];
+      if (own.status === "error") {
+        return [{ label: "Couldn't load your playlists. Try again", onSelect: wantOwnPlaylists, keepOpen: true }];
+      }
+      return own.items.map((pl) => ({
         label: pl.title,
         icon: createElement(IconLibrary, { size: 18 }),
         onSelect: () => addTo.mutate({ playlistId: pl.id, trackIds: [track.id] }),
-      });
-    }
+      }));
+    };
 
-    items.push({ label: "Add to playlist", separated: true, children: destinations });
+    items.push({
+      label: "Add to playlist",
+      separated: true,
+      children: destinations,
+      live: () => [...destinations, ...ownDestinations()],
+    });
 
     // Only offered where the membership handle exists, which is on the
     // playlist the track was read from — the same track can appear twice, so
@@ -117,16 +129,7 @@ export function useTrackMenu(): (
       label: isLiked ? "Remove from your library" : "Save to your library",
       separated: true,
       onSelect: () => {
-        void (async () => {
-          await fetch(apiUrl(`/v1/me/tracks/${encodeURIComponent(track.id)}/rating`), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ rating: isLiked ? "none" : "like" }),
-          });
-          void qc.invalidateQueries({ queryKey: ["liked"] });
-          void qc.invalidateQueries({ queryKey: ["playlist", "LM"] });
-          void qc.invalidateQueries({ queryKey: ["library"] });
-        })();
+        void setLiked(qc, track, !isLiked).catch(() => toast("Couldn't update your library."));
       },
     });
 

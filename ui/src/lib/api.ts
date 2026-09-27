@@ -19,10 +19,30 @@ export class ApiError extends Error {
     readonly status: number,
     /** Only a confirmed logged-out session sets this — never a network fault. */
     readonly reauth = false,
+    /** From a 429's Retry-After, in seconds, when the core sent one. */
+    readonly retryAfter = 0,
   ) {
     super(message);
     this.name = "ApiError";
   }
+
+  /** YouTube (through the core) is limiting requests. */
+  get rateLimited(): boolean {
+    return this.status === 429;
+  }
+}
+
+/*
+ * Whether a failed query is worth another try.
+ *
+ * Every retry is another request to YouTube, and the failures that matter
+ * most are the ones a retry makes worse: a 429 means "slow down", and a 5xx
+ * from the core is almost always YouTube refusing or failing upstream. Those,
+ * and a signed-out session, are never retried; anything else gets one more go.
+ */
+export function shouldRetry(count: number, err: unknown, max = 1): boolean {
+  if (err instanceof ApiError && (err.reauth || err.status === 429 || err.status >= 500)) return false;
+  return count < max;
 }
 
 async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -44,7 +64,8 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
     } catch {
       /* non-JSON error body; keep the status text */
     }
-    throw new ApiError(message, res.status, reauth);
+    const retryAfter = Number(res.headers.get("Retry-After")) || 0;
+    throw new ApiError(message, res.status, reauth, retryAfter);
   }
   return res.json() as Promise<T>;
 }

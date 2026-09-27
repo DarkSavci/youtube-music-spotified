@@ -4,7 +4,7 @@ import { usePlayer, currentPosition, interpolationRate } from "./player";
 import { switchTrackVariant } from "./playback";
 import type { Track } from "./types";
 
-export const useVideo = create(() => ({ enabled: false, busy: false, loading: false, error: null as string | null, revision: 0, availabilityID: "", availability: "checking" as "checking" | "available" | "unavailable" | "error" }));
+export const useVideo = create(() => ({ enabled: false, busy: false, loading: false, error: null as string | null, revision: 0, availabilityID: "", availability: "unknown" as "unknown" | "checking" | "available" | "unavailable" | "error" }));
 const versions = new Map<string, Track[]>();
 let request = 0;
 
@@ -35,6 +35,26 @@ async function loadVersions(track: Track): Promise<Track[]> {
 export function isVideoTrack(track: Track | null | undefined): boolean {
   if (!track) return false;
   return track.isVideo || Boolean(versions.get(track.id)?.some(v => v.id === track.id && v.isVideo));
+}
+
+/*
+ * Whether the playing song has a music video is asked only when it matters:
+ * while video is on, or once the pointer or focus reaches a video button.
+ * Asking on every track change was a YouTube request per song for a feature
+ * most listening never uses. Until then the button reads as available, and
+ * pressing it finds out.
+ */
+export function resetVideoAvailability() {
+  const track = usePlayer.getState().track;
+  useVideo.setState({ availabilityID: track?.id ?? "", availability: track?.isVideo ? "available" : "unknown" });
+}
+
+/** Checks the playing song for a music video, unless that is already known. */
+export function checkVideoAvailabilityOnce() {
+  const { availabilityID, availability } = useVideo.getState();
+  const track = usePlayer.getState().track;
+  if (!track || (availabilityID === track.id && availability !== "unknown" && availability !== "error")) return;
+  void checkVideoAvailability();
 }
 
 export async function checkVideoAvailability() {

@@ -6,7 +6,7 @@ import { usePrompt } from "./Prompt";
 import { IconMore } from "./Icon";
 import { transport } from "../lib/playback";
 import { share } from "../lib/share";
-import { useAddToPlaylist, useCreatePlaylist, useDeletePlaylist, useOwnPlaylists } from "../lib/playlists";
+import { ownPlaylists, useAddToPlaylist, useCreatePlaylist, useDeletePlaylist, wantOwnPlaylists } from "../lib/playlists";
 import type { Track } from "../lib/types";
 
 /**
@@ -38,7 +38,6 @@ export function EntityActions({
   const menu = useMenu();
   const prompt = usePrompt();
   const navigate = useNavigate();
-  const playlists = useOwnPlaylists();
   const addTo = useAddToPlaylist();
   const createPlaylist = useCreatePlaylist();
   const deletePlaylist = useDeletePlaylist();
@@ -77,13 +76,19 @@ export function EntityActions({
           })();
         },
       });
-      for (const pl of playlists.slice(0, 6)) {
-        if (pl.id === id) continue;
-        out.push({
-          label: `Add all to ${pl.title}`,
-          onSelect: () => void withTracks((all) => addTo.mutate({ playlistId: pl.id, trackIds: all.map((t) => t.id) })),
-        });
-      }
+      // Read when the menu renders: fills in, or offers a retry, while open.
+      out.push({
+        label: "Add all to…",
+        live: () => {
+          const own = ownPlaylists();
+          if (own.status === "loading") return [{ label: "Loading your playlists…", disabled: true }];
+          if (own.status === "error") return [{ label: "Couldn't load your playlists. Try again", onSelect: wantOwnPlaylists, keepOpen: true }];
+          return own.items.filter((pl) => pl.id !== id).slice(0, 6).map((pl) => ({
+            label: `Add all to ${pl.title}`,
+            onSelect: () => void withTracks((all) => addTo.mutate({ playlistId: pl.id, trackIds: all.map((t) => t.id) })),
+          }));
+        },
+      });
     }
 
     if (kind === "playlist" && id !== "LM") {
@@ -122,7 +127,10 @@ export function EntityActions({
       // to the page when the menu hands it back while loading.
       aria-disabled={loading}
       aria-busy={loading}
-      onClick={(e) => { if (!loading) menu.open(e, build()); }}
+      // Reaching the button is the cue to fetch the playlists its menu lists.
+      onPointerEnter={wantOwnPlaylists}
+      onFocus={wantOwnPlaylists}
+      onClick={(e) => { wantOwnPlaylists(); if (!loading) menu.open(e, build()); }}
     >
       <IconMore size={22} />
     </button>

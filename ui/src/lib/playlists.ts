@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryClient } from "./queryclient";
 import { api } from "./api";
 import { apiUrl } from "./base";
 import type { LibraryItem, Track } from "./types";
@@ -26,17 +27,40 @@ async function send(path: string, method: string, body?: unknown): Promise<Respo
   return res;
 }
 
-/** The user's own playlists, for an "add to" menu. */
-export function useOwnPlaylists(): LibraryItem[] {
-  const { data } = useQuery({
-    queryKey: ["library", "playlists", "alphabetical"],
+/*
+ * The "add to playlist" lists are only fetched once one is about to be used.
+ *
+ * Every album, playlist and artist page, and every track list, holds a menu
+ * that can add to a playlist, and each used to fetch the user's playlists on
+ * mount — a library request to YouTube per page visit, for a menu most visits
+ * never open. Now nothing is fetched until a menu button is reached or a menu
+ * opens (wantOwnPlaylists), and the menu reads the list live (ownPlaylists),
+ * so an open menu fills in when it arrives.
+ */
+const OWN_KEY = ["library", "playlists", "alphabetical"] as const;
+
+/** Asks for the user's playlists if they are not loaded, or failed last time. */
+export function wantOwnPlaylists(): void {
+  void queryClient.prefetchQuery({
+    queryKey: OWN_KEY,
     queryFn: ({ signal }) => api.library("playlists", "alphabetical", signal),
-    staleTime: 60_000,
+    staleTime: 10 * 60_000,
     retry: false,
   });
-  // Liked Music is a generated list and cannot be added to; offering it would
-  // produce an error the user cannot act on.
-  return (data ?? []).filter((p) => p.id !== "LM");
+}
+
+/**
+ * The user's own playlists as they stand now: loaded, still loading, or
+ * failed. Read by menus when they render, not when they are built.
+ */
+export function ownPlaylists(): { status: "loading" | "error" | "ready"; items: LibraryItem[] } {
+  const state = queryClient.getQueryState<LibraryItem[]>(OWN_KEY);
+  if (state?.data) {
+    // Liked Music is a generated list and cannot be added to; offering it
+    // would produce an error the user cannot act on.
+    return { status: "ready", items: state.data.filter((p) => p.id !== "LM") };
+  }
+  return { status: state?.status === "error" ? "error" : "loading", items: [] };
 }
 
 export function useCreatePlaylist() {

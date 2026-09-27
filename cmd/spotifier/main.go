@@ -106,12 +106,32 @@ func main() {
 		// hours skips yt-dlp.
 		deps.URLs = ctrl
 	}
+	// Answers read from YouTube are kept, in a file beside the account's
+	// database, so repeat views and restarts do not ask for them again. The
+	// desktop shell deletes that file when the account signs out or is
+	// removed; it is separate so the listening history can stay.
+	responsesPath := filepath.Join(filepath.Dir(*dbPath), control.ResponsesFile)
+	if kept, err := control.OpenResponses(context.Background(), responsesPath); err != nil {
+		log.Warn("response cache file unavailable; keeping answers in memory only", "err", err)
+		deps.Responses = api.NewResponseCache(nil, log)
+	} else {
+		defer kept.Close()
+		deps.Responses = api.NewResponseCache(kept, log)
+	}
 
 	// Credentials are optional and may arrive later: signing in happens while
 	// this process is running. The store re-reads the file on demand, which is
 	// what lets a sign-in take effect without restarting playback.
 	acct := account.New(*credPath, rec, ctrl)
 	credErr := acct.Reload()
+	// The session is checked once per launch rather than trusted from the
+	// last one: a sign-in that expired while the app was closed must show.
+	deps.Responses.Clear(context.Background(), "me|state")
+	if !acct.SignedIn() {
+		// No account now: nothing kept for one may be shown, even if the
+		// shell could not delete the file.
+		api.ClearSignedOut(context.Background(), deps.Responses)
+	}
 	deps.Account = acct
 
 	// The catalog client is built from whatever credentials exist now. It is
