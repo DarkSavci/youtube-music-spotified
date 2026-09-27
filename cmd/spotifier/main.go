@@ -36,6 +36,7 @@ import (
 	"spotifier/internal/lyrics"
 	"spotifier/internal/mixes"
 	"spotifier/internal/obs"
+	"spotifier/internal/ratelimit"
 	"spotifier/internal/report"
 	"spotifier/internal/resolver"
 	"spotifier/internal/session"
@@ -62,6 +63,9 @@ func main() {
 		level = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	// Packages without a logger of their own (library, identity) log through
+	// the default, which should read like the rest of the core's output.
+	slog.SetDefault(log)
 
 	rec := obs.NewRecorder()
 	// The token comes through the environment rather than a flag, so it does
@@ -69,6 +73,25 @@ func main() {
 	deps := api.Deps{AccountScope: *accountScope, ClientToken: os.Getenv("SPOTIFIER_CLIENT_TOKEN"), Recorder: rec, Log: log}
 	// Keep it out of the environment yt-dlp and deno inherit.
 	_ = os.Unsetenv("SPOTIFIER_CLIENT_TOKEN")
+
+	/*
+	 * One pace for everything this process asks of YouTube.
+	 *
+	 * Installed before any client is built: the catalog's, the account's and
+	 * every one a sign-in builds later share one Governor and one scraped
+	 * config, and every call they make is logged.
+	 */
+	innertube.SetDefaultGovernor(ratelimit.API)
+	innertube.ShareConfig()
+	upstream := newUpstreamLog(log)
+	innertube.SetObserver(upstream.record)
+	deps.APIGovernor, deps.StreamGovernor = ratelimit.API, ratelimit.Streams
+	ratelimit.API.OnCooldown(func(d time.Duration) {
+		log.Warn("YouTube asked us to slow down; pausing requests", "for", d.Round(time.Second))
+	})
+	ratelimit.Streams.OnCooldown(func(d time.Duration) {
+		log.Warn("YouTube is rate-limiting stream lookups; pausing them", "for", d.Round(time.Second))
+	})
 
 	// The Control plane is ours and needs no credentials. If it cannot open,
 	// browsing and playback still work; only the statistics surfaces and the
@@ -126,13 +149,24 @@ func main() {
 		deps.Audio = cache
 	}
 
+	/*
+	 * The catalog reads through the account's current client, so a session
+	 * the shell refreshes (auth/reload) or ends (sign-out) applies to browsing
+	 * at once instead of at the next restart. Signed out, a client without
+	 * credentials serves public metadata.
+	 */
+	public := innertubeClient(nil)
+	currentClient := func() *innertube.Client {
+		if c := acct.Current().Client; c != nil {
+			return c
+		}
+		return public
+	}
 	switch *catalogMode {
 	case "fixture":
 		deps.Catalog = mustFixture(*fixtureDir, rec, log)
-	case "innertube":
-		deps.Catalog = catalog.NewInnerTube(innertubeClient(creds), rec)
-	default: // auto
-		deps.Catalog = catalog.NewInnerTube(innertubeClient(creds), rec)
+	default: // innertube, auto
+		deps.Catalog = catalog.NewInnerTubeFrom(currentClient, rec)
 	}
 
 	/*
@@ -238,6 +272,7 @@ func main() {
 
 	// Shut down cleanly so the desktop shell never leaves an orphaned sidecar.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	go upstream.run(ctx)
 	defer stop()
 
 	go func() {

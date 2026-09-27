@@ -17,6 +17,7 @@ package library
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -107,19 +108,27 @@ func (s *Service) List(ctx context.Context, f Filter, srt Sort) ([]domain.Librar
 			continue
 		}
 		wg.Add(1)
-		go func(fetch func(context.Context) ([]domain.LibraryItem, error)) {
+		go func(kind Filter, fetch func(context.Context) ([]domain.LibraryItem, error)) {
 			defer wg.Done()
+			started := time.Now()
 			items, err := fetch(ctx)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
+				// Each surface on its own line: only the first error reaches
+				// the caller, and which of the three fails is the question a
+				// refused library raises.
+				slog.Warn("library surface failed", "surface", string(kind),
+					"took", time.Since(started).Round(time.Millisecond), "err", err)
 				if firstErr == nil {
 					firstErr = err
 				}
 				return
 			}
+			slog.Debug("library surface read", "surface", string(kind), "items", len(items),
+				"took", time.Since(started).Round(time.Millisecond))
 			merged = append(merged, items...)
-		}(fetch)
+		}(kind, fetch)
 	}
 	wg.Wait()
 

@@ -3,6 +3,7 @@ package catalog_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -70,5 +71,124 @@ func TestPlaylistPageDoesNotFetchTheTail(t *testing.T) {
 	}
 	if next.Playlist.Tracks[0].ID != next.Playlist.Tracks[1].ID {
 		t.Fatal("repeated playlist entries were lost")
+	}
+}
+
+// servePage answers every InnerTube call with page, and the config scrape
+// with a usable client version, as a signed-in client.
+func servePage(page []byte) *innertube.Client {
+	return serveAs(page, nil, &innertube.Credentials{Cookie: "SAPISID=test; LOGIN_INFO=test"})
+}
+
+// serveAs is servePage with the given credentials (nil: signed out). posts,
+// when set, counts the InnerTube calls made.
+func serveAs(page []byte, posts *int, creds *innertube.Credentials) *innertube.Client {
+	opts := []innertube.Option{innertube.WithHTTPClient(&http.Client{Transport: pagingTransport(func(r *http.Request) (*http.Response, error) {
+		body := []byte(`{"INNERTUBE_CLIENT_VERSION":"1.20260901.01.00","INNERTUBE_API_KEY":"test"}`)
+		if r.Method == "POST" {
+			if posts != nil {
+				*posts++
+			}
+			body = page
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+	})})}
+	if creds != nil {
+		opts = append(opts, innertube.WithCredentials(creds))
+	}
+	return innertube.New(opts...)
+}
+
+// The Liked Music page reads without its header, as the library's summary
+// does, and a page with neither header nor tracks is the throttle shape.
+func TestLikedMusicPageUsesTheLikedParse(t *testing.T) {
+	raw, err := os.ReadFile("../../testdata/fixtures/playlist.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range renderers.FindAll(doc, "sectionListRenderer") {
+		contents := h.List("contents")
+		kept := contents[:0]
+		for _, c := range contents {
+			if m, ok := c.(map[string]any); ok && m["musicResponsiveHeaderRenderer"] != nil {
+				continue
+			}
+			kept = append(kept, c)
+		}
+		h["contents"] = kept
+	}
+	headerless, _ := json.Marshal(doc)
+	if strings.Contains(string(headerless), "musicResponsiveHeaderRenderer") {
+		t.Skip("fixture keeps its header elsewhere; covered by the renderers tests")
+	}
+
+	page, err := catalog.NewInnerTube(servePage(headerless), nil).PlaylistPage(context.Background(), "LM", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Playlist.Title != renderers.LikedTitle || len(page.Playlist.Tracks) == 0 {
+		t.Fatalf("got title=%q tracks=%d", page.Playlist.Title, len(page.Playlist.Tracks))
+	}
+
+	_, err = catalog.NewInnerTube(servePage([]byte(`{"contents":{}}`)), nil).Playlist(context.Background(), "LM")
+	if !errors.Is(err, renderers.ErrLikedShape) {
+		t.Fatalf("err = %v, want ErrLikedShape", err)
+	}
+	// Any other playlist keeps the plain parse and its own error.
+	_, err = catalog.NewInnerTube(servePage([]byte(`{"contents":{}}`)), nil).Playlist(context.Background(), "PLother")
+	if err == nil || errors.Is(err, renderers.ErrLikedShape) {
+		t.Fatalf("other playlist err = %v", err)
+	}
+}
+
+// Signed out, Liked Music is not asked for at all: the answer is to sign in.
+func TestLikedMusicSignedOutAsksForSignIn(t *testing.T) {
+	posts := 0
+	c := catalog.NewInnerTube(serveAs([]byte(`{"contents":{}}`), &posts, nil), nil)
+	if _, err := c.Playlist(context.Background(), "LM"); !errors.Is(err, renderers.ErrLikedSignedOut) {
+		t.Fatalf("Playlist err = %v, want ErrLikedSignedOut", err)
+	}
+	if _, err := c.PlaylistPage(context.Background(), "VLLM", ""); !errors.Is(err, renderers.ErrLikedSignedOut) {
+		t.Fatalf("PlaylistPage err = %v, want ErrLikedSignedOut", err)
+	}
+	if posts != 0 {
+		t.Fatalf("made %d InnerTube calls while signed out", posts)
+	}
+}
+
+// An account with no likes gets a message where the tracks would be. It is an
+// empty Liked Music, whole or paged, like any other empty playlist.
+func TestLikedMusicMessagePageIsEmptyNotAnError(t *testing.T) {
+	page := []byte(`{"contents":{"sectionListRenderer":{"contents":[{"itemSectionRenderer":{"contents":[{"messageRenderer":{"text":{"runs":[{"text":"Songs you like will show here"}]}}}]}}]}}}`)
+	c := catalog.NewInnerTube(servePage(page), nil)
+	pl, err := c.Playlist(context.Background(), "LM")
+	if err != nil || pl.Title != renderers.LikedTitle || len(pl.Tracks) != 0 {
+		t.Fatalf("Playlist = %+v, %v", pl, err)
+	}
+	pg, err := c.PlaylistPage(context.Background(), "LM", "")
+	if err != nil || pg.Playlist.Title != renderers.LikedTitle || len(pg.Playlist.Tracks) != 0 || pg.Next != "" {
+		t.Fatalf("PlaylistPage = %+v, %v", pg, err)
+	}
+}
+
+// The catalog asks for the client on every call, so a session that is
+// refreshed, or signed in after start, applies without a restart.
+func TestCatalogFollowsTheCurrentSession(t *testing.T) {
+	raw, err := os.ReadFile("../../testdata/fixtures/playlist.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := serveAs(raw, nil, nil) // signed out
+	c := catalog.NewInnerTubeFrom(func() *innertube.Client { return current }, nil)
+	if _, err := c.Playlist(context.Background(), "LM"); !errors.Is(err, renderers.ErrLikedSignedOut) {
+		t.Fatalf("signed out err = %v", err)
+	}
+	current = servePage(raw) // the shell signed in
+	if _, err := c.Playlist(context.Background(), "LM"); err != nil {
+		t.Fatalf("after sign-in: %v", err)
 	}
 }

@@ -61,9 +61,9 @@ func (i *InnerTube) LikedSongs(ctx context.Context) (domain.Playlist, error) {
 	if err != nil {
 		return domain.Playlist{}, err
 	}
-	pl, ok := renderers.ParsePlaylist(doc, SurfaceLikedSongs, i.ctxFor("liked"))
-	if !ok {
-		return domain.Playlist{}, fmt.Errorf("identity: liked songs did not parse")
+	pl, err := ParseLikedSongs(doc, i.ctxFor("liked"))
+	if err != nil {
+		return domain.Playlist{}, err
 	}
 	err = renderers.AppendPlaylistPages(&pl, doc, func(token string) (renderers.Node, error) {
 		return i.call(ctx, "browse", map[string]any{"continuation": token})
@@ -262,6 +262,12 @@ func LibraryItemsFrom(doc renderers.Node, hint domain.LibraryItemKind, pc render
 	classify := func(browseID, pageType string) (domain.LibraryItemKind, string) {
 		switch {
 		case strings.Contains(pageType, "ARTIST"), strings.HasPrefix(browseID, "UC"), strings.HasPrefix(browseID, "MPLA"):
+			// The library links an artist to its own view of them, "MPLA" plus
+			// the channel id. The artist page reads the channel itself. Only
+			// that form is unwrapped, as the share links do (lib/share.ts).
+			if strings.HasPrefix(browseID, "MPLAUC") {
+				return domain.LibArtist, strings.TrimPrefix(browseID, "MPLA")
+			}
 			return domain.LibArtist, browseID
 		case strings.Contains(pageType, "ALBUM"), strings.HasPrefix(browseID, "MPRE"):
 			return domain.LibAlbum, browseID
@@ -291,13 +297,9 @@ func (i *InnerTube) LikedSongsSummary(ctx context.Context) (domain.Playlist, err
 	if err != nil {
 		return domain.Playlist{}, err
 	}
-	pl, ok := renderers.ParsePlaylist(doc, SurfaceLikedSongs, i.ctxFor("liked"))
-	if !ok {
-		return domain.Playlist{}, fmt.Errorf("identity: liked songs did not parse")
-	}
-	pl.ID = "LM"
-	if pl.Title == "" {
-		pl.Title = "Liked Music"
+	pl, err := ParseLikedSongs(doc, i.ctxFor("liked"))
+	if err != nil {
+		return domain.Playlist{}, err
 	}
 	if renderers.PlaylistNext(doc) != "" && pl.TrackCount == len(pl.Tracks) {
 		pl.TrackCount = 0
@@ -305,4 +307,14 @@ func (i *InnerTube) LikedSongsSummary(ctx context.Context) (domain.Playlist, err
 	pl.Tracks = nil
 	pl.DurationMs = 0
 	return pl, nil
+}
+
+// ErrLikedShape is renderers.ErrLikedShape: Liked Music came back without its
+// header or tracks, the shape seen while YouTube throttles the account.
+var ErrLikedShape = renderers.ErrLikedShape
+
+// ParseLikedSongs reads the first page of Liked Music; see
+// renderers.ParseLikedPlaylist.
+func ParseLikedSongs(doc renderers.Node, pc renderers.ParseContext) (domain.Playlist, error) {
+	return renderers.ParseLikedPlaylist(doc, pc)
 }
