@@ -150,25 +150,24 @@ func TestLikedMusicSignInPromptIsSignedOut(t *testing.T) {
 	}
 }
 
-// Any other message page carries YouTube's wording, and the shape report says
-// a message was there.
-func TestLikedMusicMessagePageKeepsItsWording(t *testing.T) {
+// Any other message page, such as the one an account with no likes gets, is
+// an empty Liked Music, and the shape report still says a message was there.
+func TestLikedMusicMessagePageIsAnEmptyList(t *testing.T) {
 	var buf bytes.Buffer
 	old := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 	t.Cleanup(func() { slog.SetDefault(old) })
 	likedShapeOnce = sync.Once{}
 
-	_, err := ParseLikedPlaylist(messagePage("Something went wrong", "Try again later", false), ParseContext{})
-	var msg *LikedMessageError
-	if !errors.As(err, &msg) || !errors.Is(err, ErrLikedMessage) || errors.Is(err, ErrLikedShape) {
-		t.Fatalf("err = %v, want a LikedMessageError", err)
+	pl, err := ParseLikedPlaylist(messagePage("Songs you like will show here", "Tap the like button", false), ParseContext{})
+	if err != nil {
+		t.Fatalf("err = %v, want an empty list", err)
 	}
-	if msg.Text != "Something went wrong Try again later" {
-		t.Fatalf("text = %q", msg.Text)
+	if pl.ID != "LM" || pl.Title != LikedTitle || len(pl.Tracks) != 0 || pl.TrackCount != 0 {
+		t.Fatalf("got %+v", pl)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "message=true") || !strings.Contains(out, "Something went wrong") {
+	if !strings.Contains(out, "message=true") || !strings.Contains(out, "Songs you like will show here") {
 		t.Fatalf("shape report lacks the message: %s", out)
 	}
 }

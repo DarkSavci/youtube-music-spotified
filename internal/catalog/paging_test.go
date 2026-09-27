@@ -159,3 +159,18 @@ func TestLikedMusicSignedOutAsksForSignIn(t *testing.T) {
 		t.Fatalf("made %d InnerTube calls while signed out", posts)
 	}
 }
+
+// An account with no likes gets a message where the tracks would be. It is an
+// empty Liked Music, whole or paged, like any other empty playlist.
+func TestLikedMusicMessagePageIsEmptyNotAnError(t *testing.T) {
+	page := []byte(`{"contents":{"sectionListRenderer":{"contents":[{"itemSectionRenderer":{"contents":[{"messageRenderer":{"text":{"runs":[{"text":"Songs you like will show here"}]}}}]}}]}}}`)
+	c := catalog.NewInnerTube(servePage(page), nil)
+	pl, err := c.Playlist(context.Background(), "LM")
+	if err != nil || pl.Title != renderers.LikedTitle || len(pl.Tracks) != 0 {
+		t.Fatalf("Playlist = %+v, %v", pl, err)
+	}
+	pg, err := c.PlaylistPage(context.Background(), "LM", "")
+	if err != nil || pg.Playlist.Title != renderers.LikedTitle || len(pg.Playlist.Tracks) != 0 || pg.Next != "" {
+		t.Fatalf("PlaylistPage = %+v, %v", pg, err)
+	}
+}

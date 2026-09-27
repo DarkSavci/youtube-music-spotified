@@ -26,23 +26,6 @@ var ErrLikedShape = errors.New("liked music came back without its header or trac
 // is to sign in, not to wait.
 var ErrLikedSignedOut = errors.New("liked music needs a signed-in account")
 
-// ErrLikedMessage matches a LikedMessageError.
-var ErrLikedMessage = errors.New("youtube returned a message instead of liked music")
-
-// LikedMessageError is Liked Music answered with a message page rather than
-// the playlist, carrying YouTube's own wording, which is generic text rather
-// than anything from the account.
-type LikedMessageError struct{ Text string }
-
-func (e *LikedMessageError) Error() string {
-	if e.Text == "" {
-		return "YouTube returned a message instead of Liked Music"
-	}
-	return "YouTube returned a message instead of Liked Music: " + e.Text
-}
-
-func (e *LikedMessageError) Is(target error) bool { return target == ErrLikedMessage }
-
 // IsLikedID reports whether a playlist id is Liked Music, with or without the
 // browse prefix.
 func IsLikedID(id string) bool { return id == "LM" || id == "VLLM" }
@@ -53,8 +36,12 @@ var likedShapeOnce sync.Once
 // ParseLikedPlaylist reads the first page of Liked Music.
 //
 // A page with the playlist's track list but no header still reads, under its
-// known name. A page with neither returns ErrLikedShape and is reported once,
-// by its shape only: size, top-level keys and renderer counts, never content.
+// known name. A page without the track list is reported once, by its shape
+// (size, top-level keys, renderer counts and any message's wording, never
+// other content), and then read as:
+//   - a sign-in prompt: ErrLikedSignedOut;
+//   - any other message: an empty Liked Music, as for an account with no likes;
+//   - nothing at all: ErrLikedShape, the throttle's shape.
 func ParseLikedPlaylist(doc Node, pc ParseContext) (domain.Playlist, error) {
 	pl, ok := ParsePlaylistTitled(doc, "VLLM", LikedTitle, pc)
 	if !ok {
@@ -64,7 +51,11 @@ func ParseLikedPlaylist(doc Node, pc ParseContext) (domain.Playlist, error) {
 		case found && signInPrompt(doc, text):
 			return domain.Playlist{}, ErrLikedSignedOut
 		case found:
-			return domain.Playlist{}, &LikedMessageError{Text: text}
+			// Any other message stands where the tracks would be, as
+			// "Songs you like will show here" does for an account with no
+			// likes: an empty Liked Music, no different from any other.
+			// The shape line above keeps a real problem diagnosable.
+			return domain.Playlist{ID: "LM", Title: LikedTitle}, nil
 		}
 		return domain.Playlist{}, ErrLikedShape
 	}
