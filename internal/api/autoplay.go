@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
 	"spotifier/internal/domain"
+	"spotifier/internal/innertube"
 	"spotifier/internal/session"
 )
 
@@ -42,11 +44,40 @@ type autoplay struct {
 	// exhausted is set when a radio has no more pages.
 	exhausted bool
 	busy      bool
-	// failedAt holds off retrying a fetch that just failed.
-	failedAt time.Time
+	// failedAt holds off retrying a fetch that just failed, for failDelay,
+	// which doubles with each failure in a row.
+	failedAt  time.Time
+	failDelay time.Duration
+
+	// fetchedAt is when the last page was asked for. Pages are at least gap
+	// apart: a radio whose pages kept repeating what the queue already had
+	// used to be paged through back to back, several calls a second, until
+	// something new turned up.
+	fetchedAt time.Time
+	gap       time.Duration
+	// dry counts pages in a row that added nothing. After maxDry autoplay
+	// stops for this queue until it changes.
+	dry    int
+	gaveUp bool
+	// index and length are the queue position last looked at. Position
+	// reports arrive several times a second and change neither, so they no
+	// longer cause a look at all.
+	index, length int
+	seen          string
+	// retry is the pending re-check after a wait (pacing or a failure).
+	retry *time.Timer
 }
 
-func newAutoplay() *autoplay { return &autoplay{enabled: true} }
+const (
+	autoplayGap     = 8 * time.Second
+	autoplayMaxDry  = 3
+	autoplayFailMin = 30 * time.Second
+	autoplayFailMax = 10 * time.Minute
+)
+
+func newAutoplay() *autoplay {
+	return &autoplay{enabled: true, gap: autoplayGap, failDelay: autoplayFailMin, index: -1, length: -1}
+}
 
 // queueKey identifies a queue by where it came from and how it starts. A
 // radio appending to it changes neither.
@@ -61,6 +92,8 @@ func queueKey(q domain.Queue) string {
 func (s *Server) SetAutoplay(on bool) {
 	s.autoplay.mu.Lock()
 	s.autoplay.enabled = on
+	// Look again at the next update even if the queue has not moved.
+	s.autoplay.seen = ""
 	s.autoplay.mu.Unlock()
 }
 
@@ -71,7 +104,8 @@ func (s *Server) RunAutoplay(ctx context.Context) {
 	}
 	updates, cancel := s.deps.Session.Subscribe()
 	defer cancel()
-	s.topUp(ctx, s.deps.Session.Projection())
+	ctx = innertube.WithRoute(ctx, "autoplay")
+	s.topUp(ctx, s.deps.Session.Projection(), true)
 	for {
 		select {
 		case <-ctx.Done():
@@ -80,7 +114,7 @@ func (s *Server) RunAutoplay(ctx context.Context) {
 			if !ok {
 				return
 			}
-			s.topUp(ctx, p)
+			s.topUp(ctx, p, false)
 		}
 	}
 }
@@ -90,27 +124,70 @@ func (s *Server) RunAutoplay(ctx context.Context) {
 // Not while repeat is on: repeating means the queue loops as it is. Radio
 // appended to a repeating playlist played before it came round again, and
 // shuffle then mixed those strangers through the rest of it (#26, #28).
-func (s *Server) topUp(ctx context.Context, p session.Projection) {
+//
+// force re-checks a queue whose position has not moved: the first look, a
+// setting that changed, and the re-check scheduled after a wait.
+func (s *Server) topUp(ctx context.Context, p session.Projection, force bool) {
 	q := p.State.Queue
-	if p.FollowingRoom || p.State.Repeat != domain.RepeatOff || len(q.Items) == 0 || len(q.Items)-1-q.Index >= autoplayLow {
-		return
-	}
 	a := s.autoplay
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if !a.enabled || a.busy || time.Since(a.failedAt) < 30*time.Second {
+	key := queueKey(q)
+	// Settings that decide whether autoplay applies count as changes too.
+	seen := fmt.Sprintf("%s\x00%s\x00%t", key, p.State.Repeat, p.FollowingRoom)
+	moved := q.Index != a.index || len(q.Items) != a.length || seen != a.seen
+	a.index, a.length, a.seen = q.Index, len(q.Items), seen
+	if moved {
+		// Something changed: whatever autoplay gave up on, it may be worth
+		// another look now.
+		a.gaveUp = false
+	} else if !force {
 		return
 	}
-	if key := queueKey(q); key != a.key {
+	if p.FollowingRoom || p.State.Repeat != domain.RepeatOff || len(q.Items) == 0 || len(q.Items)-1-q.Index >= autoplayLow {
+		return
+	}
+	if !a.enabled || a.busy || a.gaveUp {
+		return
+	}
+	now := time.Now()
+	wait := a.failDelay - now.Sub(a.failedAt)
+	if w := a.gap - now.Sub(a.fetchedAt); w > wait {
+		wait = w
+	}
+	if wait > 0 {
+		s.recheckAutoplay(ctx, wait)
+		return
+	}
+	if key != a.key {
 		// A queue autoplay has not seen: continue it from its last track.
 		a.key, a.seed, a.mix, a.token, a.exhausted = key, q.Items[len(q.Items)-1].ID, domain.MixSeed{}, "", false
+		a.dry = 0
 	}
 	if a.exhausted {
 		// The radio ran dry: start another from where the queue now ends.
 		a.seed, a.mix, a.token, a.exhausted = q.Items[len(q.Items)-1].ID, domain.MixSeed{}, "", false
 	}
 	a.busy = true
+	a.fetchedAt = now
 	go s.extendRadio(ctx, a.key, a.seed, a.mix, a.token)
+}
+
+// recheckAutoplay looks at the queue again after d, once. Called with a.mu
+// held.
+func (s *Server) recheckAutoplay(ctx context.Context, d time.Duration) {
+	a := s.autoplay
+	if a.retry != nil {
+		return
+	}
+	a.retry = time.AfterFunc(d, func() {
+		a.mu.Lock()
+		a.retry = nil
+		a.mu.Unlock()
+		if ctx.Err() == nil {
+			s.topUp(ctx, s.deps.Session.Projection(), true)
+		}
+	})
 }
 
 // radioPage reads one page of either kind of radio.
@@ -132,10 +209,17 @@ func (s *Server) extendRadio(ctx context.Context, key, seed string, mix domain.M
 	defer a.mu.Unlock()
 	a.busy = false
 	if err != nil {
+		if !a.failedAt.IsZero() && time.Since(a.failedAt) < 2*a.failDelay+a.gap {
+			// Failing again straight after the last failure: wait longer.
+			a.failDelay = min(a.failDelay*2, autoplayFailMax)
+		}
 		a.failedAt = time.Now()
-		s.deps.Log.Debug("autoplay: radio fetch failed", "seed", seed, "err", err)
+		s.deps.Log.Debug("autoplay: radio fetch failed", "seed", seed, "err", err, "retryIn", a.failDelay)
+		s.recheckAutoplay(ctx, a.failDelay)
 		return
 	}
+	a.failDelay = autoplayFailMin
+	a.failedAt = time.Time{}
 
 	q := s.deps.Session.Projection().State.Queue
 	if queueKey(q) != key {
@@ -155,13 +239,19 @@ func (s *Server) extendRadio(ctx context.Context, key, seed string, mix domain.M
 	a.token = next
 	a.exhausted = next == ""
 	if len(fresh) == 0 {
-		if !a.exhausted {
-			// A page of repeats: the next one is fetched on the next update.
+		a.dry++
+		if a.dry >= autoplayMaxDry {
+			// Page after page of what the queue already has: stop asking
+			// until the queue changes, rather than paging through the lot.
+			a.gaveUp = true
+			s.deps.Log.Info("autoplay: radio has nothing new; stopping", "seed", seed, "pages", a.dry)
 			return
 		}
-		a.failedAt = time.Now()
+		// A page of repeats: the next one comes after the usual gap.
+		s.recheckAutoplay(ctx, a.gap)
 		return
 	}
+	a.dry = 0
 	_, _ = s.deps.Session.Command(ctx, "autoplay", session.Command{
 		Kind:   session.CmdEnqueue,
 		Insert: fresh,
