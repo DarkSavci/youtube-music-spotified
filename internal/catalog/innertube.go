@@ -126,6 +126,9 @@ func (c *InnerTube) Playlist(ctx context.Context, id string) (domain.Playlist, e
 	if !strings.HasPrefix(browseID, "VL") {
 		browseID = "VL" + browseID
 	}
+	if renderers.IsLikedID(browseID) && !c.client.Authenticated() {
+		return domain.Playlist{ID: id}, renderers.ErrLikedSignedOut
+	}
 	doc, err := c.call(ctx, "browse", map[string]any{"browseId": browseID})
 	if err != nil {
 		return domain.Playlist{}, err
@@ -241,6 +244,9 @@ func (c *InnerTube) PlaylistPage(ctx context.Context, id, token string) (domain.
 	if !strings.HasPrefix(id, "VL") {
 		browseID = "VL" + id
 	}
+	if renderers.IsLikedID(browseID) && !c.client.Authenticated() {
+		return domain.PlaylistPage{}, renderers.ErrLikedSignedOut
+	}
 	doc, err := c.call(ctx, "browse", map[string]any{"browseId": browseID})
 	if err != nil {
 		return domain.PlaylistPage{}, err
@@ -268,8 +274,8 @@ func (c *InnerTube) TrackVersions(ctx context.Context, id string) ([]domain.Trac
 }
 
 // parsePlaylist reads a playlist's first page. Liked Music has a known name,
-// so it reads without its header, and a page with neither header nor tracks
-// is reported as renderers.ErrLikedShape, the shape of a throttled answer.
+// so it reads without its header; see renderers.ParseLikedPlaylist for the
+// errors a page without its tracks is reported as.
 func (c *InnerTube) parsePlaylist(doc renderers.Node, browseID string) (domain.Playlist, error) {
 	if renderers.IsLikedID(browseID) {
 		return renderers.ParseLikedPlaylist(doc, c.ctxFor("playlist"))

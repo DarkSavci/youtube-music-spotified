@@ -264,7 +264,7 @@ type apiError struct {
 
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, identity.ErrLoggedOut):
+	case errors.Is(err, identity.ErrLoggedOut), errors.Is(err, renderers.ErrLikedSignedOut):
 		s.write(w, http.StatusUnauthorized, apiError{Error: "signed out", Reauth: true})
 	case errors.Is(err, context.Canceled):
 		// The client went away; nothing to report.
@@ -274,6 +274,10 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		s.deps.Log.Warn("upstream rate limited", "path", r.URL.Path)
 		s.write(w, http.StatusTooManyRequests,
 			apiError{Error: "rate limited by YouTube; wait a few minutes"})
+	case errors.Is(err, renderers.ErrLikedMessage):
+		// YouTube's own wording, which is generic, so it is shown as it is.
+		s.deps.Log.Warn("liked music message page", "path", r.URL.Path, "err", err)
+		s.write(w, http.StatusBadGateway, apiError{Error: err.Error()})
 	case errors.Is(err, renderers.ErrLikedShape):
 		// Liked Music without its header or tracks only comes back while
 		// YouTube throttles the account, so it is answered as the throttle it

@@ -75,15 +75,28 @@ func TestPlaylistPageDoesNotFetchTheTail(t *testing.T) {
 }
 
 // servePage answers every InnerTube call with page, and the config scrape
-// with a usable client version.
+// with a usable client version, as a signed-in client.
 func servePage(page []byte) *innertube.Client {
-	return innertube.New(innertube.WithHTTPClient(&http.Client{Transport: pagingTransport(func(r *http.Request) (*http.Response, error) {
+	return serveAs(page, nil, &innertube.Credentials{Cookie: "SAPISID=test; LOGIN_INFO=test"})
+}
+
+// serveAs is servePage with the given credentials (nil: signed out). posts,
+// when set, counts the InnerTube calls made.
+func serveAs(page []byte, posts *int, creds *innertube.Credentials) *innertube.Client {
+	opts := []innertube.Option{innertube.WithHTTPClient(&http.Client{Transport: pagingTransport(func(r *http.Request) (*http.Response, error) {
 		body := []byte(`{"INNERTUBE_CLIENT_VERSION":"1.20260901.01.00","INNERTUBE_API_KEY":"test"}`)
 		if r.Method == "POST" {
+			if posts != nil {
+				*posts++
+			}
 			body = page
 		}
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
-	})}))
+	})})}
+	if creds != nil {
+		opts = append(opts, innertube.WithCredentials(creds))
+	}
+	return innertube.New(opts...)
 }
 
 // The Liked Music page reads without its header, as the library's summary
@@ -129,5 +142,20 @@ func TestLikedMusicPageUsesTheLikedParse(t *testing.T) {
 	_, err = catalog.NewInnerTube(servePage([]byte(`{"contents":{}}`)), nil).Playlist(context.Background(), "PLother")
 	if err == nil || errors.Is(err, renderers.ErrLikedShape) {
 		t.Fatalf("other playlist err = %v", err)
+	}
+}
+
+// Signed out, Liked Music is not asked for at all: the answer is to sign in.
+func TestLikedMusicSignedOutAsksForSignIn(t *testing.T) {
+	posts := 0
+	c := catalog.NewInnerTube(serveAs([]byte(`{"contents":{}}`), &posts, nil), nil)
+	if _, err := c.Playlist(context.Background(), "LM"); !errors.Is(err, renderers.ErrLikedSignedOut) {
+		t.Fatalf("Playlist err = %v, want ErrLikedSignedOut", err)
+	}
+	if _, err := c.PlaylistPage(context.Background(), "VLLM", ""); !errors.Is(err, renderers.ErrLikedSignedOut) {
+		t.Fatalf("PlaylistPage err = %v, want ErrLikedSignedOut", err)
+	}
+	if posts != 0 {
+		t.Fatalf("made %d InnerTube calls while signed out", posts)
 	}
 }

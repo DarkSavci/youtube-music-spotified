@@ -241,3 +241,36 @@ func TestThrottledLikedMusicIsA429(t *testing.T) {
 		t.Fatalf("throttled liked music = %d, want 429", rec.Code)
 	}
 }
+
+// Signed out, Liked Music asks for sign-in like /v1/me/liked does; a message
+// page is passed on in YouTube's words; only the empty shape is a 429.
+func TestLikedMusicFailuresAreToldApart(t *testing.T) {
+	cases := []struct {
+		err    error
+		code   int
+		reauth bool
+	}{
+		{renderers.ErrLikedSignedOut, http.StatusUnauthorized, true},
+		{&renderers.LikedMessageError{Text: "Something went wrong"}, http.StatusBadGateway, false},
+		{renderers.ErrLikedShape, http.StatusTooManyRequests, false},
+	}
+	for _, c := range cases {
+		rec := do(t, serverWith(api.Deps{Catalog: brokenCatalog{err: c.err}}), http.MethodGet, "/v1/playlists/LM")
+		if rec.Code != c.code {
+			t.Fatalf("%v: status %d, want %d", c.err, rec.Code, c.code)
+		}
+		var body struct {
+			Error  string `json:"error"`
+			Reauth bool   `json:"reauth"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Reauth != c.reauth {
+			t.Fatalf("%v: reauth %v, want %v", c.err, body.Reauth, c.reauth)
+		}
+		if c.code == http.StatusBadGateway && !strings.Contains(body.Error, "Something went wrong") {
+			t.Fatalf("message lost: %q", body.Error)
+		}
+	}
+}
