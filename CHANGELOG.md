@@ -2,6 +2,76 @@
 
 Every release of Youtube Music Spotified, newest first.
 
+## 0.2.1 — 2026-09-27
+
+### New
+
+- Artist radio, full-catalogue play and an all-songs view (#47, #48)
+- Ask the leader before a guest's song joins a Take requests room
+
+### Fixed
+
+- Say when signing in is needed for every library change, and strip stream error URLs
+- Show YouTube's wait, say when signing in is needed, and keep request keys out of errors
+- No false skip after a brief outage, and a temporary resolver fallback
+- Polish the liked reads, retry menu entry and liked count
+- Menus, likes, video and playing keep working with fewer requests
+- Keep the mixes through a signed-out start, and never show kept likes to a signed-out session
+- Clearing the cache for an account change starts no edit lag window
+- Never keep a failed or signed-out answer, and forget an account's cache on sign-out
+- Recover from a lost connection faster and more surely
+- A success ends a cooldown only if it began after the cooldown did
+- Only the empty state reads as no likes, and follow the live session
+- An account with no likes gets an empty Liked Music, not an error
+- Tell signed-out and message-page Liked Music apart from throttling
+- Treat header-less Liked Music the same everywhere, and keep artist pins
+- Read Liked Music without its header, and open library artists
+- Close the gaps the request governor left
+- Tighten connection-loss handling after review
+- Wait out a lost connection instead of skipping the queue
+- Give every keyboard shortcut its own id
+- A track played from a warmed deck ends a run of failures
+- Never let an older projection overwrite a stall, and re-report it after a seek
+- Keep a stall honest through retries, creep and stale reports
+- Show buffering at once and give up on a dead stream in seconds
+- Keep the Songs page's opened releases, and retry the ones that failed
+- Open every release on the artist Songs page, albums first
+- Say when a radio batch had only songs the room already had
+- Radio never brings back a song the room jumped past
+- Say what closing the window does with Close to tray off on Windows
+- Closing the window quits when close to tray is off
+- Radio only from playback controllers, and it gives way
+- A failed preload backs off, and a new list is never mistaken for the current one
+- People's songs go ahead of the room's radio
+- A track that fails while paused stays put instead of skipping ahead
+- Artist Play replaces a queue that merely starts on the same song
+- Take only the artist's own songs from releases, one per song
+- Keep artist shuffle to the artist and the songs page complete
+- Report failures the engines were still able to drop
+- Don't panic when the stream retry after a 403 cannot connect
+- Give YouTube's embedded player the Referer it requires
+- Make the embedded fallback play, and fail instead of hanging
+- Report a dead track once, and never sit on a silent "playing"
+- Stop Listen Together length reports from cutting songs short or stalling the room
+- Make Listen Together move to the next song reliably and play radio from a song
+- Keep a refused accept from trimming the room's played songs
+- Tighten song requests after review
+- Keep the saved queue in an empty room, and shuffle a kept room queue
+- Say that leaving a room keeps its music playing
+- Keep the room's queue when leaving Listen Together
+- Drop the leading dot on a mix with no description
+- Keep long album titles from breaking the page header (#46)
+- Read album release type, unlinked artists, description and shelves
+
+### Faster
+
+- Make far fewer requests from the UI
+- Keep YouTube's answers, so repeat views and restarts don't ask again
+- Remember failed stream lookups and bound speculative prefetches
+- Pace autoplay's radio pages and stop on a radio with nothing new
+- Pace every YouTube call and back off when YouTube says to
+
+
 ## 0.2.0 — 2026-09-25
 
 ### New
