@@ -83,6 +83,13 @@ func main() {
 		// hours skips yt-dlp.
 		deps.URLs = ctrl
 	}
+	// Answers read from YouTube are kept, in the database when there is one,
+	// so repeat views and restarts do not ask for them again.
+	if ctrl != nil {
+		deps.Responses = api.NewResponseCache(ctrl, log)
+	} else {
+		deps.Responses = api.NewResponseCache(nil, log)
+	}
 
 	// Credentials are optional and may arrive later: signing in happens while
 	// this process is running. The store re-reads the file on demand, which is

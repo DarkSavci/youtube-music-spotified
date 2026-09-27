@@ -3,6 +3,7 @@ package mixes_test
 import (
 	"context"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -222,5 +223,65 @@ func TestEmptyHistoryIsNotAnError(t *testing.T) {
 	}
 	if len(out) != 0 {
 		t.Errorf("expected no mixes, got %d", len(out))
+	}
+}
+
+// busyCatalog records how many radio calls run at once.
+type busyCatalog struct {
+	stubCatalog
+	mu       sync.Mutex
+	inFlight int
+	maxSeen  int
+	total    int
+}
+
+func (b *busyCatalog) Radio(_ context.Context, seed string) ([]domain.Track, error) {
+	b.mu.Lock()
+	b.inFlight++
+	b.total++
+	if b.inFlight > b.maxSeen {
+		b.maxSeen = b.inFlight
+	}
+	b.mu.Unlock()
+	time.Sleep(20 * time.Millisecond)
+	b.mu.Lock()
+	b.inFlight--
+	b.mu.Unlock()
+	var out []domain.Track
+	for i := 0; i < 20; i++ {
+		out = append(out, track(seed+"-r"+string(rune('a'+i)), "Radio", "Someone"))
+	}
+	return out, nil
+}
+
+// Building the mixes used to fire about thirty radio calls in the same
+// instant. Now a handful run at a time, from a few seeds per mix.
+func TestMixesAskForRadioAFewAtATime(t *testing.T) {
+	store := openStore(t)
+	var artists []string
+	for i := 0; i < 26; i++ {
+		artists = append(artists, "Artist "+string(rune('A'+i)))
+	}
+	seedHistory(t, store, artists)
+
+	cat := &busyCatalog{}
+	g := mixes.New(store, cat)
+	out, err := g.All(context.Background(), control.DefaultUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) == 0 {
+		t.Fatal("no mixes built")
+	}
+	if cat.maxSeen > 3 {
+		t.Errorf("%d radio calls ran at once, want at most 3", cat.maxSeen)
+	}
+	if cat.total > 12 {
+		t.Errorf("%d radio calls, want at most 12 (3 seeds × 3 daily mixes + 3 for Discover)", cat.total)
+	}
+	for _, m := range out {
+		if len(m.Seeds) > 3 {
+			t.Errorf("%s seeded from %d artists", m.Title, len(m.Seeds))
+		}
 	}
 }

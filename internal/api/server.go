@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"spotifier/internal/audiocache"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"spotifier/internal/obs"
 	"spotifier/internal/report"
 	"spotifier/internal/resolver"
+	"spotifier/internal/respcache"
 	"spotifier/internal/session"
 )
 
@@ -97,6 +99,10 @@ type Deps struct {
 	// forgotten when the process ends, which is what happens without a
 	// database to write it to.
 	Resume *session.Keeper
+
+	// Responses keeps answers read from YouTube (see responses.go). Nil asks
+	// upstream on every request, which is what the tests expect.
+	Responses *respcache.Cache
 }
 
 // Server routes HTTP to the core modules.
@@ -303,21 +309,29 @@ func (s *Server) requireIdentity(w http.ResponseWriter) (identity.Identity, bool
 // ---------- catalog ----------
 
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
-	page, err := s.deps.Catalog.Home(r.Context())
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	s.write(w, http.StatusOK, normalizeBrowsePage(page))
+	s.serveKept(w, r, cacheKey("cat", "home"), policyHome, func(ctx context.Context) (produced, error) {
+		page, err := s.deps.Catalog.Home(ctx)
+		if err != nil {
+			return produced{}, err
+		}
+		return okBody(normalizeBrowsePage(page))
+	})
 }
 
 func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
-	page, err := s.deps.Catalog.Browse(r.Context(), r.PathValue("surface"), r.URL.Query().Get("params"))
-	if err != nil {
-		s.fail(w, r, err)
-		return
+	surface, params := r.PathValue("surface"), r.URL.Query().Get("params")
+	policy := policyBrowse
+	if !strings.HasPrefix(surface, "FEmusic_") {
+		// An artist's discography and the like change as the artist does.
+		policy = policyArtist
 	}
-	s.write(w, http.StatusOK, normalizeBrowsePage(page))
+	s.serveKept(w, r, cacheKey("cat", "browse", surface, params), policy, func(ctx context.Context) (produced, error) {
+		page, err := s.deps.Catalog.Browse(ctx, surface, params)
+		if err != nil {
+			return produced{}, err
+		}
+		return okBody(normalizeBrowsePage(page))
+	})
 }
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -326,12 +340,15 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		s.write(w, http.StatusOK, normalizeSearch(domain.SearchResults{Query: ""}))
 		return
 	}
-	res, err := s.deps.Catalog.Search(r.Context(), q, domain.SearchFilter(r.URL.Query().Get("filter")))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	s.write(w, http.StatusOK, normalizeSearch(res))
+	filter := r.URL.Query().Get("filter")
+	s.serveKept(w, r, cacheKey("cat", "search", strings.ToLower(strings.TrimSpace(q)), filter), policySearch,
+		func(ctx context.Context) (produced, error) {
+			res, err := s.deps.Catalog.Search(ctx, q, domain.SearchFilter(filter))
+			if err != nil {
+				return produced{}, err
+			}
+			return okBody(normalizeSearch(res))
+		})
 }
 
 func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
@@ -347,52 +364,58 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAlbum(w http.ResponseWriter, r *http.Request) {
-	al, err := s.deps.Catalog.Album(r.Context(), r.PathValue("id"))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	s.write(w, http.StatusOK, normalizeAlbum(al))
+	id := r.PathValue("id")
+	s.serveKept(w, r, cacheKey("cat", "album", id), policyAlbum, func(ctx context.Context) (produced, error) {
+		al, err := s.deps.Catalog.Album(ctx, id)
+		if err != nil {
+			return produced{}, err
+		}
+		return okBody(normalizeAlbum(al))
+	})
 }
 
 func (s *Server) handleArtist(w http.ResponseWriter, r *http.Request) {
-	ar, err := s.deps.Catalog.Artist(r.Context(), r.PathValue("id"))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	s.write(w, http.StatusOK, normalizeArtist(ar))
+	id := r.PathValue("id")
+	s.serveKept(w, r, cacheKey("cat", "artist", id), policyArtist, func(ctx context.Context) (produced, error) {
+		ar, err := s.deps.Catalog.Artist(ctx, id)
+		if err != nil {
+			return produced{}, err
+		}
+		return okBody(normalizeArtist(ar))
+	})
 }
 
 func (s *Server) handlePlaylist(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
 	if r.URL.Query().Get("paged") == "1" {
-		if pages, ok := s.deps.Catalog.(interface {
-			PlaylistPage(context.Context, string, string) (domain.PlaylistPage, error)
-		}); ok {
-			page, err := pages.PlaylistPage(r.Context(), r.PathValue("id"), r.URL.Query().Get("continuation"))
-			if err != nil {
-				s.fail(w, r, err)
-				return
+		cont := r.URL.Query().Get("continuation")
+		s.serveKept(w, r, playlistKeys(id)+cacheKey("page", cont), policyPlaylist, func(ctx context.Context) (produced, error) {
+			if pages, ok := s.deps.Catalog.(interface {
+				PlaylistPage(context.Context, string, string) (domain.PlaylistPage, error)
+			}); ok {
+				page, err := pages.PlaylistPage(ctx, id, cont)
+				if err != nil {
+					return produced{}, err
+				}
+				page.Playlist = normalizePlaylist(page.Playlist)
+				return produced{status: http.StatusOK, value: page}, nil
 			}
-			page.Playlist = normalizePlaylist(page.Playlist)
-			s.write(w, http.StatusOK, page)
-			return
-		}
-		// Fixture adapters have a finite, already complete list.
-		pl, err := s.deps.Catalog.Playlist(r.Context(), r.PathValue("id"))
+			// Fixture adapters have a finite, already complete list.
+			pl, err := s.deps.Catalog.Playlist(ctx, id)
+			if err != nil {
+				return produced{}, err
+			}
+			return produced{status: http.StatusOK, value: domain.PlaylistPage{Playlist: normalizePlaylist(pl)}}, nil
+		})
+		return
+	}
+	s.serveKept(w, r, playlistKeys(id)+"whole", policyPlaylist, func(ctx context.Context) (produced, error) {
+		pl, err := s.deps.Catalog.Playlist(ctx, id)
 		if err != nil {
-			s.fail(w, r, err)
-			return
+			return produced{}, err
 		}
-		s.write(w, http.StatusOK, domain.PlaylistPage{Playlist: normalizePlaylist(pl)})
-		return
-	}
-	pl, err := s.deps.Catalog.Playlist(r.Context(), r.PathValue("id"))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	s.write(w, http.StatusOK, normalizePlaylist(pl))
+		return okBody(normalizePlaylist(pl))
+	})
 }
 
 // ---------- identity ----------
@@ -408,14 +431,33 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		s.write(w, http.StatusOK, meResponse{State: string(innertube.LoggedOut)})
 		return
 	}
-	state, acct, err := client.SessionState(r.Context())
-	if err != nil && state == innertube.Unknown {
-		// Cannot verify is not the same as expired; report it as such so the
-		// UI does not prompt for sign-in.
+	if s.deps.Responses == nil {
+		state, acct, err := client.SessionState(r.Context())
+		if err != nil && state == innertube.Unknown {
+			// Cannot verify is not the same as expired; report it as such so
+			// the UI does not prompt for sign-in.
+			s.write(w, http.StatusOK, meResponse{State: string(innertube.Unknown)})
+			return
+		}
+		s.write(w, http.StatusOK, meResponse{State: string(state), Account: acct})
+		return
+	}
+	// "Cannot verify" is never kept: the last verified answer covers it, and
+	// without one it is reported as unknown rather than as an error.
+	e, res, err := s.deps.Responses.Get(r.Context(), cacheKey("me", "state"), policyMe,
+		func(ctx context.Context) (respcache.Entry, error) {
+			state, acct, err := client.SessionState(ctx)
+			if err != nil && state == innertube.Unknown {
+				return respcache.Entry{}, err
+			}
+			body, err := json.Marshal(meResponse{State: string(state), Account: acct})
+			return respcache.Entry{Status: http.StatusOK, Body: body}, err
+		})
+	if err != nil {
 		s.write(w, http.StatusOK, meResponse{State: string(innertube.Unknown)})
 		return
 	}
-	s.write(w, http.StatusOK, meResponse{State: string(state), Account: acct})
+	writeKept(w, e, res)
 }
 
 func (s *Server) handleChannels(w http.ResponseWriter, r *http.Request) {
@@ -424,12 +466,13 @@ func (s *Server) handleChannels(w http.ResponseWriter, r *http.Request) {
 		s.write(w, http.StatusUnauthorized, map[string]string{"error": "Sign in first"})
 		return
 	}
-	channels, err := client.Channels(r.Context())
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	s.write(w, http.StatusOK, channels)
+	s.serveKept(w, r, cacheKey("me", "channels"), policyChannels, func(ctx context.Context) (produced, error) {
+		channels, err := client.Channels(ctx)
+		if err != nil {
+			return produced{}, err
+		}
+		return okBody(channels)
+	})
 }
 
 // handleAuthReload re-reads the credentials file written by the shell.
@@ -449,6 +492,8 @@ func (s *Server) handleAuthReload(w http.ResponseWriter, r *http.Request) {
 	}
 	signedIn := s.deps.Account.SignedIn()
 	s.deps.Log.Info("credentials reloaded", "signedIn", signedIn)
+	// Whatever was kept for the previous session is not this one's.
+	s.forget(r.Context(), "me|", "lib|", cacheKey("cat", "home"))
 	s.write(w, http.StatusOK, map[string]any{"signedIn": signedIn})
 }
 
@@ -457,6 +502,7 @@ func (s *Server) handleAuthSignOut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Account != nil {
 		s.deps.Account.Clear()
 	}
+	s.forget(r.Context(), "me|", "lib|", cacheKey("cat", "home"))
 	s.write(w, http.StatusOK, map[string]any{"signedIn": false})
 }
 
@@ -474,12 +520,14 @@ alarming banner on a perfectly normal state.
 */
 // handlePodcast reads a show and its episodes.
 func (s *Server) handlePodcast(w http.ResponseWriter, r *http.Request) {
-	pod, err := s.deps.Catalog.Podcast(r.Context(), r.PathValue("id"))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	s.write(w, http.StatusOK, normalizePodcast(pod))
+	id := r.PathValue("id")
+	s.serveKept(w, r, cacheKey("cat", "podcast", id), policyPodcast, func(ctx context.Context) (produced, error) {
+		pod, err := s.deps.Catalog.Podcast(ctx, id)
+		if err != nil {
+			return produced{}, err
+		}
+		return okBody(normalizePodcast(pod))
+	})
 }
 
 // handleRadio returns the endless queue YouTube generates from a seed Track.
@@ -490,22 +538,25 @@ func (s *Server) handlePodcast(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRadio(w http.ResponseWriter, r *http.Request) {
 	// ?list= names a generated queue other than the song's own radio (an
 	// artist's mix); the path is then the song that list starts from.
+	id := r.PathValue("id")
 	if list := r.URL.Query().Get("list"); list != "" {
-		mix := domain.MixSeed{VideoID: r.PathValue("id"), PlaylistID: list, Params: r.URL.Query().Get("params")}
-		tracks, _, err := s.deps.Catalog.MixPage(r.Context(), mix, "")
+		mix := domain.MixSeed{VideoID: id, PlaylistID: list, Params: r.URL.Query().Get("params")}
+		s.serveKept(w, r, cacheKey("cat", "radio", id, list, mix.Params), policyRadio, func(ctx context.Context) (produced, error) {
+			tracks, _, err := s.deps.Catalog.MixPage(ctx, mix, "")
+			if err != nil {
+				return produced{}, err
+			}
+			return okBody(nonNilTracks(tracks))
+		})
+		return
+	}
+	s.serveKept(w, r, cacheKey("cat", "radio", id), policyRadio, func(ctx context.Context) (produced, error) {
+		tracks, err := s.deps.Catalog.Radio(ctx, id)
 		if err != nil {
-			s.fail(w, r, err)
-			return
+			return produced{}, err
 		}
-		s.write(w, http.StatusOK, nonNilTracks(tracks))
-		return
-	}
-	tracks, err := s.deps.Catalog.Radio(r.Context(), r.PathValue("id"))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	s.write(w, http.StatusOK, nonNilTracks(tracks))
+		return okBody(nonNilTracks(tracks))
+	})
 }
 
 func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request) {
@@ -532,21 +583,24 @@ func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request) {
 	// the client rather than decided here.
 	preferTimed := q.Get("timed") == "1"
 
-	got, err := s.deps.Lyrics.Lyrics(r.Context(), track, preferTimed)
-	if q.Get("video") == "1" && (errors.Is(err, lyrics.ErrNotFound) || (err == nil && preferTimed && !got.Synced)) {
-		if fallback, fallbackErr := s.videoLyrics(r.Context(), track, preferTimed); fallbackErr == nil && (err != nil || fallback.Synced) {
-			got, err = fallback, nil
+	key := cacheKey("cat", "lyrics", track.ID, q.Get("timed"), q.Get("video"),
+		q.Get("title"), q.Get("artist"), q.Get("album"), q.Get("durationMs"))
+	s.serveKept(w, r, key, policyLyrics, func(ctx context.Context) (produced, error) {
+		got, err := s.deps.Lyrics.Lyrics(ctx, track, preferTimed)
+		if q.Get("video") == "1" && (errors.Is(err, lyrics.ErrNotFound) || (err == nil && preferTimed && !got.Synced)) {
+			if fallback, fallbackErr := s.videoLyrics(ctx, track, preferTimed); fallbackErr == nil && (err != nil || fallback.Synced) {
+				got, err = fallback, nil
+			}
 		}
-	}
-	if errors.Is(err, lyrics.ErrNotFound) {
-		s.write(w, http.StatusNotFound, apiError{Error: "no lyrics for this track"})
-		return
-	}
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	s.write(w, http.StatusOK, got)
+		if errors.Is(err, lyrics.ErrNotFound) {
+			// Most songs have none. That is an answer, and it is kept.
+			return produced{status: http.StatusNotFound, value: apiError{Error: "no lyrics for this track"}}, nil
+		}
+		if err != nil {
+			return produced{}, err
+		}
+		return okBody(got)
+	})
 }
 
 func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
@@ -554,6 +608,13 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 	if lib == nil {
 		s.write(w, http.StatusUnauthorized, apiError{Error: "signed out", Reauth: true})
 		return
+	}
+	// With answers kept, the library reads its YouTube surfaces through them
+	// and still merges, enriches and sorts on every request.
+	if _, isService := lib.(*library.Service); isService && s.deps.Responses != nil {
+		if id := s.account().Identity; id != nil {
+			lib = library.New(keptLibrary{Identity: id, s: s}, s.libraryMeta())
+		}
 	}
 	q := r.URL.Query()
 	items, err := lib.List(r.Context(),
@@ -574,12 +635,22 @@ func (s *Server) handleLiked(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	pl, err := id.LikedSongs(r.Context())
-	if err != nil {
-		s.fail(w, r, err)
+	if s.deps.Responses == nil {
+		pl, err := id.LikedSongs(r.Context())
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		s.write(w, http.StatusOK, normalizePlaylist(pl))
 		return
 	}
-	s.write(w, http.StatusOK, normalizePlaylist(pl))
+	s.serveKept(w, r, likedKey, policyLiked, func(ctx context.Context) (produced, error) {
+		pl, err := s.readLiked(ctx, id)
+		if err != nil {
+			return produced{}, err
+		}
+		return okBody(normalizePlaylist(pl))
+	})
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
@@ -617,6 +688,14 @@ func (s *Server) handleRate(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	// A like lands at the top of Liked Music, which the next read picks up
+	// in one page; an unlike is applied to the kept list directly.
+	if identity.Rating(body.Rating) == identity.RatingLike {
+		s.expire(r.Context(), likedKey)
+	} else {
+		s.unlikeKept(r.Context(), r.PathValue("id"))
+	}
+	s.expire(r.Context(), playlistKeys("LM"), playlistKeys("VLLM"), cacheKey("lib", "liked-summary"))
 	w.WriteHeader(http.StatusNoContent)
 }
 

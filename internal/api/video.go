@@ -84,12 +84,13 @@ func (s *Server) handleTrackVersions(w http.ResponseWriter, r *http.Request) {
 		s.write(w, http.StatusOK, []domain.Track{})
 		return
 	}
-	tracks, err := provider.TrackVersions(r.Context(), id)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	s.write(w, http.StatusOK, nonNilTracks(tracks))
+	s.serveKept(w, r, cacheKey("cat", "versions", id), policyPermanent, func(ctx context.Context) (produced, error) {
+		tracks, err := provider.TrackVersions(ctx, id)
+		if err != nil {
+			return produced{}, err
+		}
+		return okBody(nonNilTracks(tracks))
+	})
 }
 
 // Picture resolutions have their own bounded cache: they must never replace

@@ -50,11 +50,25 @@ type Mix struct {
 type Generator struct {
 	store   *control.Store
 	catalog catalog.Catalog
+	// radio bounds the radio calls in flight across every mix being built.
+	// Building them all at once used to be about thirty calls in the same
+	// instant, which is how an account runs into YouTube's rate limit.
+	radio chan struct{}
 }
 
 func New(store *control.Store, cat catalog.Catalog) *Generator {
-	return &Generator{store: store, catalog: cat}
+	return &Generator{store: store, catalog: cat, radio: make(chan struct{}, radioInFlight)}
 }
+
+const (
+	// radioInFlight is how many radio calls run at once.
+	radioInFlight = 3
+	// seedsPerMix is how many artists seed each mix. Three already give a
+	// mix of thirty tracks plenty to draw from; more only cost calls.
+	seedsPerMix = 3
+	// dailyMixes is how many Daily Mixes are built.
+	dailyMixes = 3
+)
 
 // minHistoryForSeeding is how many distinct artists must exist before seeded
 // mixes are offered.
@@ -78,18 +92,35 @@ func (g *Generator) All(ctx context.Context, userID int64) ([]Mix, error) {
 	if onRepeat, err := g.OnRepeat(ctx, userID); err == nil && len(onRepeat.Tracks) > 0 {
 		out = append(out, onRepeat)
 	}
-
-	artists, err := g.store.TopArtists(ctx, userID, control.Last(90*24*time.Hour), 24)
+	seeded, err := g.Seeded(ctx, userID)
 	if err != nil {
 		return out, nil
+	}
+	return append(out, seeded...), nil
+}
+
+/*
+Seeded is the mixes built from YouTube's radio: the Daily Mixes and Discover.
+
+They are the expensive part, a handful of radio calls, and they change slowly,
+so the API keeps them for a day; On Repeat is local and is always read fresh.
+*/
+func (g *Generator) Seeded(ctx context.Context, userID int64) ([]Mix, error) {
+	if g.store == nil {
+		return nil, fmt.Errorf("mixes: no history store")
+	}
+	artists, err := g.store.TopArtists(ctx, userID, control.Last(90*24*time.Hour), seedsPerMix*dailyMixes)
+	if err != nil {
+		return nil, err
 	}
 	if len(artists) < minHistoryForSeeding {
 		// Not enough history to seed anything meaningful. Returning what we
 		// have is honest; inventing mixes from two artists is not.
-		return out, nil
+		return nil, nil
 	}
 
-	daily, err := g.DailyMixes(ctx, userID, artists, 3)
+	var out []Mix
+	daily, err := g.DailyMixes(ctx, userID, artists, dailyMixes)
 	if err == nil {
 		out = append(out, daily...)
 	}
@@ -126,6 +157,11 @@ func (g *Generator) DailyMixes(ctx context.Context, userID int64, artists []cont
 		return nil, nil
 	}
 	clusters := partition(artists, count)
+	for i := range clusters {
+		if len(clusters[i]) > seedsPerMix {
+			clusters[i] = clusters[i][:seedsPerMix]
+		}
+	}
 
 	var (
 		wg  sync.WaitGroup
@@ -166,8 +202,8 @@ func (g *Generator) DailyMixes(ctx context.Context, userID int64, artists []cont
 // removed — so the result is genuinely new rather than a greatest-hits replay.
 func (g *Generator) Discover(ctx context.Context, userID int64, artists []control.ArtistStat) (Mix, error) {
 	seedArtists := artists
-	if len(seedArtists) > 8 {
-		seedArtists = seedArtists[:8]
+	if len(seedArtists) > seedsPerMix {
+		seedArtists = seedArtists[:seedsPerMix]
 	}
 	tracks, seeds := g.expand(ctx, userID, seedArtists, 30, true)
 	return Mix{
@@ -201,7 +237,8 @@ func (g *Generator) expand(
 	}
 
 	// One seed track per artist, resolved concurrently — a mix is several
-	// independent radio calls and running them in series is needlessly slow.
+	// independent radio calls and running them in series is needlessly slow —
+	// but only a few at a time across all mixes (see Generator.radio).
 	type result struct {
 		artist string
 		tracks []domain.Track
@@ -217,6 +254,12 @@ func (g *Generator) expand(
 		wg.Add(1)
 		go func(index int, artist, seedID string) {
 			defer wg.Done()
+			select {
+			case g.radio <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-g.radio }()
 			tracks, err := g.catalog.Radio(ctx, seedID)
 			if err != nil {
 				return
