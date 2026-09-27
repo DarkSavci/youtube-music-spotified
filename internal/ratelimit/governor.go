@@ -90,6 +90,7 @@ type Governor struct {
 	tokens   float64
 	last     time.Time
 	until    time.Time     // cooldown end
+	probed   time.Time     // the cooldown end a probe was let through for
 	backoff  time.Duration // next exponential cooldown
 	inFlight chan struct{}
 	onCool   []func(time.Duration)
@@ -199,6 +200,8 @@ func (g *Governor) Acquire(ctx context.Context) (func(), error) {
 		select {
 		case g.inFlight <- struct{}{}:
 		case <-ctx.Done():
+			// Nothing was sent, so the turn is handed back.
+			g.refund()
 			return nil, ctx.Err()
 		}
 	}
@@ -230,6 +233,48 @@ func (g *Governor) take() time.Duration {
 	}
 	need := (1 - g.tokens) / g.s.Rate
 	return time.Duration(need * float64(time.Second))
+}
+
+// refund returns a token taken for a call that was never sent.
+func (g *Governor) refund() {
+	g.mu.Lock()
+	if g.s.Rate > 0 {
+		g.tokens = math.Min(float64(g.s.Burst), g.tokens+1)
+	}
+	g.mu.Unlock()
+}
+
+/*
+Probe lets one call through during a cooldown, once per cooldown.
+
+Someone pressing play is owed one real attempt: the cooldown may be over
+upstream sooner than the guess here, and a refusal they did not cause, with
+no attempt behind it, reads as a broken track. Background work never probes.
+A probe that succeeds should call Succeeded, which ends the cooldown.
+*/
+func (g *Governor) Probe() bool {
+	if g == nil {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.until.After(g.now()) || g.probed.Equal(g.until) {
+		return false
+	}
+	g.probed = g.until
+	return true
+}
+
+// Succeeded records a call that worked: the exponential step starts over, and
+// a cooldown still running is over, since upstream has just answered.
+func (g *Governor) Succeeded() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.backoff = g.s.MinCooldown
+	g.until = time.Time{}
+	g.mu.Unlock()
 }
 
 /*
@@ -275,15 +320,25 @@ func (g *Governor) coolDown(asked time.Duration) time.Duration {
 	g.mu.Lock()
 	d := asked
 	if d <= 0 {
-		d = g.backoff
+		d = min(max(g.backoff, g.s.MinCooldown), g.s.MaxCooldown)
 		g.backoff = min(g.backoff*2, g.s.MaxCooldown)
+	} else {
+		// What upstream asked for is honoured, however long, up to an hour:
+		// asking again sooner only extends it. Never shorter than the
+		// minimum, though — an eager one second followed by the same burst
+		// is how a limit gets extended too.
+		d = min(max(d, g.s.MinCooldown), maxAskedCooldown)
 	}
-	// Never shorter than the minimum: an eager Retry-After of one second
-	// followed by the same burst is how a limit gets extended.
-	d = min(max(d, g.s.MinCooldown), g.s.MaxCooldown)
-	end := g.now().Add(d)
+	now := g.now()
+	wasCooling := g.until.After(now)
+	end := now.Add(d)
 	if end.After(g.until) {
 		g.until = end
+	}
+	if wasCooling {
+		// Extended by a refusal during the cooldown — a probe that failed:
+		// no second probe for the same stretch.
+		g.probed = g.until
 	}
 	hooks := slices.Clone(g.onCool)
 	g.mu.Unlock()
@@ -292,6 +347,10 @@ func (g *Governor) coolDown(asked time.Duration) time.Duration {
 	}
 	return d
 }
+
+// maxAskedCooldown caps a Retry-After, so a nonsense value cannot switch the
+// program off for a day.
+const maxAskedCooldown = time.Hour
 
 // ParseRetryAfter reads a Retry-After value: seconds, or an HTTP date.
 func ParseRetryAfter(v string, now time.Time) time.Duration {

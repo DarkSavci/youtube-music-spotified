@@ -192,3 +192,36 @@ func TestCallsAreObserved(t *testing.T) {
 		t.Fatalf("record %+v", got[1])
 	}
 }
+
+// A scrape that never reached YouTube (network down, local cooldown) is not
+// remembered: the next call tries again straight away.
+func TestUnsentScrapeIsNotRemembered(t *testing.T) {
+	var tries atomic.Int32
+	down := atomic.Bool{}
+	down.Store(true)
+	h := &http.Client{Transport: failingTransport{down: &down, tries: &tries}}
+	c := New(WithHTTPClient(h))
+	if _, err := c.Call(context.Background(), "browse", nil); err == nil {
+		t.Fatal("expected failure")
+	}
+	down.Store(false)
+	if _, err := c.Call(context.Background(), "browse", nil); err != nil {
+		t.Fatalf("a network failure was remembered: %v", err)
+	}
+}
+
+type failingTransport struct {
+	down  *atomic.Bool
+	tries *atomic.Int32
+}
+
+func (f failingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	f.tries.Add(1)
+	if f.down.Load() {
+		return nil, errors.New("dial tcp: lookup music.youtube.com: no such host")
+	}
+	if r.Method == http.MethodGet {
+		return respond(200, homepage, nil), nil
+	}
+	return respond(200, `{}`, nil), nil
+}

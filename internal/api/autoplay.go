@@ -223,7 +223,11 @@ func (s *Server) extendRadio(ctx context.Context, key, seed string, mix domain.M
 
 	q := s.deps.Session.Projection().State.Queue
 	if queueKey(q) != key {
-		return // the listener started something else meanwhile
+		// The listener started something else meanwhile. Its updates arrived
+		// while this fetch was busy and were turned away, so look at it now
+		// rather than waiting for it to move.
+		s.recheckAutoplay(ctx, 0)
+		return
 	}
 	have := make(map[string]bool, len(q.Items))
 	for _, t := range q.Items {

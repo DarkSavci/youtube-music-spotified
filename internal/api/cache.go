@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"spotifier/internal/audiocache"
+	"spotifier/internal/ratelimit"
 	"spotifier/internal/resolver"
 )
 
@@ -188,9 +189,16 @@ func (p *prefetcher) unclaim(key string) {
 	p.mu.Unlock()
 }
 
-func (p *prefetcher) backOff() {
+// backOff pauses speculative work for as long as upstream's cooldown, or ten
+// minutes when that is not known.
+func (p *prefetcher) backOff(d time.Duration) {
+	if d <= 0 {
+		d = 10 * time.Minute
+	}
 	p.mu.Lock()
-	p.pausedUntil = time.Now().Add(10 * time.Minute)
+	if until := time.Now().Add(d); until.After(p.pausedUntil) {
+		p.pausedUntil = until
+	}
 	p.mu.Unlock()
 }
 
@@ -302,7 +310,7 @@ func (s *Server) prefetchTrack(videoID string, whole, forQueue bool, guessReason
 			<-s.prefetch.resolve
 			if err != nil {
 				if errors.Is(err, resolver.ErrRateLimited) {
-					s.prefetch.backOff()
+					s.prefetch.backOff(ratelimit.RetryAfterOf(err))
 				}
 				if errors.Is(err, context.Canceled) {
 					// Gave way to a listener; still worth doing later.

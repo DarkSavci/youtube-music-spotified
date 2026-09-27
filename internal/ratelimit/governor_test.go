@@ -187,3 +187,60 @@ func TestNilGovernorAllowsEverything(t *testing.T) {
 		t.Fatal("nil governor cooling")
 	}
 }
+
+// One probe per cooldown: a failed probe extends the cooldown without
+// granting another; a successful one ends it.
+func TestProbeOncePerCooldown(t *testing.T) {
+	g, c := newFake(Settings{})
+	if g.Probe() {
+		t.Fatal("probe granted with no cooldown")
+	}
+	g.CoolDown(0)
+	if !g.Probe() || g.Probe() {
+		t.Fatal("want exactly one probe")
+	}
+	g.CoolDown(0) // the probe was refused too
+	if g.Probe() {
+		t.Fatal("a failed probe earned another")
+	}
+	c.t = c.t.Add(time.Hour)
+	g.CoolDown(0) // a fresh cooldown later
+	if !g.Probe() {
+		t.Fatal("no probe for a new cooldown")
+	}
+	g.Succeeded()
+	if cooling, _ := g.Cooling(); cooling {
+		t.Fatal("a successful call left the cooldown running")
+	}
+}
+
+// Retry-After is honoured beyond the exponential cap, up to an hour.
+func TestLongRetryAfterIsHonoured(t *testing.T) {
+	g, _ := newFake(Settings{})
+	h := http.Header{}
+	h.Set("Retry-After", "1800")
+	if d := RetryAfterOf(g.Observe(429, h, nil)); d != 30*time.Minute {
+		t.Fatalf("cooldown %s, want 30m", d)
+	}
+	h.Set("Retry-After", "86400")
+	if d := RetryAfterOf(g.Observe(429, h, nil)); d != time.Hour {
+		t.Fatalf("cooldown %s, want capped at 1h", d)
+	}
+}
+
+// A call abandoned while waiting for a slot does not spend a token.
+func TestCancelledWaitRefundsItsToken(t *testing.T) {
+	g := New("t", Settings{Rate: 0.001, Burst: 2, InFlight: 1})
+	r1, _ := g.Acquire(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := g.Acquire(ctx); err == nil {
+		t.Fatal("got a slot while one was held")
+	}
+	r1()
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel2()
+	if _, err := g.Acquire(ctx2); err != nil {
+		t.Fatalf("the abandoned call spent the last token: %v", err)
+	}
+}

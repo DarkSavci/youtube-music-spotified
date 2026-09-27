@@ -167,8 +167,8 @@ func New(d Deps) *Server {
 	s.streamGov = d.StreamGovernor
 	// Speculative work stops the moment YouTube says to slow down, whichever
 	// kind of call it said it to.
-	d.APIGovernor.OnCooldown(func(time.Duration) { s.prefetch.backOff() })
-	d.StreamGovernor.OnCooldown(func(time.Duration) { s.prefetch.backOff() })
+	d.APIGovernor.OnCooldown(s.prefetch.backOff)
+	d.StreamGovernor.OnCooldown(s.prefetch.backOff)
 	s.routes()
 	return s
 }
@@ -502,6 +502,9 @@ func (s *Server) handleAuthReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	signedIn := s.deps.Account.SignedIn()
+	// Tracks that failed signed out (age checks, account-only formats) may
+	// play now.
+	s.failures.clear()
 	s.deps.Log.Info("credentials reloaded", "signedIn", signedIn)
 	s.write(w, http.StatusOK, map[string]any{"signedIn": signedIn})
 }

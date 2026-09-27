@@ -141,13 +141,21 @@ func (s *Server) resolve(ctx context.Context, videoID string, speculative bool) 
 		s.streams.put(videoID, e)
 		return e, nil
 	}
-	// A track that just failed fails again the same way, and a rate limit
-	// holds for everyone: neither is worth another yt-dlp run.
-	if err := s.failures.recall(videoID); err != nil {
+	// A track that just failed fails again the same way: not worth another
+	// yt-dlp run. Someone pressing play is owed a fresh attempt, though,
+	// unless one was made for them moments ago; a failed guess never stands
+	// in the way of a play.
+	if err := s.failures.recall(videoID, !speculative); err != nil {
 		return resolvedEntry{}, err
 	}
-	if cooling, left := s.streamGov.Cooling(); cooling {
-		return resolvedEntry{}, fmt.Errorf("%w: %w", resolver.ErrRateLimited, &ratelimit.Error{RetryAfter: left})
+	// A rate limit holds for everyone — except for one probe per cooldown
+	// for a track someone is waiting for, which may find it already over.
+	if cooling, left := s.streamGov.Cooling(); cooling && (speculative || !s.streamGov.Probe()) {
+		err := fmt.Errorf("%w: %w", resolver.ErrRateLimited, &ratelimit.Error{RetryAfter: left})
+		// Recorded, so the health check says "rate limited" rather than
+		// leaving the client to take this track for a dead one.
+		s.lastFailure.Store(videoID, err)
+		return resolvedEntry{}, err
 	}
 	key := videoID
 	if !speculative {
@@ -203,11 +211,15 @@ func (s *Server) resolve(ctx context.Context, videoID string, speculative bool) 
 	started := time.Now()
 	stream, quality, err := s.deps.Resolver.Resolve(rctx, videoID)
 	cancel()
-	if errors.Is(err, resolver.ErrRateLimited) {
+	switch {
+	case err == nil:
+		// Upstream answered: whatever cooldown was running is over.
+		s.streamGov.Succeeded()
+	case errors.Is(err, resolver.ErrRateLimited):
 		d := s.streamGov.CoolDown(0)
 		err = fmt.Errorf("%w: %w", err, &ratelimit.Error{RetryAfter: d})
 	}
-	s.failures.remember(videoID, err)
+	s.failures.remember(videoID, err, !speculative)
 	s.deps.Log.Info("resolve", "video", videoID, "reason", resolveReason(ctx, speculative),
 		"took", time.Since(started).Round(time.Millisecond), "err", err)
 

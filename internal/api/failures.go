@@ -31,11 +31,19 @@ type failureMemo struct {
 type failure struct {
 	err   error
 	until time.Time
+	// direct is when a play (not a guess) last failed this way; zero if only
+	// guesses have.
+	direct time.Time
 }
 
 const (
 	unavailableMemo = time.Hour
 	failureMemoTTL  = 2 * time.Minute
+	// directWindow is how long a failed play answers the next play from
+	// memory: long enough to cover the stream, loudness, health and silence
+	// asks that arrive together and the automatic retries right after, short
+	// enough that someone pressing play again gets a fresh attempt.
+	directWindow = 15 * time.Second
 )
 
 func (m *failureMemo) clock() time.Time {
@@ -45,21 +53,34 @@ func (m *failureMemo) clock() time.Time {
 	return time.Now()
 }
 
-func (m *failureMemo) recall(videoID string) error {
+// recall returns the remembered failure for a track, if any. For a play
+// (direct), only a failed play in the last directWindow counts.
+func (m *failureMemo) recall(videoID string, direct bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	f, ok := m.entries[videoID]
 	if !ok {
 		return nil
 	}
-	if !m.clock().Before(f.until) {
+	now := m.clock()
+	if !now.Before(f.until) {
 		delete(m.entries, videoID)
+		return nil
+	}
+	if direct && (f.direct.IsZero() || now.Sub(f.direct) >= directWindow) {
 		return nil
 	}
 	return f.err
 }
 
-func (m *failureMemo) remember(videoID string, err error) {
+// clear forgets every failure: after a sign-in, what failed may now work.
+func (m *failureMemo) clear() {
+	m.mu.Lock()
+	m.entries = nil
+	m.mu.Unlock()
+}
+
+func (m *failureMemo) remember(videoID string, err error, direct bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err == nil {
@@ -76,7 +97,11 @@ func (m *failureMemo) remember(videoID string, err error) {
 	if len(m.entries) > 1000 {
 		m.entries = map[string]failure{}
 	}
-	m.entries[videoID] = failure{err: err, until: m.clock().Add(ttl)}
+	f := failure{err: err, until: m.clock().Add(ttl)}
+	if direct {
+		f.direct = m.clock()
+	}
+	m.entries[videoID] = f
 }
 
 func (m *failureMemo) forget(videoID string) {

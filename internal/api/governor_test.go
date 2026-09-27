@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -96,9 +97,20 @@ func TestStreamRateLimitCoolsDown(t *testing.T) {
 	if !errors.Is(err, resolver.ErrRateLimited) || ratelimit.RetryAfterOf(err) != 30*time.Second {
 		t.Fatalf("first: %v", err)
 	}
-	_, err = s.resolveCached(context.Background(), "vid00000004")
+	// A guess during the cooldown is refused without running anything.
+	_, err = s.resolveSpeculative(context.Background(), "vid00000004")
 	if !errors.Is(err, resolver.ErrRateLimited) || r.calls.Load() != 1 {
-		t.Fatalf("a different track resolved during the cooldown: %v (%d runs)", err, r.calls.Load())
+		t.Fatalf("a guess resolved during the cooldown: %v (%d runs)", err, r.calls.Load())
+	}
+	// A play gets one probe per cooldown; the next play is refused.
+	_, _ = s.resolveCached(context.Background(), "vid00000005")
+	_, err = s.resolveCached(context.Background(), "vid00000006")
+	if !errors.Is(err, resolver.ErrRateLimited) || r.calls.Load() != 2 {
+		t.Fatalf("plays during the cooldown ran %d times, want one probe", r.calls.Load())
+	}
+	// The refusal is on record, so the health check reports a rate limit.
+	if v, ok := s.lastFailure.Load("vid00000006"); !ok || !errors.Is(v.(error), resolver.ErrRateLimited) {
+		t.Fatal("refused track has no rate-limit failure on record")
 	}
 	if !s.prefetch.pausedUntil.After(time.Now()) {
 		t.Fatal("speculative prefetch not paused by the cooldown")
@@ -236,14 +248,14 @@ func TestAutoplayGivesUpOnARadioWithNothingNew(t *testing.T) {
 }
 
 // Position reports alone do not make autoplay look at the queue again; a
-// change of position or length, or a forced re-check, does.
+// forced re-check does.
 func TestAutoplayIgnoresPositionReports(t *testing.T) {
 	hub := session.NewHub(clock.System{}, session.DefaultSettings(), nil)
 	cat := &repeatCatalog{}
 	s := New(Deps{Session: hub, Catalog: cat})
-	s.autoplay.gap = 0
+	s.autoplay.gap = time.Hour // no scheduled re-check gets in the way
+	_, _ = hub.Command(context.Background(), "d", session.Command{Kind: session.CmdPlay, Tracks: []domain.Track{track("a")}, Origin: "o"})
 	p := hub.Projection()
-	p.State.Queue = domain.Queue{Items: []domain.Track{track("a")}, Index: 0, Origin: "o"}
 
 	s.topUp(context.Background(), p, false) // first look: fetches
 	time.Sleep(50 * time.Millisecond)
@@ -252,9 +264,103 @@ func TestAutoplayIgnoresPositionReports(t *testing.T) {
 	if n := len(cat.asked()); n != 1 {
 		t.Fatalf("%d fetches; a repeated position report fetched again", n)
 	}
+	s.autoplay.mu.Lock()
+	s.autoplay.fetchedAt = time.Time{}
+	s.autoplay.mu.Unlock()
 	s.topUp(context.Background(), p, true)
 	time.Sleep(50 * time.Millisecond)
 	if n := len(cat.asked()); n != 2 {
 		t.Fatalf("%d fetches after a forced re-check, want 2", n)
+	}
+}
+
+// slowRadio holds the first queue's page until released, so a new queue is
+// started while autoplay is busy fetching for the old one.
+type slowRadio struct {
+	catalog.Catalog
+	mu      sync.Mutex
+	pages   []string
+	release chan struct{}
+}
+
+func (c *slowRadio) RadioPage(_ context.Context, seed, token string) ([]domain.Track, string, error) {
+	c.mu.Lock()
+	c.pages = append(c.pages, seed)
+	c.mu.Unlock()
+	if strings.HasPrefix(seed, "old") {
+		<-c.release
+	}
+	var out []domain.Track
+	for i := range 10 {
+		out = append(out, track(fmt.Sprintf("%s-r%s-%d", seed, token, i)))
+	}
+	return out, token + "x", nil
+}
+
+// A queue started while autoplay was fetching for the previous one is still
+// extended once that fetch returns.
+func TestNewQueueDuringAFetchIsStillExtended(t *testing.T) {
+	hub := session.NewHub(clock.System{}, session.DefaultSettings(), nil)
+	cat := &slowRadio{release: make(chan struct{})}
+	s := New(Deps{Session: hub, Catalog: cat})
+	s.autoplay.gap = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.RunAutoplay(ctx)
+	_, _ = hub.Command(context.Background(), "d", session.Command{Kind: session.CmdPlay, Tracks: []domain.Track{track("old1")}, Origin: "A"})
+	time.Sleep(100 * time.Millisecond)
+	_, _ = hub.Command(context.Background(), "d", session.Command{Kind: session.CmdPlay, Tracks: []domain.Track{track("new1")}, Origin: "B"})
+	time.Sleep(100 * time.Millisecond)
+	close(cat.release)
+	if ids := waitQueue(t, hub, 11); ids[0] != "new1" {
+		t.Fatalf("queue %v", ids)
+	}
+}
+
+// A failed guess never stands in the way of a play, and a failed play only
+// answers the next play for a few seconds; a sign-in clears everything.
+func TestPlaysGetAFreshAttempt(t *testing.T) {
+	r := &failingResolver{err: fmt.Errorf("%w: removed", resolver.ErrUnavailable)}
+	s := New(Deps{Resolver: r})
+	now := time.Now()
+	s.failures.now = func() time.Time { return now }
+
+	_, _ = s.resolveSpeculative(context.Background(), "vid00000010")
+	_, _ = s.resolveSpeculative(context.Background(), "vid00000010")
+	if n := r.calls.Load(); n != 1 {
+		t.Fatalf("guesses ran %d times, want 1", n)
+	}
+	_, _ = s.resolveCached(context.Background(), "vid00000010")
+	if n := r.calls.Load(); n != 2 {
+		t.Fatal("a failed guess blocked a play")
+	}
+	_, _ = s.resolveCached(context.Background(), "vid00000010")
+	if n := r.calls.Load(); n != 2 {
+		t.Fatal("a play straight after a failed play ran again")
+	}
+	now = now.Add(directWindow + time.Second)
+	_, _ = s.resolveCached(context.Background(), "vid00000010")
+	if n := r.calls.Load(); n != 3 {
+		t.Fatal("pressing play again later was not a fresh attempt")
+	}
+	_, _ = s.resolveSpeculative(context.Background(), "vid00000010")
+	if n := r.calls.Load(); n != 3 {
+		t.Fatal("guesses ran again within the hour")
+	}
+	s.failures.clear()
+	_, _ = s.resolveSpeculative(context.Background(), "vid00000010")
+	if n := r.calls.Load(); n != 4 {
+		t.Fatal("clearing (sign-in) did not forget the failure")
+	}
+}
+
+// The prefetch pause follows the cooldown's length.
+func TestPrefetchPauseMatchesTheCooldown(t *testing.T) {
+	api := ratelimit.New("api", ratelimit.Settings{})
+	s := New(Deps{APIGovernor: api})
+	api.CoolDown(0)
+	left := time.Until(s.prefetch.pausedUntil)
+	if left < 25*time.Second || left > 35*time.Second {
+		t.Fatalf("paused for %s after a 30s cooldown", left)
 	}
 }

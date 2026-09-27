@@ -2,6 +2,7 @@ package innertube
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -83,7 +84,7 @@ func (s *configStore) get(ctx context.Context, key string, scrape func(context.C
 		s.mu.Lock()
 		if err == nil {
 			e.cfg, e.err = cfg, nil
-		} else {
+		} else if upstreamFailure(err) {
 			e.err, e.failedAt = err, s.now()
 		}
 		e.inflight = nil
@@ -98,4 +99,18 @@ func (s *configStore) get(ctx context.Context, key string, scrape func(context.C
 		}
 		return cfg, nil
 	}
+}
+
+// scrapeFailure marks a scrape that reached YouTube and got a bad answer —
+// an error status or a page with no config. Only those are remembered: a
+// network fault or a refusal during a local cooldown sent nothing, and the
+// next call should simply try.
+type scrapeFailure struct{ err error }
+
+func (e *scrapeFailure) Error() string { return e.err.Error() }
+func (e *scrapeFailure) Unwrap() error { return e.err }
+
+func upstreamFailure(err error) bool {
+	var sf *scrapeFailure
+	return errors.As(err, &sf)
 }

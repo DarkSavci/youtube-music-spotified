@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sort"
 	"strconv"
@@ -24,12 +25,13 @@ shows up as a number rather than having to be inferred.
 type upstreamLog struct {
 	log *slog.Logger
 
-	mu      sync.Mutex
-	total   int
-	refused int
-	limited int
-	byKind  map[string]int
-	byRoute map[string]int
+	mu        sync.Mutex
+	total     int
+	refused   int
+	limited   int
+	cancelled int
+	byKind    map[string]int
+	byRoute   map[string]int
 }
 
 func newUpstreamLog(log *slog.Logger) *upstreamLog {
@@ -64,6 +66,11 @@ func (u *upstreamLog) record(r innertube.CallRecord) {
 		u.refused++
 		return
 	}
+	if r.Status == 0 && errors.Is(r.Err, context.Canceled) {
+		// Abandoned by whoever asked, most likely before it was sent.
+		u.cancelled++
+		return
+	}
 	u.total++
 	if r.Status == 429 || r.Status == 503 {
 		u.limited++
@@ -89,16 +96,16 @@ func (u *upstreamLog) run(ctx context.Context) {
 
 func (u *upstreamLog) flush() {
 	u.mu.Lock()
-	total, refused, limited := u.total, u.refused, u.limited
+	total, refused, limited, cancelled := u.total, u.refused, u.limited, u.cancelled
 	kinds, routes := u.byKind, u.byRoute
-	u.total, u.refused, u.limited = 0, 0, 0
+	u.total, u.refused, u.limited, u.cancelled = 0, 0, 0, 0
 	u.byKind, u.byRoute = map[string]int{}, map[string]int{}
 	u.mu.Unlock()
-	if total == 0 && refused == 0 {
+	if total == 0 && refused == 0 && cancelled == 0 {
 		return
 	}
 	u.log.Info("youtube calls in the last minute", "sent", total, "rateLimited", limited,
-		"refused", refused, "byKind", counts(kinds), "byRoute", counts(routes))
+		"refused", refused, "cancelled", cancelled, "byKind", counts(kinds), "byRoute", counts(routes))
 }
 
 // counts renders a tally as "a=3 b=1", largest first.

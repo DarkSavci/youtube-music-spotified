@@ -216,13 +216,17 @@ func (c *Client) scrape(ctx context.Context) (*Config, error) {
 		defer resp.Body.Close()
 	}
 	if err != nil {
+		if resp != nil {
+			// Upstream answered, with a rate limit: remembered.
+			return nil, &scrapeFailure{fmt.Errorf("scrape config: %w", err)}
+		}
 		return nil, fmt.Errorf("scrape config: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// A consent page or an error page has no config in it, and reading
 		// one as if it had is how a failure turned into a second request
 		// before every call.
-		return nil, fmt.Errorf("scrape config: %w", &HTTPError{Status: resp.StatusCode, Endpoint: "config"})
+		return nil, &scrapeFailure{fmt.Errorf("scrape config: %w", &HTTPError{Status: resp.StatusCode, Endpoint: "config"})}
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
@@ -243,7 +247,7 @@ func (c *Client) scrape(ctx context.Context) (*Config, error) {
 		scrapedAt:     time.Now(),
 	}
 	if next.ClientVersion == "" {
-		return nil, fmt.Errorf("scrape config: no client version in %d bytes", len(html))
+		return nil, &scrapeFailure{fmt.Errorf("scrape config: no client version in %d bytes", len(html))}
 	}
 	return next, nil
 }
