@@ -69,10 +69,14 @@ func (s *Server) handleMixes(w http.ResponseWriter, r *http.Request) {
 			body, err := json.Marshal(seeded)
 			return respcache.Entry{Status: http.StatusOK, Body: body}, err
 		})
-	if err != nil {
+	switch {
+	case errors.Is(err, context.Canceled):
+		// The page went away; the build carries on detached and keeps its
+		// result. Nothing failed.
+	case err != nil:
 		s.noteMixesFailed()
 		s.deps.Log.Info("mixes not rebuilt", "err", err)
-	} else {
+	default:
 		var seeded []mixes.Mix
 		if json.Unmarshal(e.Body, &seeded) == nil {
 			out = append(out, seeded...)

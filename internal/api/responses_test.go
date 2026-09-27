@@ -19,6 +19,7 @@ import (
 	"spotifier/internal/identity"
 	"spotifier/internal/innertube"
 	"spotifier/internal/library"
+	"spotifier/internal/renderers"
 	"spotifier/internal/respcache"
 )
 
@@ -54,8 +55,11 @@ func (c *countingCatalog) count() (int, int) {
 	return c.albums, c.playlists
 }
 
+// kept is the app's response cache on the given clock.
 func kept(clk clock.Clock) *respcache.Cache {
-	return respcache.New(respcache.Options{Clock: clk})
+	o := api.ResponseCacheOptions(nil, nil)
+	o.Clock = clk
+	return respcache.New(o)
 }
 
 func TestAnAlbumIsReadFromYouTubeOnce(t *testing.T) {
@@ -364,5 +368,53 @@ func TestAPlaylistEditDropsItsBrowseIDToo(t *testing.T) {
 	do(t, s, http.MethodGet, "/v1/playlists/VLPL1")
 	if _, n := cat.count(); n != 2 {
 		t.Fatalf("VLPL1 read %d times, want it dropped by an edit to PL1", n)
+	}
+}
+
+// likedCatalog serves Liked Music as a playlist until the session ends.
+type likedCatalog struct {
+	countingCatalog
+	signedOut bool
+}
+
+func (c *likedCatalog) Playlist(ctx context.Context, id string) (domain.Playlist, error) {
+	if c.signedOut {
+		return domain.Playlist{ID: id}, renderers.ErrLikedSignedOut
+	}
+	return domain.Playlist{ID: "LM", Title: "Liked Music", Tracks: []domain.Track{{ID: "private"}}}, nil
+}
+
+// Signed out, the kept likes must never stand in for the sign-in prompt.
+func TestASignedOutLikedMusicIsNotCoveredByTheKeptLikes(t *testing.T) {
+	clk := clock.NewManual()
+	cat := &likedCatalog{}
+	s := serverWith(api.Deps{Catalog: cat, Responses: kept(clk)})
+	if rec := do(t, s, http.MethodGet, "/v1/playlists/VLLM"); rec.Code != 200 {
+		t.Fatalf("signed in: %d", rec.Code)
+	}
+	clk.Advance(3 * 24 * time.Hour)
+	cat.signedOut = true
+	rec := do(t, s, http.MethodGet, "/v1/playlists/VLLM")
+	if rec.Code != http.StatusUnauthorized || strings.Contains(rec.Body.String(), "private") {
+		t.Fatalf("signed out: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestStartingSignedOutForgetsTheAccountButKeepsTheMixes(t *testing.T) {
+	c := kept(clock.NewManual())
+	ctx := context.Background()
+	body := respcache.Entry{Status: 200, Body: []byte("{}")}
+	keys := []string{"me|mixes", "me|liked", "me|liked-full-sync", "me|channels", "me|state",
+		"lib|albums", "cat|playlist|LM|whole", "cat|playlist|LM|page|", "cat|album|x"}
+	for _, k := range keys {
+		c.Put(ctx, k, respcache.Policy{Fresh: time.Hour}, body)
+	}
+	api.ClearSignedOut(ctx, c)
+	for _, k := range keys {
+		_, ok := c.Peek(ctx, k, respcache.Policy{Fresh: time.Hour})
+		want := k == "me|mixes" || k == "cat|album|x"
+		if ok != want {
+			t.Errorf("%s kept=%v, want %v", k, ok, want)
+		}
 	}
 }

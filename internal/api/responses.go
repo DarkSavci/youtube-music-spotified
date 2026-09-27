@@ -12,6 +12,7 @@ import (
 	"spotifier/internal/domain"
 	"spotifier/internal/identity"
 	"spotifier/internal/library"
+	"spotifier/internal/renderers"
 	"spotifier/internal/respcache"
 )
 
@@ -64,17 +65,44 @@ const likedFullSync = 24 * time.Hour
 // NewResponseCache builds the cache main wires into Deps.Responses. persist
 // may be nil to keep answers in memory only.
 func NewResponseCache(persist respcache.Persist, log *slog.Logger) *respcache.Cache {
+	return respcache.New(ResponseCacheOptions(persist, log))
+}
+
+// ResponseCacheOptions are the options NewResponseCache uses, for tests that
+// need the same rules with their own clock.
+func ResponseCacheOptions(persist respcache.Persist, log *slog.Logger) respcache.Options {
 	o := respcache.Options{ServeStale: coverableError, Log: log}
 	if persist != nil {
 		o.Persist = persist
 	}
-	return respcache.New(o)
+	return o
 }
 
 // coverableError decides which failures a kept answer may stand in for. A
 // signed-out session must reach the UI as itself, so it can prompt sign-in.
 func coverableError(err error) bool {
-	return !errors.Is(err, identity.ErrLoggedOut) && !errors.Is(err, context.Canceled)
+	return !errors.Is(err, identity.ErrLoggedOut) &&
+		!errors.Is(err, renderers.ErrLikedSignedOut) &&
+		!errors.Is(err, context.Canceled)
+}
+
+// ClearSignedOut drops what was kept for an account when the core starts
+// without one: its likes, its library, its channels and its state. The mixes
+// stay: they are built from this machine's own listening history, and
+// rebuilding them on every signed-out launch would cost a dozen radio calls.
+func ClearSignedOut(ctx context.Context, c *respcache.Cache) {
+	if c == nil {
+		return
+	}
+	for _, prefix := range []string{
+		cacheKey("me", "liked"), // the list and its sync mark
+		cacheKey("me", "channels"),
+		cacheKey("me", "state"),
+		"lib|",
+		playlistKeys("LM"), // Liked Music read as a playlist, VLLM included
+	} {
+		c.Clear(ctx, prefix)
+	}
 }
 
 // produced is what a route builds when it has to ask upstream: the status it

@@ -3,6 +3,7 @@ package mixes_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	"spotifier/internal/control"
 	"spotifier/internal/domain"
+	"spotifier/internal/innertube"
 	"spotifier/internal/mixes"
 )
 
@@ -287,19 +289,28 @@ func TestMixesAskForRadioAFewAtATime(t *testing.T) {
 	}
 }
 
-// failingCatalog fails every radio call after the first n.
+// failingCatalog fails every radio call after the first n with err, or only
+// the calls for the seeds in bad.
 type failingCatalog struct {
 	busyCatalog
-	ok int
+	ok  int
+	err error
+	bad map[string]bool
 }
 
 func (f *failingCatalog) Radio(ctx context.Context, seed string) ([]domain.Track, error) {
+	if f.bad != nil {
+		if f.bad[seed] {
+			return nil, f.err
+		}
+		return f.busyCatalog.Radio(ctx, seed)
+	}
 	f.mu.Lock()
 	allowed := f.ok > 0
 	f.ok--
 	f.mu.Unlock()
 	if !allowed {
-		return nil, errors.New("HTTP 429")
+		return nil, f.err
 	}
 	return f.busyCatalog.Radio(ctx, seed)
 }
@@ -314,7 +325,7 @@ func TestSeededIsAllOrNothing(t *testing.T) {
 	}
 	seedHistory(t, store, artists)
 
-	g := mixes.New(store, &failingCatalog{ok: 4})
+	g := mixes.New(store, &failingCatalog{ok: 4, err: fmt.Errorf("innertube next: %w", &innertube.HTTPError{Status: 429, Endpoint: "next"})})
 	if out, err := g.Seeded(context.Background(), control.DefaultUserID); err == nil {
 		t.Fatalf("got %d mixes and no error while radio failed", len(out))
 	}
@@ -328,5 +339,24 @@ func TestSeededIsAllOrNothing(t *testing.T) {
 	seedHistory(t, thin, []string{"One", "Two"})
 	if _, err := mixes.New(thin, &busyCatalog{}).Seeded(context.Background(), control.DefaultUserID); !errors.Is(err, mixes.ErrThinHistory) {
 		t.Fatalf("thin history: %v", err)
+	}
+}
+
+// One seed that cannot be played (a deleted song, say) drops only itself:
+// the other mixes still build, and nothing blocks them for good.
+func TestAnUnusableSeedOnlyDropsItself(t *testing.T) {
+	store := openStore(t)
+	var artists []string
+	for i := 0; i < 9; i++ {
+		artists = append(artists, "Artist "+string(rune('A'+i)))
+	}
+	seedHistory(t, store, artists)
+	cat := &failingCatalog{err: errors.New("innertube next: video unavailable"), bad: map[string]bool{"ta": true}}
+	out, err := mixes.New(store, cat).Seeded(context.Background(), control.DefaultUserID)
+	if err != nil {
+		t.Fatalf("one bad seed failed the set: %v", err)
+	}
+	if len(out) < 3 {
+		t.Fatalf("only %d mixes built", len(out))
 	}
 }

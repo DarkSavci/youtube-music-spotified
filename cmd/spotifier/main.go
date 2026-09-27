@@ -130,8 +130,7 @@ func main() {
 	if !acct.SignedIn() {
 		// No account now: nothing kept for one may be shown, even if the
 		// shell could not delete the file.
-		deps.Responses.Clear(context.Background(), "me|")
-		deps.Responses.Clear(context.Background(), "lib|")
+		api.ClearSignedOut(context.Background(), deps.Responses)
 	}
 	deps.Account = acct
 

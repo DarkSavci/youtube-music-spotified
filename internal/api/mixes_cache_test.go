@@ -3,8 +3,9 @@ package api_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -14,8 +15,8 @@ import (
 	"spotifier/internal/clock"
 	"spotifier/internal/control"
 	"spotifier/internal/domain"
+	"spotifier/internal/innertube"
 	"spotifier/internal/mixes"
-	"spotifier/internal/respcache"
 )
 
 // radioCatalogFor answers radio for mixes and can be made to fail.
@@ -88,7 +89,7 @@ func TestARateLimitedRebuildKeepsTheMixesThatWereThere(t *testing.T) {
 	clk := clock.NewManual()
 	store := historyOf(t, 9)
 	cat := &radioCatalogFor{}
-	cache := respcache.New(respcache.Options{Clock: clk})
+	cache := kept(clk)
 	s := serverWith(api.Deps{Catalog: cat, Control: store, Mixes: mixes.New(store, cat), Responses: cache})
 
 	good := mixIDs(t, s)
@@ -96,7 +97,7 @@ func TestARateLimitedRebuildKeepsTheMixesThatWereThere(t *testing.T) {
 		t.Fatal("no mixes built")
 	}
 	clk.Advance(3 * 24 * time.Hour) // past fresh and past the revalidate window
-	cat.setFail(errors.New("innertube next: HTTP 429: Resource has been exhausted"))
+	cat.setFail(rateLimited())
 	if got := mixIDs(t, s); len(got) != len(good) {
 		t.Fatalf("during the rate limit got %v, want the kept %v", got, good)
 	}
@@ -112,8 +113,8 @@ func TestARateLimitedRebuildKeepsTheMixesThatWereThere(t *testing.T) {
 func TestAFailedFirstBuildIsNotRetriedAtOnce(t *testing.T) {
 	clk := clock.NewManual()
 	store := historyOf(t, 9)
-	cat := &radioCatalogFor{fail: errors.New("HTTP 429")}
-	s := serverWith(api.Deps{Catalog: cat, Control: store, Mixes: mixes.New(store, cat), Responses: respcache.New(respcache.Options{Clock: clk})})
+	cat := &radioCatalogFor{fail: rateLimited()}
+	s := serverWith(api.Deps{Catalog: cat, Control: store, Mixes: mixes.New(store, cat), Responses: kept(clk)})
 	mixIDs(t, s)
 	first := cat.calls
 	mixIDs(t, s)
@@ -131,7 +132,7 @@ func TestNotEnoughHistoryIsOnlyKeptBriefly(t *testing.T) {
 	clk := clock.NewManual()
 	store := historyOf(t, 2)
 	cat := &radioCatalogFor{}
-	s := serverWith(api.Deps{Catalog: cat, Control: store, Mixes: mixes.New(store, cat), Responses: respcache.New(respcache.Options{Clock: clk})})
+	s := serverWith(api.Deps{Catalog: cat, Control: store, Mixes: mixes.New(store, cat), Responses: kept(clk)})
 	if got := mixIDs(t, s); len(got) != 0 {
 		t.Fatalf("two artists gave mixes %v", got)
 	}
@@ -152,4 +153,47 @@ func TestNotEnoughHistoryIsOnlyKeptBriefly(t *testing.T) {
 	if len(s2) == 0 {
 		t.Fatal("mixes never appeared once there was enough history")
 	}
+}
+
+func rateLimited() error {
+	return fmt.Errorf("innertube next: %w", &innertube.HTTPError{Status: 429, Endpoint: "next", Message: "Resource has been exhausted"})
+}
+
+// A page that leaves before the first build finishes does not count as a
+// failure: the build carries on and its result is kept.
+func TestALeavingPageDoesNotPauseTheMixes(t *testing.T) {
+	clk := clock.NewManual()
+	store := historyOf(t, 9)
+	cat := &slowRadio{release: make(chan struct{})}
+	s := serverWith(api.Deps{Catalog: cat, Control: store, Mixes: mixes.New(store, cat), Responses: kept(clk)})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/me/mixes", nil).WithContext(ctx))
+	}()
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	<-done
+	// The next page asks while the first build is still running: it waits
+	// for that build, not for a pause as if it had failed.
+	next := make(chan []string, 1)
+	go func() { next <- mixIDs(t, s) }()
+	time.Sleep(30 * time.Millisecond)
+	close(cat.release)
+	if ids := <-next; len(ids) == 0 {
+		t.Fatal("the next page got no mixes: the left page was treated as a failed build")
+	}
+}
+
+// slowRadio answers once released.
+type slowRadio struct {
+	radioCatalogFor
+	release chan struct{}
+}
+
+func (c *slowRadio) Radio(ctx context.Context, seed string) ([]domain.Track, error) {
+	<-c.release
+	return c.radioCatalogFor.Radio(ctx, seed)
 }

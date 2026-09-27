@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -23,6 +24,8 @@ import (
 	"spotifier/internal/catalog"
 	"spotifier/internal/control"
 	"spotifier/internal/domain"
+	"spotifier/internal/innertube"
+	"spotifier/internal/ratelimit"
 )
 
 // Kind tags a generated mix, so the UI can group and label them.
@@ -77,6 +80,33 @@ var ErrThinHistory = errors.New("mixes: not enough listening history yet")
 
 // ErrNoMixes means the radio answered but no mix had enough tracks.
 var ErrNoMixes = errors.New("mixes: no mix came out with enough tracks")
+
+// minSeedsPerMix is how many of a mix's seeds must answer for it to be built.
+// One artist's radio alone is not a mix.
+const minSeedsPerMix = 2
+
+/*
+transient reports whether a failed radio call says YouTube or the network is
+refusing for now (a rate limit, a timeout, a dropped connection, a 5xx), as
+opposed to this one seed being unusable (a deleted video, say).
+
+A transient failure ends the rebuild so the mixes already kept stay; anything
+else only drops that seed, or one bad song would block every mix for good.
+*/
+func transient(err error) bool {
+	if errors.Is(err, ratelimit.ErrRateLimited) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	var ne net.Error
+	if errors.As(err, &ne) {
+		return true
+	}
+	var he *innertube.HTTPError
+	if errors.As(err, &he) {
+		return he.Status == 429 || he.Status >= 500
+	}
+	return false
+}
 
 // minHistoryForSeeding is how many distinct artists must exist before seeded
 // mixes are offered.
@@ -276,7 +306,9 @@ func (g *Generator) expand(
 	var (
 		wg       sync.WaitGroup
 		errMu    sync.Mutex
-		radioErr error
+		radioErr error // transient failures only
+		answered int
+		asked    int
 	)
 
 	for i, a := range artists {
@@ -284,6 +316,7 @@ func (g *Generator) expand(
 		if err != nil || seed == "" {
 			continue
 		}
+		asked++
 		wg.Add(1)
 		go func(index int, artist, seedID string) {
 			defer wg.Done()
@@ -297,16 +330,27 @@ func (g *Generator) expand(
 			}
 			defer func() { <-g.radio }()
 			tracks, err := g.catalog.Radio(ctx, seedID)
+			errMu.Lock()
+			defer errMu.Unlock()
 			if err != nil {
-				errMu.Lock()
-				radioErr = errors.Join(radioErr, err)
-				errMu.Unlock()
+				if transient(err) {
+					radioErr = errors.Join(radioErr, err)
+				}
+				// Anything else: this seed is unusable; the rest carry on.
 				return
 			}
+			answered++
 			results[index] = result{artist: artist, tracks: tracks}
 		}(i, a.Artist, seed)
 	}
 	wg.Wait()
+	if radioErr != nil {
+		return nil, nil, radioErr
+	}
+	if answered == 0 || answered < min(minSeedsPerMix, asked) {
+		// Too few seeds answered to make this mix; the others still build.
+		return nil, nil, nil
+	}
 
 	// Interleave so no single artist dominates the opening of the mix.
 	var (
