@@ -1,9 +1,8 @@
 import { useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { usePlayer } from "../lib/player";
 import { transport } from "../lib/playback";
 import { useSettings } from "../lib/settings";
-import { useLikedIds, useToggleLike } from "../lib/liked";
+import { useCanLike, useLikedIds, useToggleLike } from "../lib/liked";
 import { toggleMini, useMini } from "../lib/miniplayer";
 import { artistNames, artworkAtLeast } from "../lib/types";
 import { desktop } from "../lib/desktop";
@@ -20,8 +19,7 @@ import type { TrayAction, TrayState } from "../lib/traystate";
 export function TrayBridge() {
   const likedIds = useLikedIds();
   const toggleLike = useToggleLike();
-  const qc = useQueryClient();
-  const canLike = qc.getQueryState(["liked"])?.status === "success";
+  const canLike = useCanLike();
   const miniOpen = useMini((s) => s.win !== null);
   const closeToTray = useSettings((s) => s.closeToTray);
 

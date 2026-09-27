@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { TrackTable } from "../components/TrackTable";
 import { PageState, TrackListSkeleton } from "../components/States";
 import { PageError } from "./Home";
@@ -18,11 +18,15 @@ const ORDERS: { id: SongOrder; label: string }[] = [
   { id: "album", label: "By album" },
 ];
 
-// How many releases open without asking. Most discographies fit; a very
-// long one opens this many more each time the listener asks for them.
-const RELEASE_BATCH = 60;
+// How many releases open without asking. Each is a request to YouTube, so
+// the first batch covers the artist's own albums and the likeliest singles,
+// and a long discography opens this many more each time the listener asks.
+const RELEASE_BATCH = 20;
 // Releases opened at once.
-const RELEASE_PARALLEL = 4;
+const RELEASE_PARALLEL = 2;
+// Opened releases stay cached this long after the page is left, so coming
+// back, or opening one of them as an album, does not ask YouTube again.
+const RELEASE_GC_MS = 6 * 60 * 60_000;
 // How many releases each artist's page may open, kept for the session so
 // going back to it does not lose the batches already asked for.
 const releaseLimits = new Map<string, number>();
@@ -37,7 +41,9 @@ const releaseLimits = new Map<string, number>();
 function useReleases(scope: string, order: string[], limit: number) {
   const qc = useQueryClient();
   const [version, bump] = useReducer((n: number) => n + 1, 0);
-  type Run = { scope: string; opened: Map<string, Album | null>; inflight: Set<string>; abort: AbortController };
+  // `limited`: YouTube answered with a 429, so nothing more is started until
+  // the listener asks again.
+  type Run = { scope: string; opened: Map<string, Album | null>; inflight: Set<string>; abort: AbortController; limited: boolean };
   const run = useRef<Run | null>(null);
   const latest = useRef({ order, limit });
   latest.current = { order, limit };
@@ -45,12 +51,15 @@ function useReleases(scope: string, order: string[], limit: number) {
   const pump = useCallback(() => {
     const r = run.current;
     if (!r) return;
-    while (!r.abort.signal.aborted && r.inflight.size < RELEASE_PARALLEL && r.opened.size + r.inflight.size < latest.current.limit) {
+    while (!r.abort.signal.aborted && !r.limited && r.inflight.size < RELEASE_PARALLEL && r.opened.size + r.inflight.size < latest.current.limit) {
       const id = latest.current.order.find((x) => !r.opened.has(x) && !r.inflight.has(x));
       if (!id) break;
       r.inflight.add(id);
-      qc.fetchQuery({ queryKey: ["album", id], queryFn: ({ signal }) => api.album(id, signal), staleTime: 10 * 60_000 })
-        .then((album) => album, () => null)
+      qc.fetchQuery({ queryKey: ["album", id], queryFn: ({ signal }) => api.album(id, signal), staleTime: 60 * 60_000, gcTime: RELEASE_GC_MS })
+        .then((album) => album, (err) => {
+          if (err instanceof ApiError && err.rateLimited) r.limited = true;
+          return null;
+        })
         .then((album) => {
           if (run.current !== r || r.abort.signal.aborted) return;
           r.inflight.delete(id);
@@ -65,7 +74,7 @@ function useReleases(scope: string, order: string[], limit: number) {
   // queue; what is in flight still fills the cache.
   useEffect(() => {
     if (!scope) return;
-    const r: Run = { scope, opened: new Map(), inflight: new Set(), abort: new AbortController() };
+    const r: Run = { scope, opened: new Map(), inflight: new Set(), abort: new AbortController(), limited: false };
     run.current = r;
     bump();
     pump();
@@ -89,6 +98,7 @@ function useReleases(scope: string, order: string[], limit: number) {
     const cur = run.current;
     if (!cur) return;
     for (const [id, album] of cur.opened) if (album === null) cur.opened.delete(id);
+    cur.limited = false;
     bump();
     pump();
   }, [pump]);
@@ -97,6 +107,7 @@ function useReleases(scope: string, order: string[], limit: number) {
     retryFailed,
     opened: r?.opened ?? EMPTY,
     loading: (r?.inflight.size ?? 0) > 0,
+    limited: r?.limited ?? false,
     failed: r ? [...r.opened.values()].filter((a) => a === null).length : 0,
   };
 }
@@ -229,7 +240,8 @@ export function ArtistSongsView() {
   // Of the planned releases, those not open yet: the ones left to open, and
   // among them singles whose song is already here.
   const unopened = plan.order.filter((r) => !releases.opened.has(r));
-  const pending = releases.loading || (unopened.length > 0 && releases.opened.size < limit);
+  // A 429 stops the run, so nothing is pending until the listener asks again.
+  const pending = releases.loading || (!releases.limited && unopened.length > 0 && releases.opened.size < limit);
   const resolving = dated && (!complete || discography.isFetching || pending);
   // Only releases that actually opened; failures are counted apart.
   const openedCount = plan.order.filter((r) => releases.opened.get(r)).length;
@@ -253,7 +265,9 @@ export function ArtistSongsView() {
               ? `${unopened.length - coveredLeft} more ${unopened.length - coveredLeft === 1 ? "release" : "releases"} not opened yet`
               : "",
             coveredLeft > 0 ? `${coveredLeft} ${coveredLeft === 1 ? "single" : "singles"} not opened, as ${coveredLeft === 1 ? "its title song is" : "their title songs are"} already here` : "",
-            releases.failed > 0 ? `${releases.failed} could not be opened` : "",
+            releases.limited
+              ? "YouTube is limiting requests; try again in a bit"
+              : releases.failed > 0 ? `${releases.failed} could not be opened` : "",
             undated > 0 ? `${undated} without a known release date, shown last` : "",
           ].filter(Boolean).join(" · ");
   const canOpenMore = dated && complete && !resolving && unopened.length + releases.failed > 0;

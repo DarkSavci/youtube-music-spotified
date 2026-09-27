@@ -1,14 +1,13 @@
 import { Artwork } from "./Artwork";
 import { EndTime } from "./EndTime";
 import { VideoSurface, VideoNotice, useVideoControl } from "./VideoPlayer";
-import { useVideo, setVideoEnabled } from "../lib/video";
+import { useVideo, setVideoEnabled, checkVideoAvailabilityOnce } from "../lib/video";
 import { useContext, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useQueryClient } from "@tanstack/react-query";
 import { usePlayer } from "../lib/player";
 import { transport } from "../lib/playback";
 import { usePlaybackPosition, FrameWindow } from "../lib/tick";
-import { useLikedIds, useToggleLike } from "../lib/liked";
+import { useCanLike, useLikedIds, useToggleLike } from "../lib/liked";
 import { useArtColor } from "../lib/artcolor";
 import { desktop } from "../lib/desktop";
 import { closeMini, ensureMiniSize, useMini } from "../lib/miniplayer";
@@ -291,7 +290,7 @@ function LikeButton() {
   const track = usePlayer((s) => s.track);
   const likedIds = useLikedIds();
   const toggleLike = useToggleLike();
-  const canLike = useQueryClient().getQueryState(["liked"])?.status === "success";
+  const canLike = useCanLike();
   if (!track || !canLike) return null;
   const liked = likedIds.has(track.id);
   const label = liked ? "Remove from Liked Music" : "Add to Liked Music";
@@ -405,7 +404,8 @@ function Extras({ panel, onPanel }: PanelProps) {
       {/* The mini player has no custom tooltip layer, so title is its only tooltip. */}
       <button className="iconbtn" aria-label={panel === "video" ? "Hide music video" : reason} title={panel === "video" ? "Hide music video" : reason}
         aria-pressed={panel === "video"} data-active={panel === "video" || undefined}
-        aria-disabled={panel !== "video" && blocked} onClick={() => { if (panel === "video" || !blocked) onPanel("video"); }}>
+        aria-disabled={panel !== "video" && blocked} onPointerEnter={checkVideoAvailabilityOnce} onFocus={checkVideoAvailabilityOnce}
+        onClick={() => { if (panel === "video" || !blocked) onPanel("video"); }}>
         <IconVideo size={18} />
       </button>
       <VideoNotice />

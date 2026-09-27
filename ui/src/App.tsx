@@ -1,6 +1,6 @@
 import { VideoSurface, VideoNotice } from "./components/VideoPlayer";
 import { usePlayer } from "./lib/player";
-import { useVideo, checkVideoAvailability } from "./lib/video";
+import { useVideo, checkVideoAvailability, resetVideoAvailability } from "./lib/video";
 import { useEffect, useRef, useState } from "react";
 import { PageBoundary } from "./components/PageBoundary";
 import { Toast } from "./components/Toast";
@@ -57,7 +57,9 @@ export function App() {
   const videoEnabled = useVideo(s => s.enabled);
   const videoTrackID = usePlayer(s => s.track?.id);
   useEffect(() => {
-    void checkVideoAvailability();
+    // Only while video is on; otherwise a video button asks when reached.
+    if (useVideo.getState().enabled) void checkVideoAvailability();
+    else resetVideoAvailability();
     // Do not replace automatically advanced songs: that restarts audio and
     // discards gapless prefetch. Switching versions is an explicit action.
     if (!usePlayer.getState().track?.isVideo) useVideo.setState({ enabled: false });

@@ -1,4 +1,4 @@
-import { MoodTile } from "../components/MoodTile";
+import { MOOD_PREVIEWS, MoodTile } from "../components/MoodTile";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -39,7 +39,12 @@ export function Search() {
   const [params, setParams] = useSearchParams();
   const query = params.get("q") ?? "";
   const filter = params.get("filter") ?? "";
-  const debounced = useDebounced(query, 250);
+  // Each settled prefix is a search on YouTube, so typing is given a little
+  // longer to settle before one is sent.
+  const debounced = useDebounced(query, 400);
+  // And tracks are only warmed once the query has stopped changing for a
+  // second: a prefix's results are rarely the ones clicked.
+  const settled = useDebounced(query, 1000);
   const { recent, remember, forget, clear } = useRecentSearches();
 
   /*
@@ -79,9 +84,12 @@ export function Search() {
   const topOthers = topItems.filter((i) => i.kind !== "track");
   // The top result and the first songs are what a search gets clicked for.
   useEffect(() => {
-    if (data?.topResult?.kind === "track") warmTrack(data.topResult.track?.id);
-    warmFirst(songs, 2);
-  }, [data, songs]);
+    // Only the query as typed now, once it has stopped changing: never a
+    // prefix whose results arrived on the way.
+    if (!data || settled !== query || debounced !== query || !settled.trim()) return;
+    if (data.topResult?.kind === "track") warmTrack(data.topResult.track?.id, "search");
+    else warmFirst(songs, 1, "search");
+  }, [data, songs, settled, debounced, query]);
 
   if (!debounced.trim()) {
     return (
@@ -134,8 +142,8 @@ export function Search() {
             {[{ id: "FEmusic_explore", params: undefined, title: "Discover", color: "#185a74" },
               { id: "FEmusic_charts", params: undefined, title: "Charts", color: "#78468c" },
               { id: "FEmusic_new_releases", params: undefined, title: "New releases", color: "#315e46" },
-              ...browse.data.moods].map((mood) => (
-              <MoodTile key={`${mood.id}:${mood.params ?? ""}`} mood={mood} />
+              ...browse.data.moods].map((mood, i) => (
+              <MoodTile key={`${mood.id}:${mood.params ?? ""}`} mood={mood} preview={i < MOOD_PREVIEWS} />
             ))}
           </div>
         ) : (
