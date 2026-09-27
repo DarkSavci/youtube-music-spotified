@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"spotifier/internal/audiocache"
@@ -29,6 +30,7 @@ import (
 	"spotifier/internal/lyrics"
 	"spotifier/internal/mixes"
 	"spotifier/internal/obs"
+	"spotifier/internal/ratelimit"
 	"spotifier/internal/report"
 	"spotifier/internal/resolver"
 	"spotifier/internal/session"
@@ -38,6 +40,12 @@ import (
 type Deps struct {
 	AccountScope string
 	Catalog      catalog.Catalog
+
+	// StreamGovernor carries the cooldown after YouTube rate-limits stream
+	// resolution; APIGovernor is the one InnerTube calls go through. Both
+	// optional: nil never cools down, which is what tests get.
+	StreamGovernor *ratelimit.Governor
+	APIGovernor    *ratelimit.Governor
 
 	// ClientToken, when set, is a per-launch secret the desktop shell attaches
 	// to its own requests. The video routes require it, so a web page cannot
@@ -110,6 +118,12 @@ type Server struct {
 	streams      *streamCache
 	prefetch     *prefetcher
 	autoplay     *autoplay
+	// failures remembers resolutions that failed, so asking again within a
+	// while answers from memory instead of running yt-dlp.
+	failures failureMemo
+	// streamGov carries the cooldown after YouTube rate-limits stream
+	// resolution. Nil (in tests) never cools down.
+	streamGov *ratelimit.Governor
 	// lastFailure is each track's most recent resolution error, for
 	// diagnosing a failed track without resolving it again.
 	lastFailure sync.Map
@@ -150,6 +164,11 @@ func New(d Deps) *Server {
 			ForceAttemptHTTP2:     true,
 		}},
 	}
+	s.streamGov = d.StreamGovernor
+	// Speculative work stops the moment YouTube says to slow down, whichever
+	// kind of call it said it to.
+	d.APIGovernor.OnCooldown(func(time.Duration) { s.prefetch.backOff() })
+	d.StreamGovernor.OnCooldown(func(time.Duration) { s.prefetch.backOff() })
 	s.routes()
 	return s
 }
@@ -162,6 +181,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
+	}
+	// Calls this request makes to YouTube are logged against its route.
+	if _, pattern := s.mux.Handler(r); pattern != "" {
+		r = r.WithContext(innertube.WithRoute(r.Context(), pattern))
 	}
 	s.mux.ServeHTTP(w, r)
 }
@@ -259,6 +282,34 @@ type apiError struct {
 	// session sets it — never a network failure, or an offline user is sent
 	// through a needless login.
 	Reauth bool `json:"reauth,omitempty"`
+	// RateLimited marks a 429 the UI must wait out rather than retry, with
+	// RetryAfter in seconds (also sent as the Retry-After header).
+	RateLimited bool `json:"rateLimited,omitempty"`
+	RetryAfter  int  `json:"retryAfter,omitempty"`
+}
+
+// rateLimited reports whether err means YouTube asked us to slow down: the
+// governor's refusal or a 429 it passed on, or yt-dlp's bot check.
+func rateLimited(err error) bool {
+	if errors.Is(err, ratelimit.ErrRateLimited) || errors.Is(err, resolver.ErrRateLimited) {
+		return true
+	}
+	var h *innertube.HTTPError
+	return errors.As(err, &h) && (h.Status == http.StatusTooManyRequests)
+}
+
+// retryAfter is how long the client should wait: what the refusal says, else
+// whatever cooldown is running, else a minute.
+func retryAfter(err error) time.Duration {
+	if d := ratelimit.RetryAfterOf(err); d > 0 {
+		return d
+	}
+	for _, g := range []*ratelimit.Governor{ratelimit.API, ratelimit.Streams} {
+		if cooling, left := g.Cooling(); cooling {
+			return left
+		}
+	}
+	return time.Minute
 }
 
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
@@ -267,12 +318,15 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		s.write(w, http.StatusUnauthorized, apiError{Error: "signed out", Reauth: true})
 	case errors.Is(err, context.Canceled):
 		// The client went away; nothing to report.
-	case errors.Is(err, resolver.ErrRateLimited):
+	case rateLimited(err):
 		// 429 rather than 502: the request was fine and the track is fine, so
-		// the client must wait rather than treat the track as broken.
-		s.deps.Log.Warn("upstream rate limited", "path", r.URL.Path)
+		// the client must wait rather than treat the track as broken — and
+		// must not retry, which is what kept a rate limit going.
+		wait := retryAfter(err)
+		s.deps.Log.Warn("upstream rate limited", "path", r.URL.Path, "retryAfter", wait)
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
 		s.write(w, http.StatusTooManyRequests,
-			apiError{Error: "rate limited by YouTube; wait a few minutes"})
+			apiError{Error: "rate limited by YouTube; wait a few minutes", RateLimited: true, RetryAfter: int(math.Ceil(wait.Seconds()))})
 	default:
 		s.deps.Log.Warn("request failed", "path", r.URL.Path, "err", err)
 		s.write(w, http.StatusBadGateway, apiError{Error: err.Error()})

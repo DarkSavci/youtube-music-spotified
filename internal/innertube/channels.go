@@ -26,11 +26,13 @@ func (c *Client) Channels(ctx context.Context) ([]Channel, error) {
 	}
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Cookie", c.creds.cookie())
-	response, err := c.http.Do(req)
+	response, err := c.send(req, "channels", "www.youtube.com")
+	if response != nil {
+		defer response.Body.Close()
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
 	page, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
 	if err != nil {
 		return nil, err
