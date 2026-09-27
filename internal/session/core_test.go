@@ -648,3 +648,24 @@ func TestSeekWhileStalledKeepsTrying(t *testing.T) {
 		t.Fatalf("target position = %d, want 90000", got)
 	}
 }
+
+// A queue loaded paused is in place at its start, and the next toggle plays it
+// from there.
+func TestPlayPausedLoadsWithoutStarting(t *testing.T) {
+	c, clk := newCore(t)
+	if r, _ := c.Apply(Command{Kind: CmdPlay, Tracks: tracks(3), StartIndex: 1, Origin: "Remote", Paused: true}); r != RejectNone {
+		t.Fatalf("play rejected: %s", r)
+	}
+	s := c.State()
+	if s.State != domain.StatePaused || currentID(c) != "b" || s.PositionMs != 0 {
+		t.Fatalf("loaded paused: state=%s current=%s pos=%d", s.State, currentID(c), s.PositionMs)
+	}
+	clk.Advance(10 * time.Second)
+	if c.State().PositionMs != 0 {
+		t.Fatalf("position moved while paused")
+	}
+	c.Apply(Command{Kind: CmdToggle})
+	if c.State().State != domain.StatePlaying || currentID(c) != "b" {
+		t.Fatalf("toggle after a paused load: state=%s current=%s", c.State().State, currentID(c))
+	}
+}

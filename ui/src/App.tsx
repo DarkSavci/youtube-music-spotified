@@ -40,6 +40,7 @@ import { installMediaSession } from "./lib/mediasession";
 import { TrayBridge } from "./components/TrayBridge";
 import { MiniPlayerHost } from "./components/MiniPlayer";
 import { useSettings, applyDocumentSettings } from "./lib/settings";
+import { useContinueOnLaunch } from "./lib/launchqueue";
 import { PlaybackNotice } from "./components/PlaybackNotice";
 import { FullScreenPlayer } from "./components/FullScreenPlayer";
 import { LyricsPanel, LyricsView } from "./components/Lyrics";
@@ -115,6 +116,9 @@ export function App() {
   }, [playbackSpeed, roomActive]);
 
   const settings = useSettings();
+
+  // The "Continue from YouTube Music" setting, applied once at launch.
+  useContinueOnLaunch();
 
   useEffect(() => {
     startPlayback();

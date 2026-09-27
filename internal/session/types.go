@@ -58,6 +58,9 @@ type Command struct {
 	Tracks     []domain.Track
 	StartIndex int
 	Origin     string
+	// Paused loads the queue at StartIndex without starting it: a queue picked
+	// up at launch is put in place, not played at someone who has not asked.
+	Paused bool
 
 	// Seek
 	PositionMs int64
