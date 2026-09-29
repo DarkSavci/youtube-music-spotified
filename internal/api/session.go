@@ -174,6 +174,15 @@ func (s *Server) logEngineEvent(ev session.EngineEvent, before, after domain.Ses
 		if after.State == domain.StatePaused && before.State != domain.StatePaused {
 			s.deps.Log.Warn("playback stopped after a failure", "failedInQueue", len(after.Degraded))
 		}
+	case session.EvEnded:
+		switch {
+		case len(after.Degraded) > len(before.Degraded):
+			s.deps.Log.Warn("track ended again before playing; skipped", attrs...)
+		case after.Epoch != before.Epoch && after.Queue.Index == before.Queue.Index && before.Repeat != domain.RepeatOne && ev.Epoch == before.Epoch:
+			s.deps.Log.Warn("track ended before playing; reloading it", attrs...)
+		default:
+			s.deps.Log.Info("engine "+string(ev.Kind), attrs...)
+		}
 	case session.EvBlocked, session.EvStalled:
 		s.deps.Log.Warn("playback "+string(ev.Kind), attrs...)
 	default:

@@ -53,6 +53,7 @@ func TestVariantCarriesPartialListenAndDoesNotResumeEndedTrack(t *testing.T) {
 	if reject != RejectNone || len(logs) != 0 || c.playedMs != 1000 {
 		t.Fatalf("partial listen lost: %s %v %d", reject, logs, c.playedMs)
 	}
+	c.HandleEngine(EngineEvent{Kind: EvPosition, Epoch: c.State().Epoch, PositionMs: 179_000})
 	c.HandleEngine(EngineEvent{Kind: EvEnded, Epoch: c.State().Epoch})
 	variant.ID = "song"
 	_, _ = c.Apply(Command{Kind: CmdVariant, ExpectedID: "clip", Tracks: []domain.Track{variant}})
