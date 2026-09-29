@@ -2,6 +2,16 @@
 
 Every release of Youtube Music Spotified, newest first.
 
+## 0.2.2 — 2026-09-29
+
+### New
+
+- A setting to continue from YouTube Music at launch, loading the other device's queue paused
+- Account search history in the search box, and continue the queue from other devices
+- Home loads more shelves as it scrolls and has YouTube's mood chips
+- Send InnerTube calls in the web client's shape, and read Home off the homepage on a cold start
+
+
 ## 0.2.1 — 2026-09-27
 
 ### New
