@@ -2,6 +2,15 @@
 
 Every release of Youtube Music Spotified, newest first.
 
+## 0.2.3 — 2026-09-29
+
+### Fixed
+
+- Stay on the core when the page errors at startup, and make local playback work (#49)
+- Reload a track that reports ending before it played, instead of skipping it
+- A log file per launch, and a report zip Explorer can open
+
+
 ## 0.2.2 — 2026-09-29
 
 ### New
