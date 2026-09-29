@@ -669,3 +669,46 @@ func TestPlayPausedLoadsWithoutStarting(t *testing.T) {
 		t.Fatalf("toggle after a paused load: state=%s current=%s", c.State().State, currentID(c))
 	}
 }
+
+func TestEndBeforeAnythingPlayedReloadsOnceThenFails(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 3)
+	first := c.State()
+
+	// The "Make It Bun Dem" report: an end 70 ms into a three-minute track.
+	c.HandleEngine(EngineEvent{Kind: EvEnded, Epoch: first.Epoch})
+	after := c.State()
+	if currentID(c) != "a" || after.Epoch == first.Epoch || after.PositionMs != 0 || !c.playIntent() {
+		t.Fatalf("an implausible end should reload the track: %+v", after)
+	}
+
+	// It ends early again: now it is broken, and the queue moves on past it.
+	c.HandleEngine(EngineEvent{Kind: EvEnded, Epoch: after.Epoch})
+	if currentID(c) != "b" {
+		t.Fatalf("a track that keeps ending early should be skipped, on %q", currentID(c))
+	}
+	if d := c.State().Degraded; len(d) != 1 || d[0].Reason != EndedEarly {
+		t.Fatalf("the skip should be recorded as a failure: %+v", d)
+	}
+}
+
+func TestEndAfterPlayingAdvancesAsBefore(t *testing.T) {
+	c, _ := newCore(t)
+	playN(t, c, 2)
+	epoch := c.State().Epoch
+	c.HandleEngine(EngineEvent{Kind: EvPosition, Epoch: epoch, PositionMs: 175_000})
+	c.HandleEngine(EngineEvent{Kind: EvEnded, Epoch: epoch})
+	if currentID(c) != "b" || len(c.State().Degraded) != 0 {
+		t.Fatalf("a normal end should advance: %q %+v", currentID(c), c.State().Degraded)
+	}
+
+	// A short track genuinely ending is not suspicious either.
+	c2, _ := newCore(t)
+	short := tracks(2)
+	short[0].DurationMs = 1_500
+	c2.Apply(Command{Kind: CmdPlay, Tracks: short, Origin: "Test"})
+	c2.HandleEngine(EngineEvent{Kind: EvEnded, Epoch: c2.State().Epoch})
+	if currentID(c2) != "b" {
+		t.Fatalf("a short track's end should advance, on %q", currentID(c2))
+	}
+}

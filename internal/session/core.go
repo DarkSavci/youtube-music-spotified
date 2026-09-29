@@ -68,6 +68,10 @@ type Core struct {
 	offline           bool
 	waitingForNetwork bool
 
+	// earlyEndRetried is the track last reloaded for ending before it had
+	// played (see endedTooEarly), so a second early end fails it instead.
+	earlyEndRetried string
+
 	rng *rand.Rand
 }
 
@@ -554,6 +558,15 @@ func (c *Core) HandleEngine(ev EngineEvent) []LogEntry {
 		}
 
 	case EvEnded:
+		if cur := c.state.Queue.Current(); cur != nil && !c.following && c.endedTooEarly(cur) {
+			if c.earlyEndRetried != cur.ID {
+				c.earlyEndRetried = cur.ID
+				c.userChange = false
+				c.startTrack(c.state.Queue.Index, 0)
+				return nil
+			}
+			return c.handleFailure(EndedEarly)
+		}
 		logs := c.closeOutCurrent(true)
 		if c.following {
 			c.roomEnded = true
@@ -581,6 +594,24 @@ func (c *Core) HandleEngine(ev EngineEvent) []LogEntry {
 		return c.handleFailure(ev.Reason)
 	}
 	return nil
+}
+
+// EndedEarly is the failure reason for a track that ended again, straight
+// after being reloaded for ending before it had played.
+const EndedEarly = "ended_early"
+
+/*
+endedTooEarly is whether an end report is implausible: a track the catalogue
+says runs for minutes, reported finished before two seconds of it played.
+
+That is not the song ending but the player being wrong about it — a deck that
+took over holding a source already at its end, or one that believed a partial
+response was the whole file. Believing it skipped the song unheard, in 70 ms
+(the "Make It Bun Dem" report). It is reloaded from the start once; a second
+early end fails it, so the queue still cannot stick on a broken track.
+*/
+func (c *Core) endedTooEarly(cur *domain.Track) bool {
+	return cur.DurationMs >= 30_000 && c.lastPositionMs < 2_000 && c.playedMs < 2_000
 }
 
 /*

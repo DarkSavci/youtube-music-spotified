@@ -140,22 +140,40 @@ export class SessionClient {
     this.onProjection(p);
   }
 
-  /** Announces this device and begins streaming projections. */
+  /**
+   * Announces this device and begins streaming projections.
+   *
+   * True once the core has answered. Applying its first snapshot is the
+   * page's business, not the core's: an error there is logged and the core
+   * stays authoritative. It used to share this catch, so a throw anywhere in
+   * the page's reaction to the first snapshot read as "core unreachable" and
+   * left the app on local playback for the whole run, with nothing logged.
+   */
   async start(name: string, capabilities: Capabilities): Promise<boolean> {
+    let body: { projection: Projection };
     try {
       const res = await fetch(apiUrl("/v1/session/register"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ deviceId: this.deviceID, name, capabilities }),
       });
-      if (!res.ok) return false;
-      const body = (await res.json()) as { projection: Projection };
-      this.deliver(body.projection, true);
-      this.connect();
-      return true;
-    } catch {
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        console.warn(`[session] register refused: HTTP ${res.status} ${detail.trim()}`);
+        return false;
+      }
+      body = (await res.json()) as { projection: Projection };
+    } catch (err) {
+      console.warn("[session] register failed:", err);
       return false;
     }
+    this.connect();
+    try {
+      this.deliver(body.projection, true);
+    } catch (err) {
+      console.error("[session] applying the first projection failed:", err);
+    }
+    return true;
   }
 
   /**
@@ -174,12 +192,18 @@ export class SessionClient {
     source.addEventListener("projection", (e) => {
       this.connected = true;
       this.retryMs = 1000;
+      let p: Projection;
       try {
-        const fresh = this.resync;
-        this.resync = false;
-        this.deliver(JSON.parse((e as MessageEvent).data) as Projection, fresh);
+        p = JSON.parse((e as MessageEvent).data) as Projection;
       } catch {
-        /* a malformed frame is superseded by the next full snapshot */
+        return; // a malformed frame is superseded by the next full snapshot
+      }
+      const fresh = this.resync;
+      this.resync = false;
+      try {
+        this.deliver(p, fresh);
+      } catch (err) {
+        console.error("[session] applying a projection failed:", err);
       }
     });
 
