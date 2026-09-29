@@ -58,6 +58,11 @@ interface PlayerState {
   origin: string;
   repeat: RepeatMode;
   shuffle: boolean;
+  /**
+   * The queue's order from before shuffle, so turning it off puts it back.
+   * Local playback only; the core keeps its own when it is authoritative.
+   */
+  unshuffled: Track[] | null;
   volume: number;
   muted: boolean;
   anchor: PositionAnchor;
@@ -104,7 +109,10 @@ interface PlayerState {
    */
   notice: string | null;
 
+  /** Makes `tracks` the queue and plays from `index`, shuffled if shuffle is on. */
   playFrom: (tracks: Track[], index: number, origin?: string) => void;
+  /** Plays another entry of the current queue, from its start. */
+  playAt: (index: number) => void;
   toggle: () => void;
   next: () => void;
   prev: () => void;
@@ -134,6 +142,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   origin: "",
   repeat: "off",
   shuffle: false,
+  unshuffled: null,
   // Matches the core's default: half, which the slider taper makes half as loud.
   volume: 0.5,
   muted: false,
@@ -147,13 +156,19 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   engineEq: false,
 
   playFrom: (tracks, index, origin = "") => {
-    const track = tracks[index];
+    if (!tracks[index]) return;
+    // As the core does: the chosen track first, the rest shuffled after it.
+    const queue = get().shuffle ? shuffledAround(tracks, index) : tracks;
+    set({ queue, origin, unshuffled: get().shuffle ? tracks : null });
+    get().playAt(get().shuffle ? 0 : index);
+  },
+
+  playAt: (index) => {
+    const track = get().queue[index];
     if (!track) return;
     set({
-      queue: tracks,
       index,
       track,
-      origin,
       state: "playing",
       anchor: { positionMs: 0, atMs: performance.now(), rate: interpolationRate(get()) },
     });
@@ -161,7 +176,9 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
   toggle: () => {
     const { state, anchor } = get();
-    if (state === "playing") {
+    // Buffering is still playing: pressing the button there means pause. It
+    // did nothing at all, so a stalled track could not be stopped or nudged.
+    if (state === "playing" || state === "stalled" || state === "loading") {
       // Freeze the anchor at the current interpolated position.
       set({
         state: "paused",
@@ -183,7 +200,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       }
       nextIndex = 0;
     }
-    get().playFrom(queue, nextIndex, get().origin);
+    get().playAt(nextIndex);
   },
 
   prev: () => {
@@ -195,7 +212,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       get().seek(0);
       return;
     }
-    get().playFrom(queue, Math.max(0, index - 1), get().origin);
+    get().playAt(Math.max(0, index - 1));
   },
 
   seek: (ms) =>
@@ -207,8 +224,34 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   toggleMute: () => set((s) => ({ muted: !s.muted })),
   cycleRepeat: () =>
     set((s) => ({ repeat: s.repeat === "off" ? "all" : s.repeat === "all" ? "one" : "off" })),
-  toggleShuffle: () => set((s) => ({ shuffle: !s.shuffle })),
+  /*
+   * Reorders the queue, not just the button. It used to flip the flag and
+   * nothing else, so without the core shuffle lit up and played in order.
+   * Turning it on keeps the playing track and shuffles the rest after it;
+   * turning it off restores the saved order with the same track current.
+   */
+  toggleShuffle: () =>
+    set((s) => {
+      if (!s.shuffle) {
+        if (s.index < 0 || !s.queue[s.index]) return { shuffle: true };
+        return { shuffle: true, unshuffled: s.queue, queue: shuffledAround(s.queue, s.index), index: 0 };
+      }
+      const saved = s.unshuffled;
+      const at = saved && s.track ? saved.findIndex((t) => t.id === s.track!.id) : -1;
+      if (!saved || at < 0) return { shuffle: false, unshuffled: null };
+      return { shuffle: false, unshuffled: null, queue: saved, index: at };
+    }),
 }));
+
+/** The track at `index` first, then every other track in random order. */
+function shuffledAround(tracks: Track[], index: number): Track[] {
+  const rest = tracks.filter((_, i) => i !== index);
+  for (let i = rest.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [rest[i], rest[j]] = [rest[j]!, rest[i]!];
+  }
+  return [tracks[index]!, ...rest];
+}
 
 /**
  * How fast position advances while playing: this device's speed, or 1× while

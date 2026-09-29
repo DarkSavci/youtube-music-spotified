@@ -79,3 +79,49 @@ test('the client asks the core directly whether it is offline (#7)', async () =>
   h.responses.push({ offline: false });
   assert.equal(await h.client.offline(), false);
 });
+
+// Loads the client with one scripted fetch, for registration's outcomes.
+function withFetch(fetch, onProjection = () => {}) {
+  const source = path.join(__dirname, '../../ui/src/lib/sessionclient.ts');
+  const code = ts.transpileModule(fs.readFileSync(source, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const module = { exports: {} };
+  const streams = [];
+  const logged = [];
+  const log = (...args) => logged.push(args.map(String).join(' '));
+  vm.runInNewContext(code, {
+    module, exports: module.exports, JSON, Math, Date, Promise,
+    console: { warn: log, error: log, debug() {}, info() {} },
+    localStorage: { getItem: () => 'dev', setItem() {} },
+    AbortSignal: { timeout: () => undefined },
+    EventSource: class { constructor() { streams.push(this); } addEventListener() {} close() {} },
+    setTimeout: () => 1,
+    fetch,
+    require(name) {
+      if (name === './base') return { apiUrl: (p) => p };
+      throw new Error(name);
+    },
+  });
+  return { client: new module.exports.SessionClient(onProjection), streams, logged };
+}
+
+test('a throw while applying the first projection does not count as the core being unreachable', async () => {
+  const h = withFetch(
+    async () => ({ ok: true, status: 200, json: async () => ({ projection: projection(1, 'paused') }) }),
+    () => { throw new Error('a store listener broke'); },
+  );
+  assert.equal(await h.client.start('test', {}), true);
+  assert.equal(h.streams.length, 1, 'the projection stream is still opened');
+  assert.match(h.logged.join('\n'), /applying the first projection failed: Error: a store listener broke/);
+});
+
+test('a refused or failed registration says why', async () => {
+  const refused = withFetch(async () => ({ ok: false, status: 503, text: async () => '{"error":"session unavailable"}' }));
+  assert.equal(await refused.client.start('test', {}), false);
+  assert.match(refused.logged.join('\n'), /register refused: HTTP 503 \{"error":"session unavailable"\}/);
+
+  const failed = withFetch(async () => { throw new TypeError('Failed to fetch'); });
+  assert.equal(await failed.client.start('test', {}), false);
+  assert.match(failed.logged.join('\n'), /register failed: TypeError: Failed to fetch/);
+});

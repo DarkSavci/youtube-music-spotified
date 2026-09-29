@@ -43,8 +43,8 @@ export function installMediaSession(): () => void {
   setHandler("pause", () => {
     if (usePlayer.getState().state === "playing") transport.toggle();
   });
-  setHandler("nexttrack", () => transport.next());
-  setHandler("previoustrack", () => transport.prev());
+  setHandler("nexttrack", () => transport.next("OS media controls"));
+  setHandler("previoustrack", () => transport.prev("OS media controls"));
   setHandler("seekto", (details) => {
     if (typeof details.seekTime === "number") {
       transport.seek(details.seekTime * 1000);

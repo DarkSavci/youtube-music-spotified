@@ -245,12 +245,18 @@ function deriveTarget(): Target {
     lastPositionMs = 0;
     loggedCurrent = false;
   }
-  const next = s.queue[s.index + 1];
+  // Repeat one has no next track, as in the core's Target: one named here
+  // was started by the engine when this one ended, while the store replayed
+  // the current track — the sound moved on and the player did not.
+  const next = s.repeat === "one" ? undefined : s.queue[s.index + 1];
   return {
     epoch,
     videoId: track?.id ?? null,
     startAtMs: s.anchor.positionMs,
-    playing: s.state === "playing",
+    // A stalled or loading track still wants to play: that is the engine
+    // waiting for audio. Asking it to pause there meant it never got the
+    // audio, and the track sat on "stalled" in silence for good (#49).
+    playing: s.state === "playing" || s.state === "stalled" || s.state === "loading",
     preloadVideoId: next?.id ?? null,
     volume: s.muted ? 0 : s.volume,
     transition: { kind: "gapless" },
@@ -355,7 +361,12 @@ function onEngineEvent(e: EngineEvent) {
       break;
 
     case "stalled":
-      usePlayer.setState({ state: "stalled" });
+      // Hold the clock where the audio stopped; the next position report
+      // starts it again. Left running, the bar counted through the silence.
+      usePlayer.setState((s) => ({
+        state: "stalled",
+        anchor: { positionMs: engine?.positionMs() ?? currentPosition(s), atMs: performance.now(), rate: 0 },
+      }));
       break;
 
     case "blocked":
@@ -372,7 +383,14 @@ function onEngineEvent(e: EngineEvent) {
 
     case "ended":
       closeOutCurrent(true);
-      store.next();
+      if (store.repeat === "one") {
+        // The same track again, as a new play: a fresh epoch, so the engine
+        // starts it over and the listen is counted again.
+        lastTrackId = null;
+        store.playAt(store.index);
+      } else {
+        store.next();
+      }
       break;
 
     case "failed": {
@@ -410,27 +428,34 @@ function applyProjection(p: Projection) {
   // window is a remote for it: its speed is not ours to know, so interpolate
   // at 1× and let the core's projections correct it.
   const remote = (p.devices ?? []).some((d) => d.owner && d.id !== session?.deviceID);
-  noteConnection(Boolean(p.offline), p.state.state === "paused" || p.state.state === "idle");
-  usePlayer.setState({
-    outputElsewhere: remote,
-    followingRoom: Boolean(p.followingRoom),
-    roomPlayback: p.room ?? null,
-    state: p.state.state,
-    track,
-    queue: items,
-    index: p.state.queue.index,
-    origin: p.state.queue.origin ?? "",
-    repeat: p.state.repeat,
-    shuffle: p.state.shuffle,
-    volume: p.state.volume,
-    capabilities: p.capabilities,
-    devices: (p.devices ?? []).map((d) => ({ id: d.id, name: d.name, owner: d.owner })),
-    anchor: {
-      positionMs: p.state.positionMs,
-      atMs: performance.now(),
-      rate: p.state.state !== "playing" ? 0 : interpolationRate({ speed: usePlayer.getState().speed, outputElsewhere: remote }),
-    },
-  });
+  // The store's listeners (the tray, the OS media controls) run inside
+  // setState. One of them throwing must not keep the core's target from the
+  // engine below, or the bar shows the track while nothing plays.
+  try {
+    noteConnection(Boolean(p.offline), p.state.state === "paused" || p.state.state === "idle");
+    usePlayer.setState({
+      outputElsewhere: remote,
+      followingRoom: Boolean(p.followingRoom),
+      roomPlayback: p.room ?? null,
+      state: p.state.state,
+      track,
+      queue: items,
+      index: p.state.queue.index,
+      origin: p.state.queue.origin ?? "",
+      repeat: p.state.repeat,
+      shuffle: p.state.shuffle,
+      volume: p.state.volume,
+      capabilities: p.capabilities,
+      devices: (p.devices ?? []).map((d) => ({ id: d.id, name: d.name, owner: d.owner })),
+      anchor: {
+        positionMs: p.state.positionMs,
+        atMs: performance.now(),
+        rate: p.state.state !== "playing" ? 0 : interpolationRate({ speed: usePlayer.getState().speed, outputElsewhere: remote }),
+      },
+    });
+  } catch (err) {
+    console.error("[playback] applying a projection to the player failed:", err);
+  }
 
   retryNativeAtTrackChange(p.target.Epoch);
   if (engine) {
@@ -457,16 +482,20 @@ export function startPlayback() {
 
   // Try the authoritative core first. Failing that, drive playback locally —
   // the app still works, it just cannot hand off between devices.
-  session = new SessionClient(applyProjection);
-  void session
+  const client = new SessionClient(applyProjection);
+  session = client;
+  void client
     .start(navigator.platform || "This device", engine.capabilities)
     .then((ok) => {
+      // Stopped (and perhaps started again) while registering: this answer
+      // belongs to a client that is gone, and must not decide for the new one.
+      if (session !== client) return;
       serverAuthoritative = ok;
       // A room invitation never survives a window reload or account switch.
       // Only the playback owner may clear its stale room after a reload.
       if (ok && usePlayer.getState().followingRoom && usePlayer.getState().devices.some(d => d.id === session?.deviceID && d.owner)) void session?.command({ Kind: "leave_room", KeepQueue: true });
       if (!ok) {
-        console.debug("[playback] session core unreachable; driving playback locally");
+        console.warn("[playback] session core unreachable; driving playback locally");
         session = null;
       }
       resolveSessionReady(ok);
@@ -639,10 +668,7 @@ export const transport = {
     if (routeRoom("jump", { at })) return;
     if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.command({ Kind: "jump", At: at });
-    else {
-      const s = usePlayer.getState();
-      s.playFrom(s.queue, at, s.origin ?? "");
-    }
+    else usePlayer.getState().playAt(at);
   },
 
   toggle() {
@@ -660,13 +686,20 @@ export const transport = {
     if (serverAuthoritative && session) void session.command({ Kind: "toggle" });
     else usePlayer.getState().toggle();
   },
-  next() {
+  /*
+   * Skips name where they came from. A skip nobody remembers making is the
+   * commonest "it skipped by itself" report, and the log could not tell a
+   * headset button from the app.
+   */
+  next(source = "app") {
+    console.info(`[transport] next from ${source}`);
     if (routeRoom("next")) return;
     if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.command({ Kind: "next" });
     else usePlayer.getState().next();
   },
-  prev() {
+  prev(source = "app") {
+    console.info(`[transport] previous from ${source}`);
     if (routeRoom("previous")) return;
     if (roomControlsLocked()) return;
     if (serverAuthoritative && session) void session.command({ Kind: "prev" });
@@ -744,7 +777,9 @@ export const transport = {
     if (serverAuthoritative && session) {
       void session.command({ Kind: "enqueue", Insert: tracks, At: at });
     } else {
-      usePlayer.setState({ queue: [...s.queue, ...tracks] });
+      // Added while shuffled, they join the end of the saved order too, so
+      // turning shuffle off keeps them (as the core does).
+      usePlayer.setState({ queue: [...s.queue, ...tracks], unshuffled: s.unshuffled && [...s.unshuffled, ...tracks] });
     }
   },
 
@@ -759,7 +794,7 @@ export const transport = {
     } else {
       const next = [...s.queue];
       next.splice(at, 0, ...tracks);
-      usePlayer.setState({ queue: next });
+      usePlayer.setState({ queue: next, unshuffled: s.unshuffled && [...s.unshuffled, ...tracks] });
     }
   },
 

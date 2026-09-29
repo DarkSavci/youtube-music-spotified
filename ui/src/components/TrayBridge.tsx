@@ -85,9 +85,9 @@ export function TrayBridge() {
           case "toggle":
             return transport.toggle();
           case "next":
-            return transport.next();
+            return transport.next("tray");
           case "prev":
-            return transport.prev();
+            return transport.prev("tray");
           case "shuffle":
             return transport.toggleShuffle();
           case "repeat":

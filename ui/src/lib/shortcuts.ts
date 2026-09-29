@@ -72,14 +72,14 @@ export const SHORTCUTS: Shortcut[] = [
     keys: "ctrl+arrowright",
     label: "Next track",
     group: "Playback",
-    run: () => transport.next(),
+    run: () => transport.next("keyboard shortcut"),
   },
   {
     id: "prev",
     keys: "ctrl+arrowleft",
     label: "Previous track",
     group: "Playback",
-    run: () => transport.prev(),
+    run: () => transport.prev("keyboard shortcut"),
   },
   {
     id: "seek-forward",
@@ -286,8 +286,8 @@ export function installShortcuts(nav: Navigator): () => void {
 
   const offMedia = desktop.onMediaKey((action) => {
     if (action === "playpause" || action === "stop") transport.toggle();
-    else if (action === "next") transport.next();
-    else if (action === "prev") transport.prev();
+    else if (action === "next") transport.next("media key");
+    else if (action === "prev") transport.prev("media key");
   });
 
   return () => {
