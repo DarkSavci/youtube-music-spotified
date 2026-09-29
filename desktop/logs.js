@@ -7,9 +7,11 @@
  * timeline is the point — "the track failed" in the page and "yt-dlp: HTTP
  * Error 403" in the core are only useful read side by side.
  *
- * The file lives in the data directory, rotates at a few megabytes, and is
- * scrubbed on the way in rather than on export: a log that holds cookies on
- * disk is a liability whether or not anyone ever sends it.
+ * Each launch writes its own file in the data directory's logs folder, named
+ * for when it started, so "what happened this morning" is one file rather
+ * than the tail of a shared one. Old launches are pruned by count and size.
+ * Lines are scrubbed on the way in rather than on export: a log that holds
+ * cookies on disk is a liability whether or not anyone ever sends it.
  */
 
 const { app, shell } = require("electron");
@@ -18,15 +20,23 @@ const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
 
-const MAX_BYTES = 2 * 1024 * 1024;
-/** Rotated copies kept beside the live file: app.1.log is the newest. */
-const KEEP = 3;
+/** One launch's file is cut here and continued in a numbered part. */
+const MAX_BYTES = 5 * 1024 * 1024;
+/** Log files kept, this launch's included; older ones are deleted at startup. */
+const KEEP_FILES = 20;
+/** And the folder as a whole stays under this. */
+const MAX_TOTAL_BYTES = 40 * 1024 * 1024;
+/** How much of the newest logs a diagnostics bundle carries. */
+const BUNDLE_BYTES = 20 * 1024 * 1024;
 /** A single line longer than this is cut; a dumped response is not a log line. */
 const MAX_LINE = 4000;
 
 let dir = null;
 let file = null;
 let size = 0;
+/** This launch's file name without ".log"; parts after the first add "-2", "-3"… */
+let base = null;
+let part = 1;
 
 /* ---------- redaction ---------- */
 
@@ -62,17 +72,51 @@ function redact(text) {
 
 /* ---------- the file ---------- */
 
-function rotate() {
+/** Log files in the folder, newest first. Includes the single-file logs of older versions. */
+function logFiles() {
   try {
-    for (let i = KEEP - 1; i >= 1; i--) {
-      const from = path.join(dir, `app.${i}.log`);
-      if (fs.existsSync(from)) fs.renameSync(from, path.join(dir, `app.${i + 1}.log`));
-    }
-    if (fs.existsSync(file)) fs.renameSync(file, path.join(dir, "app.1.log"));
+    return fs
+      .readdirSync(dir)
+      .filter((name) => /^app.*\.log$/.test(name))
+      .map((name) => {
+        const stat = fs.statSync(path.join(dir, name));
+        return { name, size: stat.size, mtime: stat.mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
   } catch {
-    /* a locked file only means this rotation waits for the next line */
+    return [];
   }
+}
+
+/** Deletes the oldest files past the count or size budget, never the live one. */
+function prune() {
+  let total = 0;
+  let kept = 0;
+  for (const entry of logFiles()) {
+    if (path.join(dir, entry.name) === file) {
+      total += entry.size;
+      kept++;
+      continue;
+    }
+    if (kept < KEEP_FILES && total + entry.size <= MAX_TOTAL_BYTES) {
+      total += entry.size;
+      kept++;
+      continue;
+    }
+    try {
+      fs.rmSync(path.join(dir, entry.name), { force: true });
+    } catch {
+      /* a file another process holds open goes at the next launch */
+    }
+  }
+}
+
+/** Continues a launch that outgrew its file in the next part. */
+function nextPart() {
+  part++;
+  file = path.join(dir, `${base}-${part}.log`);
   size = 0;
+  prune();
 }
 
 /**
@@ -92,7 +136,7 @@ function write(source, level, text) {
     .join("");
   if (!lines) return;
   try {
-    if (size + lines.length > MAX_BYTES) rotate();
+    if (size > 0 && size + lines.length > MAX_BYTES) nextPart();
     fs.appendFileSync(file, lines);
     size += Buffer.byteLength(lines);
   } catch {
@@ -169,24 +213,27 @@ function format(value) {
 }
 
 /**
- * Opens the log. Called once, as early as possible, so startup is recorded.
+ * Opens this launch's log. Called once, as early as possible, so startup is
+ * recorded.
  *
- * Each launch starts with a header naming the version and the machine, so a
- * log read on its own still says what it came from.
+ * The file starts with a header naming the version and the machine, so a log
+ * read on its own still says what it came from.
  */
 function init(dataDir) {
   dir = path.join(dataDir, "logs");
-  file = path.join(dir, "app.log");
+  base = `app-${stampForFile()}`;
+  // Two launches in the same second (a quick relaunch) must not share a file.
+  if (fs.existsSync(path.join(dir, `${base}.log`))) base += `-${process.pid}`;
+  file = path.join(dir, `${base}.log`);
   try {
     fs.mkdirSync(dir, { recursive: true });
-    size = fs.existsSync(file) ? fs.statSync(file).size : 0;
+    fs.appendFileSync(file, "");
   } catch {
     file = null;
     return;
   }
-  if (size > MAX_BYTES / 2) rotate();
+  prune();
   captureConsole();
-  write("main", "info", "-".repeat(60));
   write(
     "main",
     "info",
@@ -311,18 +358,24 @@ async function exportBundle(opts) {
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), "ytms-diag-"));
   try {
     fs.writeFileSync(path.join(staging, "info.txt"), await systemInfo(opts));
-    for (const name of ["app.log", ...Array.from({ length: KEEP }, (_, i) => `app.${i + 1}.log`)]) {
-      const from = path.join(dir, name);
-      if (fs.existsSync(from)) fs.copyFileSync(from, path.join(staging, name));
+    const names = ["info.txt"];
+    let budget = BUNDLE_BYTES;
+    for (const entry of dir ? logFiles() : []) {
+      if (entry.size > budget && names.length > 1) break;
+      fs.copyFileSync(path.join(dir, entry.name), path.join(staging, entry.name));
+      names.push(entry.name);
+      budget -= entry.size;
     }
 
     const out = path.join(app.getPath("downloads"), `ytms-diagnostics-${stampForFile()}.zip`);
     // Windows ships bsdtar, which writes a zip when asked to (-a, by extension).
+    // The files are named rather than passed as ".": that stores them as
+    // "./app.log", and Explorer shows a zip of "./" entries as empty.
     const tar = process.platform === "darwin"
       ? "/usr/bin/tar"
       : path.join(process.env.SystemRoot || "C:/Windows", "System32", "tar.exe");
     await new Promise((resolve, reject) => {
-      const child = spawn(tar, ["-a", "-c", "-f", out, "-C", staging, "."], { windowsHide: true });
+      const child = spawn(tar, ["-a", "-c", "-f", out, "-C", staging, ...names], { windowsHide: true });
       child.on("error", reject);
       child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`tar exited ${code}`))));
     });
