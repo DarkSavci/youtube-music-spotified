@@ -1,5 +1,10 @@
 # Youtube Music Spotified
 
+> [!IMPORTANT]
+> This repository is archived and no longer maintained. Development continues
+> in the native rewrite:
+> [DarkSavci/youtube-music-spotified-native](https://github.com/DarkSavci/youtube-music-spotified-native).
+
 A desktop client that plays YouTube Music through a Spotify-style interface,
 with Windows installers and native macOS source builds.
 
